@@ -104,6 +104,10 @@ async function copyMessage(message: UiMessage) {
   await navigator.clipboard.writeText(message.content)
 }
 
+function hasConversationActions(message: UiMessage): boolean {
+  return message.role === 'user' || (message.role === 'assistant' && Boolean(message.content.trim()))
+}
+
 watch(() => props.messages.length, async () => {
   if (!pinnedToBottom.value) return
   await nextTick()
@@ -214,7 +218,7 @@ defineExpose({ scrollToMessage, scrollToBottom })
 
             <p v-if="message.error" class="message__error"><AppIcon name="alert" :size="13" />{{ message.error }}</p>
 
-            <div class="message__actions">
+            <div v-if="hasConversationActions(message)" class="message__actions">
               <time v-if="message.role === 'assistant' && !showAssistantIdentity && message.createdAt" class="message__action-time">{{ formatTime(message.createdAt) }}</time>
               <button type="button" title="复制" aria-label="复制消息" @click="copyMessage(message)"><AppIcon name="copy" :size="13" /></button>
               <button type="button" title="引用" aria-label="引用消息" @click="emit('quote', message)"><AppIcon name="quote" :size="13" /></button>

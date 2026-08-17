@@ -76,7 +76,7 @@ test('renders historical assistant MEDIA as Markdown in chat and group chat', as
 
 test('folds tool result rows into their expandable tool call', async ({ page }) => {
   await page.goto('/chat/session-demo')
-  const tool = page.getByRole('button', { name: /file_search/ })
+  const tool = page.locator('[data-message-id="message-tool-call"]').getByRole('button', { name: /file_search/ })
   await expect(tool).toBeVisible()
   await tool.click()
   await expect(page.locator('.tool-trace pre')).toContainText('/tmp/demo-report.pdf')
@@ -117,6 +117,8 @@ test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ pag
   await expect(page.locator('.message--assistant .message__avatar')).toHaveCount(0)
   await expect(page.locator('.message--assistant .message__meta')).toHaveCount(0)
   await expect(page.locator('.message--assistant-anonymous:not(.message--tool-only) .message__action-time').first()).toBeVisible()
+  await expect(page.locator('.message--tool-only .message__actions')).toHaveCount(0)
+  await expect(page.locator('[data-message-id="message-thinking-tool"] .message__actions')).toHaveCount(0)
   await expect(page.locator('.message--user .message__meta')).toHaveCSS('display', 'none')
   await expect(page.getByRole('button', { name: '会话操作' })).toBeVisible()
   await page.getByRole('button', { name: '会话操作' }).click()
