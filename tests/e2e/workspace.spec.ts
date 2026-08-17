@@ -83,6 +83,13 @@ test('folds tool result rows into their expandable tool call', async ({ page }) 
   await expect(page.locator('.message--tool')).toHaveCount(0)
 })
 
+test('renders subtask completion as a collapsed timeline event', async ({ page }) => {
+  await page.goto('/chat/session-demo')
+  await expect(page.getByText('子任务已完成', { exact: true })).toBeVisible()
+  await expect(page.locator('.delegation-event')).toContainText('2 个子任务 · 2 已完成')
+  await expect(page.locator('.delegation-event')).not.toHaveAttribute('open', '')
+})
+
 test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ page }) => {
   const logo = page.locator('.rail__brand img')
   await expect(logo).toHaveAttribute('src', '/brand/AppIcon-1024.png')

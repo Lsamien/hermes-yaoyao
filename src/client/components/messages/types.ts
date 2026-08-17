@@ -27,6 +27,8 @@ export type UiMessage = {
   attachments?: UiMessageAttachment[]
   tools?: UiToolCall[]
   profile?: string
+  timelineKind?: 'delegation-complete' | 'system'
+  timelineMetadata?: Record<string, unknown>
 }
 
 export type UiInteraction = {

@@ -137,6 +137,8 @@ export interface ChatMessage {
   toolCalls?: ToolCall[]
   toolCallId?: string
   toolName?: string
+  displayKind?: string
+  displayMetadata?: JsonValue
   raw?: JsonValue
 }
 

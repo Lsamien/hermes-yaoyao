@@ -79,6 +79,10 @@ function toolResult(message: ChatMessage): unknown {
   try { return JSON.parse(message.content) } catch { return message.content || undefined }
 }
 
+function timelineMetadata(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
 export function chatMessageToUi(message: ChatMessage, agentNameFor?: (profile?: string) => string | undefined): UiMessage {
   const attachments: UiMessageAttachment[] | undefined = message.attachments?.map(attachment => ({
     id: attachment.id,
@@ -132,6 +136,11 @@ export function chatMessagesToUi(messages: ChatMessage[], agentNameFor?: (profil
     // content. Keep the canvas focused on the user and participating agents.
     if (message.role === 'system') continue
     const ui = chatMessageToUi(message, agentNameFor)
+    if (message.displayKind) {
+      ui.role = 'system'
+      ui.timelineKind = message.displayKind === 'async_delegation_complete' ? 'delegation-complete' : 'system'
+      ui.timelineMetadata = timelineMetadata(message.displayMetadata)
+    }
     result.push(ui)
     if (message.role === 'assistant') {
       lastAssistant = ui

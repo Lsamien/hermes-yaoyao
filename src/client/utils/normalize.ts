@@ -143,6 +143,11 @@ function normalizeToolCall(value: unknown, index: number): ToolCall {
   }
 }
 
+function parseJsonValue(value: unknown): JsonValue | undefined {
+  if (typeof value !== 'string') return value as JsonValue | undefined
+  try { return JSON.parse(value) as JsonValue } catch { return undefined }
+}
+
 export function normalizeAttachment(value: unknown, index = 0): ChatAttachment {
   const source = record(value)
   const mimeType = string(pick(source, 'mime_type', 'mimeType', 'media_type', 'mediaType'), 'application/octet-stream')
@@ -198,6 +203,8 @@ export function normalizeChatMessage(value: unknown, sessionId: string, fallback
       : pick(source, 'tool_calls', 'toolCalls', 'tools')).map(normalizeToolCall),
     toolCallId: string(pick(source, 'tool_call_id', 'toolCallId')) || undefined,
     toolName: string(pick(source, 'tool_name', 'toolName')) || undefined,
+    displayKind: string(pick(source, 'display_kind', 'displayKind')) || undefined,
+    displayMetadata: parseJsonValue(pick(source, 'display_metadata', 'displayMetadata')),
     raw: value as JsonValue,
   }
 }

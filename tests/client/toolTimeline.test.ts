@@ -24,4 +24,18 @@ describe('ordinary chat tool timeline', () => {
       id: 'call-1', name: 'terminal', status: 'success', input: '{"command":"pwd"}', output: { output: '/tmp/work', exit_code: 0, error: null },
     })])
   })
+
+  it('renders asynchronous delegation completion as a timeline event, not a user message', () => {
+    const notice = normalizeChatMessage({
+      id: 'delegation', role: 'user', content: '[ASYNC DELEGATION BATCH COMPLETE]',
+      display_kind: 'async_delegation_complete',
+      display_metadata: JSON.stringify({ task_count: 2, completed_count: 2, failed_count: 0, duration_seconds: 71 }),
+      timestamp: 1,
+    }, 'session-1', 'default')
+    const [timeline] = chatMessagesToUi([notice])
+    expect(timeline).toMatchObject({
+      role: 'system', timelineKind: 'delegation-complete',
+      timelineMetadata: { task_count: 2, completed_count: 2 },
+    })
+  })
 })

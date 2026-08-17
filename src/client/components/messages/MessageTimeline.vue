@@ -62,6 +62,15 @@ function formatTime(value?: string | number | Date) {
   return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(date)
 }
 
+function delegationSummary(metadata?: Record<string, unknown>): string {
+  const total = Number(metadata?.task_count ?? 0)
+  const completed = Number(metadata?.completed_count ?? 0)
+  const failed = Number(metadata?.failed_count ?? 0)
+  const seconds = Number(metadata?.duration_seconds ?? 0)
+  const duration = seconds > 0 ? ` · ${seconds < 60 ? `${Math.round(seconds)} 秒` : `${Math.floor(seconds / 60)} 分 ${Math.round(seconds % 60)} 秒`}` : ''
+  return `${total || completed + failed || 1} 个子任务 · ${completed} 已完成${failed ? ` · ${failed} 失败` : ''}${duration}`
+}
+
 function onScroll() {
   const el = scroller.value
   if (!el) return
@@ -149,6 +158,13 @@ defineExpose({ scrollToMessage, scrollToBottom })
         >
           <div v-if="message.role !== 'user'" class="message__avatar">{{ (message.author || message.profile || (message.role === 'assistant' ? '夭' : '系')).slice(0, 1).toUpperCase() }}</div>
           <div class="message__body">
+            <template v-if="message.timelineKind === 'delegation-complete'">
+              <details class="delegation-event">
+                <summary><AppIcon name="groups" :size="14" /><span><strong>子任务已完成</strong><small>{{ delegationSummary(message.timelineMetadata) }}</small></span></summary>
+                <MarkdownContent v-if="message.content" :content="message.content" />
+              </details>
+            </template>
+            <template v-else>
             <div class="message__meta">
               <strong>{{ message.role === 'user' ? '你' : message.author || message.profile || (message.role === 'assistant' ? 'Agent' : '系统') }}</strong>
               <time>{{ formatTime(message.createdAt) }}</time>
@@ -197,6 +213,7 @@ defineExpose({ scrollToMessage, scrollToBottom })
               <button type="button" title="引用" aria-label="引用消息" @click="emit('quote', message)"><AppIcon name="quote" :size="13" /></button>
               <button v-if="message.role === 'assistant'" type="button" title="从这里分支" aria-label="从这里分支" @click="emit('branch', message)"><AppIcon name="branch" :size="13" /></button>
             </div>
+            </template>
           </div>
         </article>
 
@@ -238,6 +255,7 @@ defineExpose({ scrollToMessage, scrollToBottom })
 .dark .message--user .message__body { background: #2d323a; }
 .message--user .message__meta { display: none; }
 .message--system { justify-content: center; }.message--system .message__avatar, .message--system .message__meta { display: none; }.message--system .message__body { max-width: 82%; padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--text-muted); text-align: center; }
+.delegation-event { min-width: 230px; max-width: 460px; text-align: left; }.delegation-event summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }.delegation-event summary::-webkit-details-marker { display: none; }.delegation-event summary > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.delegation-event strong { color: var(--text-secondary); font-size: 11px; font-weight: 650; }.delegation-event small { color: var(--text-muted); font-size: 9px; }.delegation-event :deep(.markdown) { max-height: 260px; margin-top: 9px; overflow: auto; color: var(--text-secondary); font-size: 10px; }
 .message--tool-only { margin-block: 9px; }.message--tool-only .message__avatar, .message--tool-only .message__meta, .message--tool-only .message__actions { display: none; }.message--tool-only .message__body { max-width: 100%; }
 .message__reasoning { max-width: 420px; margin: 3px 0 10px; padding: 0 0 8px; border: 0; border-bottom: 1px dashed var(--line-strong); color: var(--text-secondary); font-size: 11px; }.message__reasoning summary { display: flex; align-items: center; gap: 5px; list-style: none; color: var(--text-muted); cursor: pointer; font-size: 9px; }.message__reasoning summary::-webkit-details-marker { display: none; }.message__reasoning summary::before { content: '›'; color: var(--text-muted); font-size: 14px; line-height: 1; transition: transform 120ms ease; }.message__reasoning[open] summary::before { transform: rotate(90deg); }.message__reasoning :deep(.markdown) { margin-top: 8px; }
 .fork-divider { display: flex; align-items: center; gap: 12px; margin: 8px 0 28px; color: var(--text-muted); font-size: 10px; }.fork-divider::before, .fork-divider::after { height: 1px; flex: 1; background: var(--line); content: ''; }.fork-divider > span { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-raised); white-space: nowrap; }.fork-divider strong { max-width: 180px; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; }
