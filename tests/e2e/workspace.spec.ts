@@ -31,6 +31,10 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   await expect(page.getByText('demo-report.pdf')).toBeVisible()
   await page.getByText('demo-report.pdf').click()
   await expect(page.getByRole('dialog', { name: /预览 demo-report.pdf/ })).toBeVisible()
+  await expect(page.locator('.preview-meta')).toHaveCount(0)
+  const previewDialog = page.getByRole('dialog', { name: /预览 demo-report.pdf/ })
+  await expect(previewDialog.getByRole('link', { name: '下载' })).toBeVisible()
+  await expect(previewDialog.getByRole('button', { name: '加入输入框' })).toBeVisible()
   await page.getByRole('button', { name: '关闭预览' }).click()
 
   await page.goto('/artifacts')
