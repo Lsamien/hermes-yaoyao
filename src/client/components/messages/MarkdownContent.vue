@@ -121,6 +121,30 @@ function decorateFileLinks() {
   })
 }
 
+function decorateMediaPreviews() {
+  if (!props.fileCards || !root.value) return
+  root.value.querySelectorAll<HTMLImageElement>('img').forEach(image => {
+    if (image.dataset.mediaPreview) return
+    let url: URL
+    try { url = new URL(image.currentSrc || image.src, window.location.href) } catch { return }
+    if (url.origin !== window.location.origin) return
+    image.dataset.mediaPreview = 'true'
+    const name = decodeURIComponent(url.pathname.split('/').at(-1) || '图片')
+    image.setAttribute('role', 'button')
+    image.setAttribute('tabindex', '0')
+    image.setAttribute('aria-label', `预览图片 ${name}`)
+    const preview = (event: Event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      emit('fileLink', name, `${url.pathname}${url.search}`)
+    }
+    image.addEventListener('click', preview)
+    image.addEventListener('keydown', event => {
+      if ((event as KeyboardEvent).key === 'Enter' || (event as KeyboardEvent).key === ' ') preview(event)
+    })
+  })
+}
+
 function onClick(event: MouseEvent) {
   const link = (event.target as HTMLElement).closest('a')
   if (!link) return
@@ -128,8 +152,8 @@ function onClick(event: MouseEvent) {
   if (/^(javascript|data|vbscript):/i.test(href)) event.preventDefault()
 }
 
-onMounted(() => { decorateCopyButtons(); decorateFileLinks() })
-onUpdated(() => { decorateCopyButtons(); decorateFileLinks() })
+onMounted(() => { decorateCopyButtons(); decorateFileLinks(); decorateMediaPreviews() })
+onUpdated(() => { decorateCopyButtons(); decorateFileLinks(); decorateMediaPreviews() })
 </script>
 
 <template>
@@ -159,7 +183,7 @@ onUpdated(() => { decorateCopyButtons(); decorateFileLinks() })
 .markdown :deep(th), .markdown :deep(td) { padding: 6px 10px; border: 1px solid var(--line); text-align: left; }
 .markdown :deep(th) { background: var(--surface-soft); color: var(--text-primary); font-weight: 640; }.markdown :deep(td) { color: var(--text-secondary); }
 .markdown :deep(hr) { margin: 16px 0; border: 0; border-top: 1px solid var(--line); }
-.markdown :deep(img) { display: block; width: auto; max-width: min(100%, 560px); max-height: 360px; margin: .7em 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); object-fit: contain; }
+.markdown :deep(img) { display: block; width: auto; max-width: min(100%, 560px); max-height: 360px; margin: .7em 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); object-fit: contain; }.markdown :deep(img[data-media-preview]) { cursor: zoom-in; }
 .markdown :deep(.file-link-card) { display: flex; width: min(390px, 100%); min-height: 52px; align-items: center; gap: 9px; margin: 8px 0; padding: 8px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 3px 10px rgba(0,0,0,.035); color: var(--text-primary); text-decoration: none; }.markdown :deep(.file-link-card)::before { display: grid; width: 27px; height: 27px; flex: 0 0 27px; place-items: center; border-radius: 7px; background: var(--surface-soft); color: var(--text-secondary); content: '▤'; font-size: 15px; }.markdown :deep(.file-link-card)::after { margin-left: auto; color: var(--text-muted); content: '预览'; font-size: 9px; }.markdown :deep(.file-link-card:hover) { border-color: var(--line-strong); background: var(--surface-soft); text-decoration: none; }
 .markdown :deep(.mention-highlight) { padding: .08em .34em; border-radius: 6px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text-primary); font-weight: 600; }
 .markdown--streaming :deep(p:last-child)::after { content: ''; display: inline-block; width: 5px; height: 14px; margin-left: 3px; border-radius: 1px; background: currentColor; vertical-align: -2px; animation: caret 1s step-end infinite; }

@@ -68,7 +68,11 @@ test('restores a routed conversation even when unread-count refresh fails', asyn
 
 test('renders historical assistant MEDIA as Markdown in chat and group chat', async ({ page }) => {
   await page.goto('/chat/session-demo')
-  await expect(page.locator('.markdown img[alt="AppIcon-1024.png"]')).toBeVisible()
+  const image = page.locator('.markdown img[alt="夭夭 Logo"]')
+  await expect(image).toBeVisible()
+  await image.click()
+  await expect(page.getByRole('dialog', { name: /预览 AppIcon-1024.png/ })).toBeVisible()
+  await page.getByRole('button', { name: '关闭预览' }).click()
 
   await page.getByRole('button', { name: '群聊' }).click()
   await expect(page.locator('.markdown img[alt="AppIcon-1024.png"]')).toBeVisible()
@@ -88,6 +92,12 @@ test('renders subtask completion as a collapsed timeline event', async ({ page }
   await expect(page.getByText('子任务已完成', { exact: true })).toBeVisible()
   await expect(page.locator('.delegation-event')).toContainText('2 个子任务 · 2 已完成')
   await expect(page.locator('.delegation-event')).not.toHaveAttribute('open', '')
+})
+
+test('renders model changes as a collapsed system event', async ({ page }) => {
+  await page.goto('/chat/session-demo')
+  await expect(page.getByText('模型已切换：gpt-5.6-terra', { exact: true })).toBeVisible()
+  await expect(page.locator('.system-event')).not.toHaveAttribute('open', '')
 })
 
 test('opens a local message file link as a floating preview card', async ({ page }) => {

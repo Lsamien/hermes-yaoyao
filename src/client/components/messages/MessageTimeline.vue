@@ -74,6 +74,12 @@ function delegationSummary(metadata?: Record<string, unknown>): string {
   return `${total || completed + failed || 1} 个子任务 · ${completed} 已完成${failed ? ` · ${failed} 失败` : ''}${duration}`
 }
 
+function systemSummary(content: string): string {
+  const model = content.match(/(?:changed to|切换为)\s*([^\s，。\]]+?)(?=\s+via\b|\s*$|\])/i)?.[1]
+  if (model) return `模型已切换：${model}`
+  return '系统信息'
+}
+
 function onScroll() {
   const el = scroller.value
   if (!el) return
@@ -172,6 +178,12 @@ defineExpose({ scrollToMessage, scrollToBottom })
                 <MarkdownContent v-if="message.content" :content="message.content" />
               </details>
             </template>
+            <template v-else-if="message.timelineKind === 'system'">
+              <details class="system-event">
+                <summary><AppIcon name="settings" :size="13" /><span>{{ systemSummary(message.content) }}</span></summary>
+                <MarkdownContent v-if="message.content" :content="message.content" />
+              </details>
+            </template>
             <template v-else>
             <div v-if="message.role !== 'assistant' || showAssistantIdentity" class="message__meta">
               <strong>{{ message.role === 'user' ? '你' : message.author || message.profile || (message.role === 'assistant' ? 'Agent' : '系统') }}</strong>
@@ -267,6 +279,7 @@ defineExpose({ scrollToMessage, scrollToBottom })
 .message--user .message__meta { display: none; }
 .message--system { justify-content: center; }.message--system .message__avatar, .message--system .message__meta { display: none; }.message--system .message__body { max-width: 82%; padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--text-muted); text-align: center; }
 .delegation-event { min-width: 230px; max-width: 460px; text-align: left; }.delegation-event summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }.delegation-event summary::-webkit-details-marker { display: none; }.delegation-event summary > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.delegation-event strong { color: var(--text-secondary); font-size: 11px; font-weight: 650; }.delegation-event small { color: var(--text-muted); font-size: 9px; }.delegation-event :deep(.markdown) { max-height: 260px; margin-top: 9px; overflow: auto; color: var(--text-secondary); font-size: 10px; }
+.system-event { max-width: 460px; text-align: left; }.system-event summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; color: var(--text-muted); font-size: 10px; }.system-event summary::-webkit-details-marker { display: none; }.system-event :deep(.markdown) { max-height: 220px; margin-top: 8px; overflow: auto; color: var(--text-secondary); font-size: 10px; }
 .message--tool-only { margin-block: 9px; }.message--tool-only .message__avatar, .message--tool-only .message__meta, .message--tool-only .message__actions { display: none; }.message--tool-only .message__body { max-width: 100%; }
 .message--assistant-anonymous .message__body { max-width: min(680px, 100%); }
 .message__reasoning { max-width: 420px; margin: 3px 0 10px; padding: 0 0 8px; border: 0; border-bottom: 1px dashed var(--line-strong); color: var(--text-secondary); font-size: 11px; }.message__reasoning summary { display: flex; align-items: center; gap: 5px; list-style: none; color: var(--text-muted); cursor: pointer; font-size: 9px; }.message__reasoning summary::-webkit-details-marker { display: none; }.message__reasoning summary::before { content: '›'; color: var(--text-muted); font-size: 14px; line-height: 1; transition: transform 120ms ease; }.message__reasoning[open] summary::before { transform: rotate(90deg); }.message__reasoning :deep(.markdown) { margin-top: 8px; }

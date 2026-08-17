@@ -83,6 +83,10 @@ function timelineMetadata(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 }
 
+function isSystemTimelineMessage(message: ChatMessage): boolean {
+  return Boolean(message.displayKind) || /^\[system:/i.test(message.content.trim())
+}
+
 export function chatMessageToUi(message: ChatMessage, agentNameFor?: (profile?: string) => string | undefined): UiMessage {
   const attachments: UiMessageAttachment[] | undefined = message.attachments?.map(attachment => ({
     id: attachment.id,
@@ -132,11 +136,11 @@ export function chatMessagesToUi(messages: ChatMessage[], agentNameFor?: (profil
       if (message.toolCallId) toolOwners.set(message.toolCallId, owner)
       continue
     }
-    // Gateway system rows are transport/protocol detail rather than chat
-    // content. Keep the canvas focused on the user and participating agents.
-    if (message.role === 'system') continue
+    // Gateway system rows are transport/protocol detail unless they carry an
+    // explicit display marker or a human-readable [System: ...] notice.
+    if (message.role === 'system' && !isSystemTimelineMessage(message)) continue
     const ui = chatMessageToUi(message, agentNameFor)
-    if (message.displayKind) {
+    if (isSystemTimelineMessage(message)) {
       ui.role = 'system'
       ui.timelineKind = message.displayKind === 'async_delegation_complete' ? 'delegation-complete' : 'system'
       ui.timelineMetadata = timelineMetadata(message.displayMetadata)

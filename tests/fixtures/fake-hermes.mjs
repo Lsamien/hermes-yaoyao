@@ -49,6 +49,7 @@ const messages = [
   { id: 'message-legacy-media', role: 'assistant', content: '历史兼容：MEDIA:/brand/AppIcon-1024.png', timestamp: now() - 150 },
   { id: 'message-local-link', role: 'assistant', content: '[方案草稿.md](/Users/samien/Agents/方案草稿.md)', timestamp: now() - 145 },
   { id: 'message-delegation', role: 'user', content: '[ASYNC DELEGATION BATCH COMPLETE]\n后台子任务已经完成。', display_kind: 'async_delegation_complete', display_metadata: { task_count: 2, completed_count: 2, failed_count: 0, duration_seconds: 71 }, timestamp: now() - 140 },
+  { id: 'message-system', role: 'user', content: '[System: The active model for this chat has changed to gpt-5.6-terra via provider openai.]', timestamp: now() - 130 },
 ]
 const groupAgent = { id: agentId, roomId, profile: 'yaoyao', displayName: '夭夭', description: '主 Agent', enabled: true, replyWithoutMention: true, status: 'idle', createdAt: now() - 2000, updatedAt: now() }
 const groupMessage = { seq: 1, id: '44444444-4444-4444-8444-444444444444', roomId, senderKind: 'human', senderId: 'demo-user', senderName: '验收用户', content: '大家好，检查一下群聊输入框。', status: 'completed', createdAt: now() - 120, updatedAt: now() - 120 }
