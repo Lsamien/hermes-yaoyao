@@ -128,13 +128,14 @@ export function normalizeSession(value: unknown, fallbackProfile?: string): Sess
 
 function normalizeToolCall(value: unknown, index: number): ToolCall {
   const source = record(value)
+  const functionCall = record(source.function)
   const error = string(source.error)
   const result = pick(source, 'result', 'output') as JsonValue | undefined
   return {
     id: string(pick(source, 'id', 'tool_call_id', 'toolCallId', 'tool_id'), `tool-${index}`),
-    name: string(pick(source, 'name', 'tool_name', 'toolName'), '工具'),
+    name: string(pick(source, 'name', 'tool_name', 'toolName') ?? functionCall.name, '工具'),
     status: error ? 'failed' : result !== undefined ? 'completed' : 'running',
-    arguments: pick(source, 'arguments', 'args', 'context') as JsonValue | undefined,
+    arguments: (pick(source, 'arguments', 'args', 'context') ?? functionCall.arguments) as JsonValue | undefined,
     result,
     preview: string(pick(source, 'preview', 'summary', 'args_text')) || undefined,
     error: error || undefined,
@@ -192,7 +193,11 @@ export function normalizeChatMessage(value: unknown, sessionId: string, fallback
     stage: status === 'error' || source.error ? 'failed' : 'settled',
     error: string(source.error) || undefined,
     attachments: attachments.length ? attachments : undefined,
-    toolCalls: values(pick(source, 'tool_calls', 'toolCalls', 'tools')).map(normalizeToolCall),
+    toolCalls: values(typeof pick(source, 'tool_calls', 'toolCalls', 'tools') === 'string'
+      ? (() => { try { return JSON.parse(String(pick(source, 'tool_calls', 'toolCalls', 'tools'))) } catch { return [] } })()
+      : pick(source, 'tool_calls', 'toolCalls', 'tools')).map(normalizeToolCall),
+    toolCallId: string(pick(source, 'tool_call_id', 'toolCallId')) || undefined,
+    toolName: string(pick(source, 'tool_name', 'toolName')) || undefined,
     raw: value as JsonValue,
   }
 }

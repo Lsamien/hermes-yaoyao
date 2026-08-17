@@ -23,6 +23,7 @@ const props = withDefaults(defineProps<{
   synced?: boolean
   showTools?: boolean
   interaction?: UiInteraction | null
+  mentionNames?: string[]
 }>(), {
   title: '',
   subtitle: '',
@@ -38,6 +39,7 @@ const props = withDefaults(defineProps<{
   synced: false,
   showTools: true,
   interaction: null,
+  mentionNames: () => [],
 })
 
 const emit = defineEmits<{
@@ -140,7 +142,10 @@ defineExpose({ scrollToMessage, scrollToBottom })
           :key="message.id"
           :data-message-id="message.id"
           class="message"
-          :class="[`message--${message.role}`, { 'message--failed': message.status === 'failed' }]"
+          :class="[`message--${message.role}`, {
+            'message--failed': message.status === 'failed',
+            'message--tool-only': message.role === 'assistant' && !message.content && !message.reasoning && Boolean(message.tools?.length),
+          }]"
         >
           <div v-if="message.role !== 'user'" class="message__avatar">{{ (message.author || message.profile || (message.role === 'assistant' ? '夭' : '系')).slice(0, 1).toUpperCase() }}</div>
           <div class="message__body">
@@ -168,6 +173,8 @@ defineExpose({ scrollToMessage, scrollToBottom })
                 :content="message.content"
                 :streaming="message.status === 'streaming'"
                 :legacy-media="message.role === 'assistant'"
+                :plain="message.role === 'user'"
+                :mention-names="mentionNames"
               />
             </div>
 
@@ -231,6 +238,7 @@ defineExpose({ scrollToMessage, scrollToBottom })
 .dark .message--user .message__body { background: #2d323a; }
 .message--user .message__meta { display: none; }
 .message--system { justify-content: center; }.message--system .message__avatar, .message--system .message__meta { display: none; }.message--system .message__body { max-width: 82%; padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--text-muted); text-align: center; }
+.message--tool-only { margin-block: 9px; }.message--tool-only .message__avatar, .message--tool-only .message__meta, .message--tool-only .message__actions { display: none; }.message--tool-only .message__body { max-width: 100%; }
 .message__reasoning { max-width: 420px; margin: 3px 0 10px; padding: 0 0 8px; border: 0; border-bottom: 1px dashed var(--line-strong); color: var(--text-secondary); font-size: 11px; }.message__reasoning summary { display: flex; align-items: center; gap: 5px; list-style: none; color: var(--text-muted); cursor: pointer; font-size: 9px; }.message__reasoning summary::-webkit-details-marker { display: none; }.message__reasoning summary::before { content: '›'; color: var(--text-muted); font-size: 14px; line-height: 1; transition: transform 120ms ease; }.message__reasoning[open] summary::before { transform: rotate(90deg); }.message__reasoning :deep(.markdown) { margin-top: 8px; }
 .fork-divider { display: flex; align-items: center; gap: 12px; margin: 8px 0 28px; color: var(--text-muted); font-size: 10px; }.fork-divider::before, .fork-divider::after { height: 1px; flex: 1; background: var(--line); content: ''; }.fork-divider > span { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-raised); white-space: nowrap; }.fork-divider strong { max-width: 180px; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; }
 .message__attachments { display: flex; margin-top: 8px; flex-wrap: wrap; gap: 7px; }.message__attachments button { display: flex; min-width: 90px; max-width: 210px; min-height: 42px; align-items: center; gap: 7px; padding: 5px 8px; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--text-secondary); cursor: pointer; }.message__attachments button:hover { border-color: var(--line-strong); }.message__attachments img { width: 48px; height: 48px; margin: -5px 0 -5px -8px; object-fit: cover; }.message__attachments button > span { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 7px; background: var(--surface-soft); }.message__attachments strong { min-width: 0; overflow: hidden; font-size: 10px; font-weight: 520; text-overflow: ellipsis; white-space: nowrap; }

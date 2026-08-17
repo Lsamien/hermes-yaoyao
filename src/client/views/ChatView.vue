@@ -12,7 +12,7 @@ import MessageTimeline from '@/components/messages/MessageTimeline.vue'
 import type { UiMessage } from '@/components/messages/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
-import { chatInteraction, chatMessageToUi, sessionSidebarItem } from '@/components/workspace/viewModels'
+import { chatInteraction, chatMessagesToUi, sessionSidebarItem } from '@/components/workspace/viewModels'
 import { consumeLibraryItemForComposer } from '@/components/workspace/pendingComposer'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
@@ -45,7 +45,7 @@ const sidebarItems = computed(() => sessions.value.map(session => sessionSidebar
   chat.unreadCounts[session.id] ?? 0,
   agentNames.value.get(session.profile || auth.activeProfile?.name || ''),
 )))
-const messages = computed(() => chat.messages.map(chatMessageToUi))
+const messages = computed(() => chatMessagesToUi(chat.messages, profile => profile ? agentNames.value.get(profile) : undefined))
 const activeSession = computed(() => chat.activeSession)
 const connected = computed(() => ['connected', 'ready'].includes(chat.connectionState))
 const interaction = computed(() => chatInteraction(chat.pendingApproval, chat.pendingClarification))

@@ -72,7 +72,14 @@ function toolToUi(tool: ToolCall): UiToolCall {
   }
 }
 
-export function chatMessageToUi(message: ChatMessage): UiMessage {
+function toolResult(message: ChatMessage): unknown {
+  const raw = record(message.raw)
+  if (raw.result !== undefined) return raw.result
+  if (raw.output !== undefined && typeof raw.output !== 'string') return raw.output
+  try { return JSON.parse(message.content) } catch { return message.content || undefined }
+}
+
+export function chatMessageToUi(message: ChatMessage, agentNameFor?: (profile?: string) => string | undefined): UiMessage {
   const attachments: UiMessageAttachment[] | undefined = message.attachments?.map(attachment => ({
     id: attachment.id,
     name: attachment.name,
@@ -83,7 +90,7 @@ export function chatMessageToUi(message: ChatMessage): UiMessage {
   return {
     id: message.id,
     role: message.role,
-    author: message.role === 'assistant' ? message.profile : undefined,
+    author: message.role === 'assistant' ? agentNameFor?.(message.profile) || message.profile : undefined,
     content: message.content,
     reasoning: message.reasoning,
     createdAt: message.timestamp < 10_000_000_000 ? message.timestamp * 1000 : message.timestamp,
@@ -93,6 +100,45 @@ export function chatMessageToUi(message: ChatMessage): UiMessage {
     tools: message.toolCalls?.map(toolToUi),
     profile: message.profile,
   }
+}
+
+/** Render only user and agent prose; tool result rows belong under their call. */
+export function chatMessagesToUi(messages: ChatMessage[], agentNameFor?: (profile?: string) => string | undefined): UiMessage[] {
+  const result: UiMessage[] = []
+  const toolOwners = new Map<string, UiMessage>()
+  let lastAssistant: UiMessage | undefined
+
+  for (const message of messages) {
+    if (message.role === 'tool') {
+      const owner = (message.toolCallId && toolOwners.get(message.toolCallId)) || lastAssistant
+      if (!owner) continue
+      const id = message.toolCallId || message.id
+      const tools = [...(owner.tools ?? [])]
+      const index = tools.findIndex(tool => tool.id === id)
+      const patch: UiToolCall = {
+        id,
+        name: message.toolName || tools[index]?.name || '工具',
+        status: message.error ? 'error' : 'success',
+        input: tools[index]?.input,
+        output: message.error || toolResult(message),
+      }
+      if (index >= 0) tools[index] = { ...tools[index], ...patch }
+      else tools.push(patch)
+      owner.tools = tools
+      if (message.toolCallId) toolOwners.set(message.toolCallId, owner)
+      continue
+    }
+    // Gateway system rows are transport/protocol detail rather than chat
+    // content. Keep the canvas focused on the user and participating agents.
+    if (message.role === 'system') continue
+    const ui = chatMessageToUi(message, agentNameFor)
+    result.push(ui)
+    if (message.role === 'assistant') {
+      lastAssistant = ui
+      for (const tool of ui.tools ?? []) toolOwners.set(tool.id, ui)
+    }
+  }
+  return result
 }
 
 export function chatInteraction(approval?: ApprovalRequest, clarification?: ClarificationRequest): UiInteraction | null {

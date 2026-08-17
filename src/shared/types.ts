@@ -135,6 +135,8 @@ export interface ChatMessage {
   error?: string
   attachments?: ChatAttachment[]
   toolCalls?: ToolCall[]
+  toolCallId?: string
+  toolName?: string
   raw?: JsonValue
 }
 

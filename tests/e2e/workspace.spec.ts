@@ -69,11 +69,18 @@ test('restores a routed conversation even when unread-count refresh fails', asyn
 test('renders historical assistant MEDIA as Markdown in chat and group chat', async ({ page }) => {
   await page.goto('/chat/session-demo')
   await expect(page.locator('.markdown img[alt="AppIcon-1024.png"]')).toBeVisible()
-  await expect(page.locator('.message--user .markdown')).toContainText('MEDIA:/brand/AppIcon-1024.png')
-  await expect(page.locator('.message--user .markdown img')).toHaveCount(0)
 
   await page.getByRole('button', { name: '群聊' }).click()
   await expect(page.locator('.markdown img[alt="AppIcon-1024.png"]')).toBeVisible()
+})
+
+test('folds tool result rows into their expandable tool call', async ({ page }) => {
+  await page.goto('/chat/session-demo')
+  const tool = page.getByRole('button', { name: /file_search/ })
+  await expect(tool).toBeVisible()
+  await tool.click()
+  await expect(page.locator('.tool-trace pre')).toContainText('/tmp/demo-report.pdf')
+  await expect(page.locator('.message--tool')).toHaveCount(0)
 })
 
 test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ page }) => {
