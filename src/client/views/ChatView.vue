@@ -217,6 +217,7 @@ watch(() => chat.activeSessionId, async id => {
         :connected="connected"
         :synced="chat.historySynced"
         :show-tools="showTools"
+        :show-assistant-identity="false"
         :interaction="interaction"
         empty-logo
         transparent-header

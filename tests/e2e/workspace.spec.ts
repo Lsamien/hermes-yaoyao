@@ -106,6 +106,8 @@ test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ pag
   await page.locator('.composer-shell').click()
   await page.getByRole('option').first().click()
   await expect(page.locator('.timeline')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(page.locator('.message--assistant .message__avatar')).toHaveCount(0)
+  await expect(page.locator('.message--assistant .message__meta')).toHaveCount(0)
   await expect(page.locator('.message--user .message__meta')).toHaveCSS('display', 'none')
   await expect(page.getByRole('button', { name: '会话操作' })).toBeVisible()
   await page.getByRole('button', { name: '会话操作' }).click()
