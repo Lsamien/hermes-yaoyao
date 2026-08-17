@@ -73,9 +73,13 @@ const reasoningComposerOptions = computed<ComposerOption[]>(() => reasoningOptio
 const reasoningLabel = computed(() => reasoningOptions.find(option => option.id === (chat.reasoningEffort || ''))?.label || '默认')
 
 async function refreshSessions() {
-  await Promise.all([chat.loadSessions(auth.activeProfile?.name), chat.loadUnread(auth.activeProfile?.name)])
+  const profile = auth.activeProfile?.name
+  // The session route is the authoritative navigation target. A secondary
+  // unread-count request must never prevent its history from being restored.
+  await chat.loadSessions(profile)
   const requestedId = typeof route.params.sessionId === 'string' ? route.params.sessionId : ''
-  if (requestedId && chat.activeSessionId !== requestedId) await chat.selectSession(requestedId, auth.activeProfile?.name)
+  if (requestedId && chat.activeSessionId !== requestedId) await chat.selectSession(requestedId, profile)
+  void chat.loadUnread(profile).catch(() => undefined)
 }
 
 async function chooseSession(id: string) {

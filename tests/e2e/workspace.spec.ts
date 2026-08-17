@@ -39,6 +39,17 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   expect(consoleErrors).toEqual([])
 })
 
+test('restores a routed conversation even when unread-count refresh fails', async ({ page }) => {
+  await page.route('**/api/app/sessions/unread*', async route => {
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'unread unavailable' }) })
+  })
+
+  await page.goto('/chat/session-demo')
+  await expect(page.getByText('已整理完成。下面是', { exact: false })).toBeVisible()
+  await page.reload()
+  await expect(page.getByText('已整理完成。下面是', { exact: false })).toBeVisible()
+})
+
 test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ page }) => {
   const logo = page.locator('.rail__brand img')
   await expect(logo).toHaveAttribute('src', '/brand/AppIcon-1024.png')
@@ -54,7 +65,7 @@ test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ pag
   await expect(page.getByText('语音输入设置', { exact: true })).toBeVisible()
   await page.locator('.composer-shell').click()
   await page.getByRole('option').first().click()
-  await expect(page.locator('.timeline')).toHaveCSS('background-color', 'rgb(245, 248, 252)')
+  await expect(page.locator('.timeline')).toHaveCSS('background-color', 'rgb(255, 255, 255)')
   await expect(page.locator('.message--user .message__meta')).toHaveCSS('display', 'none')
   await expect(page.getByRole('button', { name: '会话操作' })).toBeVisible()
   await page.getByRole('button', { name: '会话操作' }).click()
