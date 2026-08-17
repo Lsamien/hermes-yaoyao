@@ -7,6 +7,8 @@ import ComposerShell from '@/components/composer/ComposerShell.vue'
 import type { ComposerOption, ComposerReference, ComposerSubmit } from '@/components/composer/types'
 import CreateGroupDialog from '@/components/groups/CreateGroupDialog.vue'
 import GroupManager from '@/components/groups/GroupManager.vue'
+import PreviewModal from '@/components/library/PreviewModal.vue'
+import type { UiLibraryItem } from '@/components/library/types'
 import MessageTimeline from '@/components/messages/MessageTimeline.vue'
 import type { UiMessage } from '@/components/messages/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
@@ -24,6 +26,7 @@ const createOpen = ref(false)
 const managerOpen = ref(false)
 const showTools = ref(true)
 const quoted = ref<UiMessage | null>(null)
+const preview = ref<UiLibraryItem | null>(null)
 const composer = ref<InstanceType<typeof ComposerShell> | null>(null)
 
 const filteredRooms = computed(() => groups.rooms
@@ -39,6 +42,7 @@ const profiles = computed(() => auth.profiles.map(profile => profile.name))
 const availableProfiles = computed(() => profiles.value.filter(profile => !groups.agents.some(agent => agent.profile === profile)))
 const uploadsEnabled = computed(() => auth.groupUploadsEnabled)
 const reference = computed<ComposerReference | null>(() => quoted.value ? { id: quoted.value.id, author: quoted.value.author, content: quoted.value.content } : null)
+const mentionNames = computed(() => ['所有人', ...groups.agents.map(agent => agent.displayName || agent.profile)])
 const mentionOptions = computed<ComposerOption[]>(() => [
   { id: 'all', label: '所有人', detail: '通知房间内全部 Agent' },
   ...groups.agents.map(agent => ({ id: agent.id, label: agent.displayName || agent.profile, detail: agent.profile, disabled: !agent.enabled })),
@@ -89,6 +93,16 @@ async function archiveRoom() {
   await groups.archiveRoom(groups.selectedRoom.id)
   managerOpen.value = false
   await router.replace(groups.selectedRoomId ? `/groups/${encodeURIComponent(groups.selectedRoomId)}` : '/groups')
+}
+
+function openLocalFile({ name, url }: { name: string; url: string }) {
+  const extension = name.split('.').at(-1)?.toLowerCase() || ''
+  const kind: UiLibraryItem['kind'] = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'avif'].includes(extension) ? 'image'
+    : ['mp4', 'mov', 'webm', 'mkv'].includes(extension) ? 'video'
+      : ['mp3', 'wav', 'm4a', 'aac', 'ogg'].includes(extension) ? 'audio'
+        : extension === 'pdf' ? 'pdf'
+          : ['md', 'markdown', 'txt', 'json', 'yaml', 'yml', 'csv', 'js', 'ts', 'py', 'sh'].includes(extension) ? 'text' : 'file'
+  preview.value = { id: `local:${url}`, name, kind, previewUrl: url, downloadUrl: url }
 }
 
 onMounted(async () => {
@@ -144,10 +158,12 @@ watch(() => route.params.roomId, async roomId => {
         :synced="!!groups.selectedRoom"
         :show-tools="showTools"
         :interaction="activeInteraction"
+        :mention-names="mentionNames"
         empty-title="让多个 Agent 一起工作"
         empty-description="使用 @ 提及指定 Agent，或直接发送消息触发已启用自动回复的成员。"
         @load-older="groups.loadOlder"
         @quote="quoted = $event"
+        @preview-file="openLocalFile"
         @approve="activeInteraction && groups.approveInteraction(activeInteraction.id, $event ? 'once' : 'deny')"
         @clarify="activeInteraction && groups.clarifyInteraction(activeInteraction.id, $event)"
       >
@@ -197,6 +213,7 @@ watch(() => route.params.roomId, async roomId => {
   </WorkspaceView>
 
   <CreateGroupDialog :open="createOpen" :profiles="profiles" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
+  <PreviewModal v-if="preview" :item="preview" @close="preview = null" @add-to-composer="preview = null" @source="preview = null" />
 </template>
 
 <style scoped>

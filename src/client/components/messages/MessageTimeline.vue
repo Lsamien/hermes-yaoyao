@@ -5,7 +5,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import InteractionCard from './InteractionCard.vue'
 import MarkdownContent from './MarkdownContent.vue'
 import ToolTrace from './ToolTrace.vue'
-import type { UiInteraction, UiMessage } from './types'
+import type { UiInteraction, UiLocalFileLink, UiMessage } from './types'
 
 const props = withDefaults(defineProps<{
   messages: UiMessage[]
@@ -49,6 +49,7 @@ const emit = defineEmits<{
   quote: [message: UiMessage]
   branch: [message: UiMessage]
   preview: [attachment: NonNullable<UiMessage['attachments']>[number]]
+  previewFile: [file: UiLocalFileLink]
   approve: [approved: boolean]
   clarify: [text: string]
 }>()
@@ -194,6 +195,8 @@ defineExpose({ scrollToMessage, scrollToBottom })
                 :legacy-media="message.role === 'assistant'"
                 :plain="message.role === 'user'"
                 :mention-names="mentionNames"
+                file-cards
+                @file-link="(name, url) => emit('previewFile', { name, url })"
               />
             </div>
 

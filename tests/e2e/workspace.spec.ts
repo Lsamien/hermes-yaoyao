@@ -90,6 +90,14 @@ test('renders subtask completion as a collapsed timeline event', async ({ page }
   await expect(page.locator('.delegation-event')).not.toHaveAttribute('open', '')
 })
 
+test('opens a local message file link as a floating preview card', async ({ page }) => {
+  await page.goto('/chat/session-demo')
+  const card = page.getByRole('link', { name: '预览文件 方案草稿.md' })
+  await expect(card).toHaveClass(/file-link-card/)
+  await card.click()
+  await expect(page.getByRole('dialog', { name: '预览 方案草稿.md' })).toBeVisible()
+})
+
 test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ page }) => {
   const logo = page.locator('.rail__brand img')
   await expect(logo).toHaveAttribute('src', '/brand/AppIcon-1024.png')

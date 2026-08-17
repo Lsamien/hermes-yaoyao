@@ -7,6 +7,7 @@ import type { ChoiceOption } from '@/components/common/types'
 import ComposerShell from '@/components/composer/ComposerShell.vue'
 import type { ComposerOption, ComposerReference, ComposerSubmit } from '@/components/composer/types'
 import PreviewInspector from '@/components/library/PreviewInspector.vue'
+import PreviewModal from '@/components/library/PreviewModal.vue'
 import type { UiLibraryItem } from '@/components/library/types'
 import MessageTimeline from '@/components/messages/MessageTimeline.vue'
 import type { UiMessage } from '@/components/messages/types'
@@ -24,6 +25,7 @@ const router = useRouter()
 const search = ref('')
 const quoted = ref<UiMessage | null>(null)
 const preview = ref<UiLibraryItem | null>(null)
+const filePreview = ref<UiLibraryItem | null>(null)
 const modelDialog = ref(false)
 const showTools = ref(true)
 const queueMode = ref(false)
@@ -104,6 +106,16 @@ async function send(payload: ComposerSubmit) {
 
 function openAttachment(attachment: NonNullable<UiMessage['attachments']>[number]) {
   preview.value = { id: attachment.id, name: attachment.name, kind: attachment.kind || 'file', size: attachment.size, previewUrl: attachment.url, downloadUrl: attachment.url }
+}
+
+function openLocalFile({ name, url }: { name: string; url: string }) {
+  const extension = name.split('.').at(-1)?.toLowerCase() || ''
+  const kind: UiLibraryItem['kind'] = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'avif'].includes(extension) ? 'image'
+    : ['mp4', 'mov', 'webm', 'mkv'].includes(extension) ? 'video'
+      : ['mp3', 'wav', 'm4a', 'aac', 'ogg'].includes(extension) ? 'audio'
+        : extension === 'pdf' ? 'pdf'
+          : ['md', 'markdown', 'txt', 'json', 'yaml', 'yml', 'csv', 'js', 'ts', 'py', 'sh'].includes(extension) ? 'text' : 'file'
+  filePreview.value = { id: `local:${url}`, name, kind, previewUrl: url, downloadUrl: url }
 }
 
 async function selectModel(id: string) {
@@ -226,6 +238,7 @@ watch(() => chat.activeSessionId, async id => {
         @quote="quoted = $event"
         @branch="branch"
         @preview="openAttachment"
+        @preview-file="openLocalFile"
         @approve="interaction && chat.respondToApproval(interaction.id, $event)"
         @clarify="interaction && chat.respondToClarification(interaction.id, $event)"
       >
@@ -267,6 +280,8 @@ watch(() => chat.activeSessionId, async id => {
 
     <template #inspector><PreviewInspector v-if="preview" :item="preview" @close="preview = null" @add-to-composer="preview = null" /></template>
   </WorkspaceView>
+
+  <PreviewModal v-if="filePreview" :item="filePreview" @close="filePreview = null" @add-to-composer="filePreview = null" @source="filePreview = null" />
 
   <ChoiceDialog :open="modelDialog" title="选择模型" :options="modelOptions" :selected-id="selectedModelId" @close="modelDialog = false" @select="selectModel" />
 

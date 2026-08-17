@@ -15,6 +15,11 @@ export type UiMessageAttachment = {
   size?: number
 }
 
+export type UiLocalFileLink = {
+  name: string
+  url: string
+}
+
 export type UiMessage = {
   id: string
   role: 'user' | 'assistant' | 'system' | 'tool'
