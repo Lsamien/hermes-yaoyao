@@ -126,4 +126,8 @@ Bootstrap now enriches Hermes profiles from the YaoYao plugin `/profiles` settin
 
 Pinned sessions are now rendered as their own “已置顶 N” section, with the existing pin glyph retained on each session row and the configured Agent name at the right edge. Server order remains authoritative; the client only supplies the visual grouping.
 
+## Message-surface alignment pass
+
+Chat and group timelines now use the reference cool blue-gray conversation canvas. Tool calls render as compact monospace “› tool_name” traces with expandable details; user attachments lead the right-aligned message bubble as a file card, followed by the user’s text. Thinking rows use the lightweight dashed disclosure treatment, and branch sessions receive a centered “FORK 来源” separator when parent metadata is present.
+
 final result: passed
