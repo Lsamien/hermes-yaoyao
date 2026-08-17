@@ -133,6 +133,7 @@ test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ pag
   await expect(assistantMessage.locator('.message__actions')).toHaveCSS('opacity', '1')
   await expect(page.locator('.message--tool-only .message__actions')).toHaveCount(0)
   await expect(page.locator('[data-message-id="message-thinking-tool"] .message__actions')).toHaveCount(0)
+  await expect(page.locator('[data-message-id="message-thinking-tool"]')).toHaveClass(/message--assistant-internal/)
   await expect(page.locator('.message--user .message__meta')).toHaveCSS('display', 'none')
   await expect(page.getByRole('button', { name: '会话操作' })).toBeVisible()
   await page.getByRole('button', { name: '会话操作' }).click()
