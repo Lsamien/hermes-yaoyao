@@ -1,0 +1,19 @@
+export type UiAgent = {
+  id: string
+  name: string
+  profile?: string
+  enabled?: boolean
+  status?: 'idle' | 'working' | 'offline' | 'error'
+  autoReply?: boolean
+  replyRounds?: number
+}
+
+export type UiRoom = {
+  id: string
+  name: string
+  description?: string
+  archived?: boolean
+  memberIds?: string[]
+  autoReply?: boolean
+  replyRounds?: number
+}
