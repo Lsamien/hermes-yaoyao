@@ -2,9 +2,9 @@
   color-scheme: light;
   --font-ui: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-code: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  --canvas: #f8f8f6;
-  --conversation-canvas: #f5f8fc;
-  --surface: #fdfdfc;
+  --canvas: #ffffff;
+  --conversation-canvas: #ffffff;
+  --surface: #ffffff;
   --surface-raised: #ffffff;
   --surface-soft: #f2f2ef;
   --surface-hover: #ecece8;
