@@ -155,11 +155,19 @@ defineExpose({ scrollToMessage, scrollToBottom })
               <MarkdownContent :content="message.reasoning" />
             </details>
 
+            <div v-if="message.role === 'user' && message.attachments?.length" class="message__attachments">
+              <button v-for="attachment in message.attachments" :key="attachment.id" type="button" @click="emit('preview', attachment)">
+                <img v-if="attachment.kind === 'image' && attachment.url" :src="attachment.url" :alt="attachment.name" />
+                <span v-else><AppIcon :name="attachment.kind || 'file'" :size="17" /></span>
+                <strong>{{ attachment.name }}</strong>
+              </button>
+            </div>
+
             <div class="message__content">
               <MarkdownContent :content="message.content" :streaming="message.status === 'streaming'" />
             </div>
 
-            <div v-if="message.attachments?.length" class="message__attachments">
+            <div v-if="message.role !== 'user' && message.attachments?.length" class="message__attachments">
               <button v-for="attachment in message.attachments" :key="attachment.id" type="button" @click="emit('preview', attachment)">
                 <img v-if="attachment.kind === 'image' && attachment.url" :src="attachment.url" :alt="attachment.name" />
                 <span v-else><AppIcon :name="attachment.kind || 'file'" :size="17" /></span>
@@ -222,6 +230,7 @@ defineExpose({ scrollToMessage, scrollToBottom })
 .message__reasoning { max-width: 420px; margin: 3px 0 10px; padding: 0 0 8px; border: 0; border-bottom: 1px dashed var(--line-strong); color: var(--text-secondary); font-size: 11px; }.message__reasoning summary { display: flex; align-items: center; gap: 5px; list-style: none; color: var(--text-muted); cursor: pointer; font-size: 9px; }.message__reasoning summary::-webkit-details-marker { display: none; }.message__reasoning summary::before { content: '›'; color: var(--text-muted); font-size: 14px; line-height: 1; transition: transform 120ms ease; }.message__reasoning[open] summary::before { transform: rotate(90deg); }.message__reasoning :deep(.markdown) { margin-top: 8px; }
 .fork-divider { display: flex; align-items: center; gap: 12px; margin: 8px 0 28px; color: var(--text-muted); font-size: 10px; }.fork-divider::before, .fork-divider::after { height: 1px; flex: 1; background: var(--line); content: ''; }.fork-divider > span { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-raised); white-space: nowrap; }.fork-divider strong { max-width: 180px; overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; }
 .message__attachments { display: flex; margin-top: 8px; flex-wrap: wrap; gap: 7px; }.message__attachments button { display: flex; min-width: 90px; max-width: 210px; min-height: 42px; align-items: center; gap: 7px; padding: 5px 8px; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--text-secondary); cursor: pointer; }.message__attachments button:hover { border-color: var(--line-strong); }.message__attachments img { width: 48px; height: 48px; margin: -5px 0 -5px -8px; object-fit: cover; }.message__attachments button > span { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 7px; background: var(--surface-soft); }.message__attachments strong { min-width: 0; overflow: hidden; font-size: 10px; font-weight: 520; text-overflow: ellipsis; white-space: nowrap; }
+.message--user .message__attachments { margin: 0 0 9px; }.message--user .message__attachments button { width: 100%; max-width: none; min-height: 50px; padding: 7px 9px; border: 0; border-radius: 11px; background: rgba(255,255,255,.48); color: var(--text-primary); }.message--user .message__attachments button > span { width: 28px; height: 28px; background: rgba(255,255,255,.65); }.message--user .message__attachments strong { font-size: 11px; font-weight: 560; }.dark .message--user .message__attachments button { background: rgba(255,255,255,.08); }
 .message__tools { margin-top: 9px; }.message__error { display: flex; align-items: center; gap: 5px; margin: 7px 0 0; color: var(--danger); font-size: 9px; }
 .message__actions { display: flex; position: absolute; left: -3px; top: 100%; gap: 2px; padding-top: 2px; opacity: 0; transition: opacity 120ms ease; }.message:hover .message__actions, .message:focus-within .message__actions { opacity: 1; }.message--user .message__actions { right: 0; left: auto; }.message__actions button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; }.message__actions button:hover { background: var(--surface-soft); color: var(--text-primary); }
 .message--failed .message__body { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
