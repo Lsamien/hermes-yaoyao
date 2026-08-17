@@ -15,6 +15,7 @@ const props = withDefaults(defineProps<{
   searchPlaceholder?: string
   emptyTitle?: string
   emptyDescription?: string
+  singleLine?: boolean
 }>(), {
   activeId: '',
   loading: false,
@@ -23,6 +24,7 @@ const props = withDefaults(defineProps<{
   searchPlaceholder: '搜索',
   emptyTitle: '暂无内容',
   emptyDescription: '新建一项开始使用。',
+  singleLine: false,
 })
 
 const emit = defineEmits<{
@@ -109,7 +111,7 @@ defineExpose({ focusSearch })
           <div v-if="row.section" class="sidebar-section-label" :class="{ 'sidebar-section-label--pinned': row.section === '已置顶' }" role="presentation"><span>{{ row.sectionLabel }}</span></div>
           <div
             class="sidebar-item"
-            :class="{ active: row.item.id === activeId || row.item.active }"
+            :class="{ active: row.item.id === activeId || row.item.active, 'sidebar-item--single-line': singleLine }"
             role="option"
             tabindex="0"
             :aria-selected="row.item.id === activeId || row.item.active"
@@ -117,7 +119,7 @@ defineExpose({ focusSearch })
             @keydown.enter.prevent="emit('select', row.item.id)"
             @keydown.space.prevent="emit('select', row.item.id)"
           >
-            <span class="sidebar-item__icon" :class="{ 'sidebar-item__icon--avatar': !row.item.icon }">
+            <span v-if="!singleLine" class="sidebar-item__icon" :class="{ 'sidebar-item__icon--avatar': !row.item.icon }">
               <AppIcon v-if="row.item.icon" :name="row.item.icon" :size="15" />
               <template v-else>{{ row.item.title.slice(0, 1).toUpperCase() }}</template>
               <span v-if="row.item.status" class="presence" :class="`presence--${row.item.status}`" />
@@ -127,7 +129,7 @@ defineExpose({ focusSearch })
                 <strong><AppIcon v-if="row.item.pinned" name="pin" :size="10" />{{ row.item.title }}</strong>
                 <small v-if="row.item.meta">{{ row.item.meta }}</small>
               </span>
-              <span v-if="row.item.subtitle" class="sidebar-item__row sidebar-item__row--secondary">
+              <span v-if="!singleLine && row.item.subtitle" class="sidebar-item__row sidebar-item__row--secondary">
                 <span>{{ row.item.subtitle }}</span>
                 <b v-if="row.item.unread">{{ row.item.unread > 99 ? '99+' : row.item.unread }}</b>
               </span>
@@ -163,6 +165,11 @@ defineExpose({ focusSearch })
 .sidebar-item { position: relative; display: flex; align-items: center; gap: 7px; width: 100%; min-height: 42px; padding: 4px 7px; border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; transition: background-color 120ms ease, color 120ms ease; }
 .sidebar-item:hover { background: var(--surface-soft); }
 .sidebar-item.active { background: var(--surface-hover); }
+.sidebar-item--single-line { min-height: 34px; padding-block: 3px; }
+.sidebar-item--single-line .sidebar-item__copy { display: block; }
+.sidebar-item--single-line .sidebar-item__row { min-height: 28px; }
+.sidebar-item--single-line .sidebar-item__row strong { font-size: 12px; }
+.sidebar-item--single-line .sidebar-item__more { top: 3px; }
 .sidebar-item__icon { position: relative; display: grid; place-items: center; width: 23px; height: 23px; flex: 0 0 23px; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; }
 .sidebar-item.active .sidebar-item__icon, .sidebar-item:hover .sidebar-item__icon { color: var(--text-secondary); }
 .sidebar-item__icon--avatar { background: var(--surface-hover); color: var(--text-secondary); font-size: 9px; font-weight: 700; }

@@ -167,7 +167,7 @@ onBeforeUnmount(() => {
     >
       <div class="sidebar-brand-row">
         <button class="rail__brand sidebar-brand" type="button" aria-label="返回对话" title="夭夭 Web" @click="navigate('/chat')">
-          <BrandMark :size="sidebarCollapsed ? 26 : 32" :label="false" compact />
+          <BrandMark :size="sidebarCollapsed ? 26 : 32" :label="false" compact bare />
         </button>
       </div>
       <button
@@ -417,9 +417,9 @@ onBeforeUnmount(() => {
   color: var(--text-primary);
 }
 
-.sidebar-brand-row { display: flex; min-height: 58px; align-items: center; padding: 9px 11px 7px; }
+.sidebar-brand-row { display: flex; min-height: 58px; align-items: center; padding: 9px 20px 7px; }
 .sidebar-brand { display: flex; min-width: 0; align-items: center; padding: 0; border: 0; border-radius: 10px; background: transparent; cursor: pointer; }
-.sidebar-brand:hover { background: var(--surface-hover); }
+.sidebar-brand:hover { background: transparent; }
 .sidebar-collapse, .sidebar-account__utility {
   display: grid;
   width: 34px;

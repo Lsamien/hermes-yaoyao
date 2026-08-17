@@ -3,15 +3,17 @@ withDefaults(defineProps<{
   size?: number
   label?: boolean
   compact?: boolean
+  bare?: boolean
 }>(), {
   size: 32,
   label: false,
   compact: false,
+  bare: false,
 })
 </script>
 
 <template>
-  <span class="brand-mark" :class="{ 'brand-mark--compact': compact }">
+  <span class="brand-mark" :class="{ 'brand-mark--compact': compact, 'brand-mark--bare': bare }">
     <span class="brand-mark__plate" :style="{ width: `${size}px`, height: `${size}px` }">
       <img src="/brand/AppIcon-1024.png" alt="" aria-hidden="true" />
     </span>
@@ -51,4 +53,5 @@ withDefaults(defineProps<{
 
 .brand-mark--compact { gap: 8px; }
 .brand-mark--compact .brand-mark__name { font-size: 16px; }
+.brand-mark--bare .brand-mark__plate { border-radius: 0; background: transparent; }
 </style>

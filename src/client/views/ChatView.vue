@@ -188,6 +188,7 @@ watch(() => chat.activeSessionId, async id => {
         :active-id="chat.activeSessionId"
         :loading="chat.isLoading"
         :search="search"
+        single-line
         search-placeholder="搜索会话"
         empty-title="还没有会话"
         empty-description="新建会话后，从输入框开始聊天。"
