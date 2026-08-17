@@ -3,11 +3,13 @@ import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 import { computed, onMounted, onUpdated, ref } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
+import { normalizeAssistantMediaMarkdown } from '@/utils/mediaMarkdown'
 
 const props = withDefaults(defineProps<{
   content: string
   streaming?: boolean
-}>(), { streaming: false })
+  legacyMedia?: boolean
+}>(), { streaming: false, legacyMedia: false })
 
 const root = ref<HTMLElement | null>(null)
 const copied = ref('')
@@ -27,7 +29,11 @@ md.renderer.rules.link_open = (tokens, index, options, env, self) => {
   return defaultLinkOpen(tokens, index, options, env, self)
 }
 
-const rendered = computed(() => DOMPurify.sanitize(md.render(props.content || ''), {
+const markdownSource = computed(() => props.legacyMedia
+  ? normalizeAssistantMediaMarkdown(props.content || '', props.streaming)
+  : props.content || '')
+
+const rendered = computed(() => DOMPurify.sanitize(md.render(markdownSource.value), {
   USE_PROFILES: { html: true },
   FORBID_TAGS: ['style', 'svg', 'math', 'form', 'input', 'button', 'iframe', 'object', 'embed'],
   FORBID_ATTR: ['style', 'onerror', 'onclick', 'onload'],

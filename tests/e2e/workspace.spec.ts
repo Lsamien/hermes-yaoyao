@@ -50,6 +50,16 @@ test('restores a routed conversation even when unread-count refresh fails', asyn
   await expect(page.getByText('已整理完成。下面是', { exact: false })).toBeVisible()
 })
 
+test('renders historical assistant MEDIA as Markdown in chat and group chat', async ({ page }) => {
+  await page.goto('/chat/session-demo')
+  await expect(page.locator('.markdown img[alt="AppIcon-1024.png"]')).toBeVisible()
+  await expect(page.locator('.message--user .markdown')).toContainText('MEDIA:/brand/AppIcon-1024.png')
+  await expect(page.locator('.message--user .markdown img')).toHaveCount(0)
+
+  await page.getByRole('button', { name: '群聊' }).click()
+  await expect(page.locator('.markdown img[alt="AppIcon-1024.png"]')).toBeVisible()
+})
+
 test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ page }) => {
   const logo = page.locator('.rail__brand img')
   await expect(logo).toHaveAttribute('src', '/brand/AppIcon-1024.png')

@@ -164,7 +164,11 @@ defineExpose({ scrollToMessage, scrollToBottom })
             </div>
 
             <div class="message__content">
-              <MarkdownContent :content="message.content" :streaming="message.status === 'streaming'" />
+              <MarkdownContent
+                :content="message.content"
+                :streaming="message.status === 'streaming'"
+                :legacy-media="message.role === 'assistant'"
+              />
             </div>
 
             <div v-if="message.role !== 'user' && message.attachments?.length" class="message__attachments">
