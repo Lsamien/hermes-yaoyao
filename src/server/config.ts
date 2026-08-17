@@ -1,6 +1,6 @@
 import { isIP } from 'node:net'
 import { homedir } from 'node:os'
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 
 export interface ServerConfig {
   host: string
@@ -8,6 +8,8 @@ export interface ServerConfig {
   upstream: URL
   allowedHosts: ReadonlySet<string>
   home: string
+  mediaRoot: string
+  mediaOwner: string
   tlsCert?: string
   tlsKey?: string
   allowInsecureLan: boolean
@@ -83,6 +85,7 @@ export function loadServerConfig(
   const port = parsePort(env.HERMES_YAOYAO_PORT)
   const upstream = parseUpstream(env.HERMES_YAOYAO_UPSTREAM)
   const home = resolve(env.HERMES_YAOYAO_HOME?.trim() || `${homedir()}/.hermes-yaoyao`)
+  const mediaRoot = resolve(env.HERMES_YAOYAO_MEDIA_ROOT?.trim() || `${homedir()}/Agents`)
   const tlsCert = env.HERMES_YAOYAO_TLS_CERT?.trim() || undefined
   const tlsKey = env.HERMES_YAOYAO_TLS_KEY?.trim() || undefined
   if (Boolean(tlsCert) !== Boolean(tlsKey)) {
@@ -108,6 +111,8 @@ export function loadServerConfig(
     upstream,
     allowedHosts,
     home,
+    mediaRoot,
+    mediaOwner: basename(homedir()),
     tlsCert,
     tlsKey,
     allowInsecureLan,

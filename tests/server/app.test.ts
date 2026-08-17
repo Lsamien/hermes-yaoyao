@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import request from 'supertest'
@@ -24,6 +24,8 @@ afterEach(() => {
 
 function makeConfig(upstream = 'http://127.0.0.1:9119'): ServerConfig {
   const home = mkdtempSync(join(tmpdir(), 'hermes-yaoyao-server-'))
+  const mediaRoot = join(home, 'media')
+  mkdirSync(mediaRoot)
   homes.push(home)
   return {
     host: '127.0.0.1',
@@ -31,6 +33,8 @@ function makeConfig(upstream = 'http://127.0.0.1:9119'): ServerConfig {
     upstream: new URL(upstream),
     allowedHosts: new Set(),
     home,
+    mediaRoot,
+    mediaOwner: 'samien',
     allowInsecureLan: false,
     insecureLan: false,
     production: false,
@@ -93,6 +97,22 @@ function cookieHeader(response: request.Response): string {
 }
 
 describe('8800 BFF', () => {
+  it('serves authenticated historical media only from the configured root', async () => {
+    const config = makeConfig()
+    writeFileSync(join(config.mediaRoot, '报告.txt'), '历史文件内容')
+    const runtime = createApplication({ config, fetchImpl: fakeGateway([]) })
+    runtimes.push(runtime)
+    const bootstrap = await request(runtime.app.callback())
+      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const cookies = cookieHeader(bootstrap)
+
+    const response = await request(runtime.app.callback())
+      .get('/Users/samien/Agents/报告.txt').set('Host', '127.0.0.1:8800').set('Cookie', cookies).expect(200)
+    expect(response.text).toBe('历史文件内容')
+    expect(response.headers['content-disposition']).toContain('inline')
+    await request(runtime.app.callback())
+      .get('/Users/samien/Agents/../state.db').set('Host', '127.0.0.1:8800').set('Cookie', cookies).expect(404)
+  })
   it('bootstraps sequentially without exposing the upstream address', async () => {
     const records: RecordedRequest[] = []
     const runtime = createApplication({ config: makeConfig(), fetchImpl: fakeGateway(records) })

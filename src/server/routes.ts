@@ -1,6 +1,9 @@
 import type Koa from 'koa'
 import Router from '@koa/router'
 import { parse } from 'cookie'
+import { createReadStream, realpathSync, statSync } from 'node:fs'
+import { basename, resolve, sep } from 'node:path'
+import { lookup as mimeLookup } from 'mime-types'
 import type { ServerConfig } from './config.js'
 import { isLoopbackUpstream } from './config.js'
 import { HttpError } from './errors.js'
@@ -371,12 +374,72 @@ function groupPath(ctx: Koa.Context, suffix = ''): string {
   return `/api/plugins/yaoyao/v1/rooms/${roomID}${suffix}`
 }
 
+function localMediaPath(root: string, relativePath: string): string {
+  let resolvedRoot: string
+  let resolvedFile: string
+  try {
+    resolvedRoot = realpathSync(root)
+    resolvedFile = realpathSync(resolve(resolvedRoot, relativePath))
+  } catch {
+    throw new HttpError(404, '本地文件不存在', 'local_media_not_found')
+  }
+  if (!resolvedFile.startsWith(`${resolvedRoot}${sep}`) || !statSync(resolvedFile).isFile()) {
+    throw new HttpError(404, '本地文件不存在', 'local_media_not_found')
+  }
+  return resolvedFile
+}
+
+function sendLocalMedia(ctx: Koa.Context, path: string): void {
+  const size = statSync(path).size
+  const type = mimeLookup(path) || 'application/octet-stream'
+  const fileName = basename(path)
+  const range = ctx.get('range').match(/^bytes=(\d*)-(\d*)$/)
+  ctx.set('Accept-Ranges', 'bytes')
+  ctx.set('Cache-Control', 'private, no-store')
+  ctx.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`)
+  ctx.type = type
+  if (!range) {
+    ctx.length = size
+    ctx.body = createReadStream(path)
+    return
+  }
+  const start = range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2] || 0))
+  const end = range[2] ? Number(range[2]) : size - 1
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= size) {
+    ctx.status = 416
+    ctx.set('Content-Range', `bytes */${size}`)
+    return
+  }
+  const boundedEnd = Math.min(end, size - 1)
+  ctx.status = 206
+  ctx.set('Content-Range', `bytes ${start}-${boundedEnd}/${size}`)
+  ctx.length = boundedEnd - start + 1
+  ctx.body = createReadStream(path, { start, end: boundedEnd })
+}
+
 export function createApiRouter(dependencies: RouteDependencies): Router {
   const router = new Router()
 
   router.get('/healthz', (ctx) => {
     ctx.set('Cache-Control', 'no-store')
     json(ctx, 200, { ok: true })
+  })
+
+  // Historical messages can contain Markdown links such as
+  // /Users/<owner>/Agents/<path>. Map only the configured media root, never
+  // an arbitrary local filesystem path.
+  router.get('/Users/:owner/Agents/*filePath', async (ctx) => {
+    if (!isLoopbackUpstream(dependencies.config.upstream)) {
+      throw new HttpError(409, '本地媒体只支持回环 Hermes 上游', 'remote_local_media_disabled')
+    }
+    if (ctx.params.owner !== dependencies.config.mediaOwner) {
+      throw new HttpError(404, '本地文件不存在', 'local_media_not_found')
+    }
+    await withJar(ctx, async (jar) => {
+      await requireGatewayAuthentication(ctx, dependencies, jar)
+      const filePath = Array.isArray(ctx.params.filePath) ? ctx.params.filePath.join('/') : ctx.params.filePath
+      sendLocalMedia(ctx, localMediaPath(dependencies.config.mediaRoot, filePath))
+    })
   })
   router.get('/readyz', async (ctx) => {
     ctx.set('Cache-Control', 'no-store')
