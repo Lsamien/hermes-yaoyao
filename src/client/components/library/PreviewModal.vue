@@ -20,7 +20,7 @@ const emit = defineEmits<{ close: []; addToComposer: [item: UiLibraryItem]; sour
 
 <style scoped>
 .preview-modal-layer { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 28px; background: var(--scrim); backdrop-filter: blur(4px); }
-.preview-modal { display: flex; width: min(960px, calc(100vw - 56px)); max-height: min(820px, calc(100vh - 56px)); overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: 0 24px 70px rgba(0,0,0,.28); }
+.preview-modal { display: flex; width: min(960px, calc(100vw - 56px)); height: min(820px, calc(100vh - 56px)); overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: 0 24px 70px rgba(0,0,0,.28); }
 .preview-modal :deep(.preview-inspector) { width: 100%; }
 .preview-modal :deep(.preview-back) { display: grid; }
 .preview-modal :deep(.preview-stage) { min-height: min(58vh, 560px); }

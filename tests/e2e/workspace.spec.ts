@@ -35,6 +35,8 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   const previewDialog = page.getByRole('dialog', { name: /预览 demo-report.pdf/ })
   await expect(previewDialog.getByRole('link', { name: '下载' })).toBeVisible()
   await expect(previewDialog.getByRole('button', { name: '加入输入框' })).toBeVisible()
+  const modalHeight = await page.locator('.preview-modal').evaluate(element => element.getBoundingClientRect().height)
+  expect(modalHeight).toBeGreaterThan(600)
   await page.getByRole('button', { name: '关闭预览' }).click()
 
   await page.goto('/artifacts')
