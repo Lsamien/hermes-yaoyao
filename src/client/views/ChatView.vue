@@ -193,10 +193,13 @@ watch(() => chat.activeSessionId, async id => {
         :loading="chat.isLoading"
         :search="search"
         single-line
+        :has-more="chat.hasMoreSessions"
+        :loading-more="chat.isLoadingMoreSessions"
         search-placeholder="搜索会话"
         empty-title="还没有会话"
         empty-description="新建会话后，从输入框开始聊天。"
         @search="search = $event"
+        @load-more="chat.loadMoreSessions(auth.activeProfile?.name)"
         @select="chooseSession"
         @more="openSessionActions"
       />

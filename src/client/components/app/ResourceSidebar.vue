@@ -16,6 +16,8 @@ const props = withDefaults(defineProps<{
   emptyTitle?: string
   emptyDescription?: string
   singleLine?: boolean
+  hasMore?: boolean
+  loadingMore?: boolean
 }>(), {
   activeId: '',
   loading: false,
@@ -25,12 +27,15 @@ const props = withDefaults(defineProps<{
   emptyTitle: '暂无内容',
   emptyDescription: '新建一项开始使用。',
   singleLine: false,
+  hasMore: false,
+  loadingMore: false,
 })
 
 const emit = defineEmits<{
   select: [id: string]
   search: [value: string]
   more: [id: string]
+  loadMore: []
 }>()
 
 const searchInput = ref<HTMLInputElement | null>(null)
@@ -69,6 +74,12 @@ function closeSearch(clear = false) {
 
 function handleSearchRequest() { void focusSearch() }
 function handleSearchCloseRequest() { searchOpen.value = false }
+function handleListScroll(event: Event) {
+  const element = event.currentTarget as HTMLElement
+  if (props.hasMore && !props.loadingMore && element.scrollHeight - element.scrollTop - element.clientHeight < 96) {
+    emit('loadMore')
+  }
+}
 
 watch(() => props.search, value => {
   if (value) searchOpen.value = true
@@ -102,7 +113,7 @@ defineExpose({ focusSearch })
         />
       </label>
     </Transition>
-    <div class="sidebar-list" role="listbox" aria-label="资源列表">
+    <div class="sidebar-list" role="listbox" aria-label="资源列表" @scroll.passive="handleListScroll">
       <div v-if="loading && !items.length" class="sidebar-loading" aria-label="正在加载">
         <span v-for="n in 7" :key="n" class="sidebar-skeleton" :style="{ opacity: 1 - n * .08 }" />
       </div>
@@ -140,6 +151,9 @@ defineExpose({ focusSearch })
           </div>
         </template>
       </template>
+      <button v-if="hasMore" class="sidebar-load-more" type="button" :disabled="loadingMore" @click="emit('loadMore')">
+        {{ loadingMore ? '正在加载更多…' : '继续加载会话' }}
+      </button>
       <div v-if="!loading && !items.length" class="sidebar-empty">
         <span><AppIcon name="chat" :size="20" /></span>
         <strong>{{ emptyTitle }}</strong>
@@ -185,6 +199,8 @@ defineExpose({ focusSearch })
 .sidebar-item__row b { display: grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--accent); color: var(--text-on-solid); font-size: 8px; }
 .sidebar-item__more { display: none; position: absolute; right: 5px; top: 7px; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: var(--surface-raised); color: var(--text-secondary); cursor: pointer; box-shadow: 0 1px 5px rgba(0,0,0,.07); }
 .sidebar-item:hover .sidebar-item__more, .sidebar-item:focus-within .sidebar-item__more { display: grid; }
+.sidebar-load-more { display: block; width: calc(100% - 14px); min-height: 32px; margin: 8px 7px 2px; border: 0; border-radius: 8px; background: var(--surface-soft); color: var(--text-secondary); cursor: pointer; font: 10px var(--font-ui); }
+.sidebar-load-more:hover:not(:disabled) { background: var(--surface-hover); color: var(--text-primary); }.sidebar-load-more:disabled { cursor: progress; opacity: .7; }
 .sidebar-loading { display: flex; flex-direction: column; gap: 4px; padding: 2px; }
 .sidebar-skeleton { height: 38px; border-radius: 8px; background: linear-gradient(90deg, var(--surface-soft), var(--surface-hover), var(--surface-soft)); background-size: 200% 100%; animation: shimmer 1.5s linear infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }

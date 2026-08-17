@@ -14,6 +14,7 @@ import { ScopedCache } from '@/utils/cache'
 import { createId, routeKey } from '@/utils/id'
 import { applyChatEvent, mergeChatMessages } from '@/utils/messageReducer'
 import { bool, normalizeChatMessage, number, record, string, values } from '@/utils/normalize'
+import { appendSessionPage, pinnedSessionsFirst } from '@/utils/sessionOrder'
 import { useAuthStore } from './auth'
 
 interface CachedHistory { messages: ChatMessage[]; total: number; savedAt: number }
@@ -42,6 +43,8 @@ export const useChatStore = defineStore('chat', () => {
   const connectionState = ref<RealtimeConnectionState>('idle')
   const historySynced = computed(() => activeRouteState.value?.historySynced ?? false)
   const isLoading = ref(false)
+  const isLoadingMoreSessions = ref(false)
+  const hasMoreSessions = ref(false)
   const isSending = ref(false)
   const error = ref<string>()
   const models = ref<ModelOption[]>([])
@@ -57,6 +60,7 @@ export const useChatStore = defineStore('chat', () => {
   let reconnectTimer: number | undefined
   let reconnectAttempt = 0
   let sessionLoadGeneration = 0
+  let nextSessionCursor: string | undefined
   let modelLoadGeneration = 0
   let unreadLoadGeneration = 0
   let reconnectResumePromise: Promise<unknown> | undefined
@@ -203,11 +207,17 @@ export const useChatStore = defineStore('chat', () => {
     disconnect()
     activeSessionId.value = undefined
     activeProfileName.value = profile
+    nextSessionCursor = undefined
+    hasMoreSessions.value = false
+    isLoadingMoreSessions.value = false
     error.value = undefined
   }
 
   function clearAccountState(): void {
     sessions.value = []
+    nextSessionCursor = undefined
+    hasMoreSessions.value = false
+    isLoadingMoreSessions.value = false
     activeSessionId.value = undefined
     activeProfileName.value = undefined
     runtimeRoutes.clear()
@@ -229,28 +239,40 @@ export const useChatStore = defineStore('chat', () => {
     isLoading.value = true
     error.value = undefined
     try {
-      const loaded: SessionSummary[] = []
-      const seen = new Set<string>()
-      let cursor: string | undefined
-      do {
-        const key = cursor ?? '<first-page>'
-        if (seen.has(key)) break
-        seen.add(key)
-        const page = await getSessions(requestedProfile, cursor, 100)
-        loaded.push(...page.items)
-        cursor = page.nextCursor ?? undefined
-      } while (cursor && loaded.length < 1_000)
+      const page = await getSessions(requestedProfile, undefined, 100)
       if (loadGeneration !== sessionLoadGeneration
         || (requestedProfile && auth.activeProfile?.name !== requestedProfile)) return
-      // 9119 owns both the list order and pin placement. Do not re-sort with a
-      // browser timestamp: it can move a conversation before the server has
-      // accepted or persisted the operation.
-      sessions.value = loaded
+      // 9119 owns recency within each bucket. Pinning is an explicit user
+      // command, so pinned sessions always form the visible top partition.
+      sessions.value = pinnedSessionsFirst(page.items)
+      nextSessionCursor = page.nextCursor ?? undefined
+      hasMoreSessions.value = Boolean(nextSessionCursor)
     } catch (cause) {
       if (loadGeneration === sessionLoadGeneration) error.value = errorMessage(cause)
       throw cause
     } finally {
       if (loadGeneration === sessionLoadGeneration) isLoading.value = false
+    }
+  }
+
+  async function loadMoreSessions(profile = auth.activeProfile?.name): Promise<void> {
+    const cursor = nextSessionCursor
+    const requestedProfile = profile || undefined
+    if (!cursor || isLoadingMoreSessions.value) return
+    const loadGeneration = sessionLoadGeneration
+    isLoadingMoreSessions.value = true
+    try {
+      const page = await getSessions(requestedProfile, cursor, 100)
+      if (loadGeneration !== sessionLoadGeneration
+        || (requestedProfile && auth.activeProfile?.name !== requestedProfile)) return
+      sessions.value = appendSessionPage(sessions.value, page.items)
+      nextSessionCursor = page.nextCursor ?? undefined
+      hasMoreSessions.value = Boolean(nextSessionCursor)
+    } catch (cause) {
+      if (loadGeneration === sessionLoadGeneration) error.value = errorMessage(cause)
+      throw cause
+    } finally {
+      if (loadGeneration === sessionLoadGeneration) isLoadingMoreSessions.value = false
     }
   }
 
@@ -698,9 +720,9 @@ export const useChatStore = defineStore('chat', () => {
 
   return {
     sessions, activeSessionId, activeProfileName, activeSession, routes, activeRouteState, messages,
-    connectionState, historySynced, hasMoreBefore, isLoading, isSending, isStreaming, isQueued,
+    connectionState, historySynced, hasMoreBefore, isLoading, isLoadingMoreSessions, hasMoreSessions, isSending, isStreaming, isQueued,
     error, models, selectedModel, reasoningEffort, fastMode, contextUsage, pendingApproval, pendingClarification, unreadCounts,
-    loadSessions, selectSession, loadOlder, createSession, connect, disconnect, send, interrupt,
+    loadSessions, loadMoreSessions, selectSession, loadOlder, createSession, connect, disconnect, send, interrupt,
     respondToApproval, respondToClarification, branchSession, renameSession, setSessionPinned, removeSession,
     loadModels, setModel, refreshContextUsage, loadUnread, markRead, switchProfile,
   }

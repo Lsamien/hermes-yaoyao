@@ -14,7 +14,7 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   const consoleErrors: string[] = []
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()) })
 
-  await expect(page.getByRole('option').first()).toContainText('第二个会话')
+  await expect(page.getByRole('option').first()).toContainText('夭夭 Web 验收会话')
   await expect(page.getByRole('option').first()).toContainText('夭夭')
   await expect(page.locator('.desktop-sidebar').getByText('已置顶 1', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '群聊' }).click()
@@ -37,6 +37,22 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   await expect(page).toHaveURL(/\/chat$/)
   await expect(page.getByRole('button', { name: '产物', exact: true })).toHaveCount(0)
   expect(consoleErrors).toEqual([])
+})
+
+test('keeps pins first and loads the next session page at the list bottom', async ({ page }) => {
+  const sidebar = page.locator('.desktop-sidebar')
+  const items = sidebar.locator('.sidebar-list [role="option"]')
+  await expect(items).toHaveCount(100)
+  await expect(items.first()).toContainText('夭夭 Web 验收会话')
+  await expect(sidebar.getByRole('button', { name: '继续加载会话' })).toBeVisible()
+
+  const list = sidebar.locator('.sidebar-list')
+  await list.evaluate(element => {
+    element.scrollTop = element.scrollHeight
+    element.dispatchEvent(new Event('scroll'))
+  })
+  await expect(items).toHaveCount(103)
+  await expect(sidebar.getByRole('button', { name: '继续加载会话' })).toHaveCount(0)
 })
 
 test('restores a routed conversation even when unread-count refresh fails', async ({ page }) => {
