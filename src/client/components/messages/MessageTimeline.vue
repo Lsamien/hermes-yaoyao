@@ -215,6 +215,7 @@ defineExpose({ scrollToMessage, scrollToBottom })
             <p v-if="message.error" class="message__error"><AppIcon name="alert" :size="13" />{{ message.error }}</p>
 
             <div class="message__actions">
+              <time v-if="message.role === 'assistant' && !showAssistantIdentity && message.createdAt" class="message__action-time">{{ formatTime(message.createdAt) }}</time>
               <button type="button" title="复制" aria-label="复制消息" @click="copyMessage(message)"><AppIcon name="copy" :size="13" /></button>
               <button type="button" title="引用" aria-label="引用消息" @click="emit('quote', message)"><AppIcon name="quote" :size="13" /></button>
               <button v-if="message.role === 'assistant'" type="button" title="从这里分支" aria-label="从这里分支" @click="emit('branch', message)"><AppIcon name="branch" :size="13" /></button>
@@ -270,6 +271,7 @@ defineExpose({ scrollToMessage, scrollToBottom })
 .message--user .message__attachments { margin: 0 0 9px; }.message--user .message__attachments button { width: 100%; max-width: none; min-height: 50px; padding: 7px 9px; border: 0; border-radius: 11px; background: rgba(255,255,255,.48); color: var(--text-primary); }.message--user .message__attachments button > span { width: 28px; height: 28px; background: rgba(255,255,255,.65); }.message--user .message__attachments strong { font-size: 11px; font-weight: 560; }.dark .message--user .message__attachments button { background: rgba(255,255,255,.08); }
 .message__tools { margin-top: 9px; }.message__error { display: flex; align-items: center; gap: 5px; margin: 7px 0 0; color: var(--danger); font-size: 9px; }
 .message__actions { display: flex; position: absolute; left: -3px; top: 100%; gap: 2px; padding-top: 2px; opacity: 0; transition: opacity 120ms ease; }.message:hover .message__actions, .message:focus-within .message__actions { opacity: 1; }.message--user .message__actions { right: 0; left: auto; }.message__actions button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; }.message__actions button:hover { background: var(--surface-soft); color: var(--text-primary); }
+.message--assistant-anonymous .message__actions { align-items: center; opacity: .72; }.message--assistant-anonymous:hover .message__actions, .message--assistant-anonymous:focus-within .message__actions { opacity: 1; }.message__action-time { min-width: 36px; padding: 0 4px 0 3px; color: var(--text-muted); font-size: 9px; font-variant-numeric: tabular-nums; }
 .message--failed .message__body { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
 .message--revealed .message__body { animation: reveal-message 1.8s ease; }
 @keyframes reveal-message { 0%, 28% { box-shadow: 0 0 0 5px var(--focus-ring); } 100% { box-shadow: 0 0 0 0 transparent; } }
