@@ -106,6 +106,19 @@ function scrollToMessage(id: string): boolean {
   return true
 }
 
+function scrollToAnchor(messageId: string, anchorId: string): boolean {
+  const root = scroller.value
+  if (!root) return false
+  const message = root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)
+  if (!message) return false
+  const target = anchorId ? message.querySelector<HTMLElement>(`#${CSS.escape(anchorId)}`) : null
+  ;(target || message).scrollIntoView({ block: target ? 'start' : 'center', behavior: 'smooth' })
+  message.classList.remove('message--revealed')
+  requestAnimationFrame(() => message.classList.add('message--revealed'))
+  window.setTimeout(() => message.classList.remove('message--revealed'), 1800)
+  return true
+}
+
 async function copyMessage(message: UiMessage) {
   await navigator.clipboard.writeText(message.content)
 }
@@ -128,7 +141,7 @@ watch(() => props.messages.at(-1)?.content, async () => {
 
 onMounted(() => nextTick(() => scrollToBottom('auto')))
 
-defineExpose({ scrollToMessage, scrollToBottom })
+defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
 </script>
 
 <template>
@@ -212,6 +225,7 @@ defineExpose({ scrollToMessage, scrollToBottom })
                 :legacy-media="message.role === 'assistant'"
                 :plain="message.role === 'user'"
                 :mention-names="mentionNames"
+                :outline-prefix="message.role === 'assistant' ? `outline-${message.id}` : ''"
                 file-cards
                 @file-link="(name, url) => emit('previewFile', { name, url })"
               />

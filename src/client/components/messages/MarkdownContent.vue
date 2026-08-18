@@ -14,7 +14,8 @@ const props = withDefaults(defineProps<{
   plain?: boolean
   mentionNames?: string[]
   fileCards?: boolean
-}>(), { streaming: false, legacyMedia: false, plain: false, fileCards: false })
+  outlinePrefix?: string
+}>(), { streaming: false, legacyMedia: false, plain: false, fileCards: false, outlinePrefix: '' })
 
 const emit = defineEmits<{ fileLink: [name: string, url: string] }>()
 
@@ -145,6 +146,13 @@ function decorateMediaPreviews() {
   })
 }
 
+function decorateOutlineHeadings() {
+  if (!props.outlinePrefix || !root.value) return
+  root.value.querySelectorAll<HTMLElement>('h1, h2, h3').forEach((heading, index) => {
+    heading.id = `${props.outlinePrefix}-heading-${index + 1}`
+  })
+}
+
 function onClick(event: MouseEvent) {
   const link = (event.target as HTMLElement).closest('a')
   if (!link) return
@@ -152,8 +160,8 @@ function onClick(event: MouseEvent) {
   if (/^(javascript|data|vbscript):/i.test(href)) event.preventDefault()
 }
 
-onMounted(() => { decorateCopyButtons(); decorateFileLinks(); decorateMediaPreviews() })
-onUpdated(() => { decorateCopyButtons(); decorateFileLinks(); decorateMediaPreviews() })
+onMounted(() => { decorateCopyButtons(); decorateFileLinks(); decorateMediaPreviews(); decorateOutlineHeadings() })
+onUpdated(() => { decorateCopyButtons(); decorateFileLinks(); decorateMediaPreviews(); decorateOutlineHeadings() })
 </script>
 
 <template>

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import type { UiMessage } from '@/components/messages/types'
+import MarkdownContent from '@/components/messages/MarkdownContent.vue'
 import { buildSessionOutline } from '@/utils/sessionOutline'
 
 describe('session outline', () => {
@@ -36,5 +39,13 @@ describe('session outline', () => {
     const [item] = buildSessionOutline([{ id: 'u1', role: 'user', content }])
     expect(item?.content).toHaveLength(51)
     expect(item?.content.endsWith('…')).toBe(true)
+  })
+
+  it('assigns stable DOM anchors to rendered Markdown headings', async () => {
+    const wrapper = mount(MarkdownContent, { props: { content: '# 结论\n## 步骤\n### 风险', outlinePrefix: 'outline-a1' } })
+    await nextTick()
+    expect(wrapper.find('h1').attributes('id')).toBe('outline-a1-heading-1')
+    expect(wrapper.find('h2').attributes('id')).toBe('outline-a1-heading-2')
+    expect(wrapper.find('h3').attributes('id')).toBe('outline-a1-heading-3')
   })
 })
