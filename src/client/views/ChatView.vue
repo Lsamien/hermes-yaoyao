@@ -20,6 +20,7 @@ import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
 import { chatInteraction, chatMessagesToUi, sessionSidebarItem } from '@/components/workspace/viewModels'
 import { consumeLibraryItemForComposer, loadComposerFile } from '@/components/workspace/pendingComposer'
+import { readAgentShowThinking, writeAgentShowThinking } from '@/utils/sessionPreferences'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { getSession } from '@/api/sessions'
@@ -35,7 +36,7 @@ const filePreview = ref<UiLibraryItem | null>(null)
 const mediaPreviewIndex = ref<number | null>(null)
 const outlineOpen = ref(false)
 const modelDialog = ref(false)
-const showTools = ref(true)
+const showThinking = ref(true)
 const queueMode = ref(false)
 const actionSessionId = ref('')
 const renaming = ref(false)
@@ -203,6 +204,15 @@ function selectReasoning(id: string) {
   chat.reasoningEffort = id || undefined
 }
 
+function restoreShowThinking(profile = auth.activeProfile?.name || 'default') {
+  showThinking.value = readAgentShowThinking(auth.user?.id ?? 'local', profile)
+}
+
+function toggleShowThinking() {
+  showThinking.value = !showThinking.value
+  writeAgentShowThinking(auth.user?.id ?? 'local', auth.activeProfile?.name || 'default', showThinking.value)
+}
+
 function openSessionActions(id: string, event?: MouseEvent) {
   actionSessionId.value = id
   const session = chat.sessions.find(item => item.id === id)
@@ -295,6 +305,7 @@ async function revealSourceMessage() {
 }
 
 onMounted(async () => {
+  restoreShowThinking()
   document.addEventListener('pointerdown', handleSessionActionPointer)
   document.addEventListener('keydown', handleSessionActionKey)
   await refreshSessions()
@@ -312,6 +323,7 @@ onBeforeUnmount(() => {
 
 watch(() => auth.activeProfile?.name, async (profile, previous) => {
   if (!profile || profile === previous) return
+  restoreShowThinking(profile)
   outlineOpen.value = false
   preview.value = null
   if (restoringRouteProfile.value === profile) {
@@ -375,7 +387,7 @@ watch(() => chat.activeSessionId, async id => {
         :has-older="chat.hasMoreBefore"
         :connected="connected"
         :synced="chat.historySynced"
-        :show-tools="showTools"
+        :show-tools="showThinking"
         :show-assistant-identity="false"
         :interaction="interaction"
         empty-logo
@@ -408,7 +420,7 @@ watch(() => chat.activeSessionId, async id => {
         :context-used="chat.contextUsage?.contextTokens || chat.contextUsage?.totalTokens || 0"
         :context-limit="chat.contextUsage?.contextLimit || 262144"
         :queue-mode="queueMode || chat.isQueued"
-        :tool-trace-visible="showTools"
+        :tool-trace-visible="showThinking"
         :reference="reference"
         :slash-commands="[
           { id: 'fork', label: 'fork', detail: '从当前会话创建分支' },
@@ -419,7 +431,7 @@ watch(() => chat.activeSessionId, async id => {
         @stop="chat.interrupt"
         @model-click="modelDialog = true"
         @reasoning-change="selectReasoning"
-        @settings-click="showTools = !showTools"
+        @settings-click="toggleShowThinking"
         @queue-toggle="queueMode = !queueMode"
         @clear-reference="quoted = null"
       />

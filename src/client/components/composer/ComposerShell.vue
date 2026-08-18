@@ -455,7 +455,7 @@ defineExpose({
             <Transition name="composer-menu">
               <div v-if="settingsOpen" class="composer-popover composer-popover--settings" role="dialog" aria-label="输入设置">
                 <button class="composer-setting-row" type="button" role="switch" :aria-checked="toolTraceVisible" @click="emit('settingsClick')">
-                  <span><AppIcon name="tools" :size="15" />显示工具轨迹</span>
+                  <span><AppIcon name="brain" :size="15" />显示思考</span>
                   <AppIcon v-if="toolTraceVisible" name="check" :size="16" />
                 </button>
                 <button class="composer-setting-row" type="button" title="首版暂未启用语音输入" @click="showError('语音输入尚未启用')">
@@ -464,8 +464,8 @@ defineExpose({
               </div>
             </Transition>
           </div>
-          <button v-else class="composer-tool" type="button" :class="{ active: toolTraceVisible }" :disabled="disabled" title="显示工具调用" @click="emit('toolTraceToggle')">
-            <AppIcon name="tools" :size="16" /><span>工具</span>
+          <button v-else class="composer-tool" type="button" :class="{ active: toolTraceVisible }" :disabled="disabled" title="显示思考" @click="emit('toolTraceToggle')">
+            <AppIcon name="brain" :size="16" /><span>思考</span>
           </button>
           <button v-if="mode === 'chat'" class="composer-tool composer-tool--model" type="button" :disabled="disabled" :title="modelLabel" @click="emit('modelClick')">
             <AppIcon name="model" :size="15" /><span>{{ compactModel }}</span><AppIcon name="chevron-down" :size="11" />

@@ -176,9 +176,9 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
         </button>
 
         <template v-for="row in timelineRows" :key="row.id">
-        <TurnTrace v-if="row.kind === 'trace'" :group="row" />
+        <TurnTrace v-if="row.kind === 'trace' && showTools" :group="row" />
+        <template v-else-if="row.kind === 'message'">
         <article
-          v-else
           v-for="message in [row.message]"
           :key="message.id"
           :data-message-id="message.id"
@@ -260,6 +260,7 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
             </template>
           </div>
         </article>
+        </template>
         </template>
 
         <InteractionCard

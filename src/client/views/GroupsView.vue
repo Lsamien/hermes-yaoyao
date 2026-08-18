@@ -18,6 +18,7 @@ import type { UiMessage } from '@/components/messages/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
 import { loadComposerFile } from '@/components/workspace/pendingComposer'
+import { readAgentShowThinking, writeAgentShowThinking } from '@/utils/sessionPreferences'
 import { agentToUi, groupInteraction, groupMessageToUi, roomSidebarItem, roomToUi } from '@/components/workspace/viewModels'
 import { useAuthStore } from '@/stores/auth'
 import { useGroupsStore } from '@/stores/groups'
@@ -29,7 +30,7 @@ const router = useRouter()
 const search = ref('')
 const createOpen = ref(false)
 const managerOpen = ref(false)
-const showTools = ref(true)
+const showThinking = ref(true)
 const quoted = ref<UiMessage | null>(null)
 const preview = ref<UiLibraryItem | null>(null)
 const mediaPreviewIndex = ref<number | null>(null)
@@ -55,6 +56,15 @@ const mentionOptions = computed<ComposerOption[]>(() => [
   { id: 'all', label: '所有人', detail: '通知房间内全部 Agent' },
   ...groups.agents.map(agent => ({ id: agent.id, label: agent.displayName || agent.profile, detail: agent.profile, disabled: !agent.enabled })),
 ])
+
+function restoreShowThinking(profile = auth.activeProfile?.name || 'default') {
+  showThinking.value = readAgentShowThinking(auth.user?.id ?? 'local', profile)
+}
+
+function toggleShowThinking() {
+  showThinking.value = !showThinking.value
+  writeAgentShowThinking(auth.user?.id ?? 'local', auth.activeProfile?.name || 'default', showThinking.value)
+}
 
 async function selectRoom(id: string) {
   await router.push(`/groups/${encodeURIComponent(id)}`)
@@ -138,6 +148,7 @@ async function addMediaToComposer(media: PreviewMedia) {
 }
 
 onMounted(async () => {
+  restoreShowThinking()
   try {
     await groups.start()
     const requested = typeof route.params.roomId === 'string' ? route.params.roomId : ''
@@ -151,6 +162,7 @@ onBeforeUnmount(() => groups.stop())
 watch(() => route.params.roomId, async roomId => {
   if (typeof roomId === 'string' && roomId && roomId !== groups.selectedRoomId) await groups.selectRoom(roomId)
 })
+watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThinking(profile) })
 </script>
 
 <template>
@@ -188,7 +200,7 @@ watch(() => route.params.roomId, async roomId => {
         :has-older="groups.hasMoreBefore"
         :connected="connected"
         :synced="!!groups.selectedRoom"
-        :show-tools="showTools"
+        :show-tools="showThinking"
         :interaction="activeInteraction"
         :mention-names="mentionNames"
         empty-title="让多个 Agent 一起工作"
@@ -215,14 +227,14 @@ watch(() => route.params.roomId, async roomId => {
         :disabled="!groups.selectedRoom || groups.availability !== 'available'"
         :streaming="groups.agents.some(agent => ['queued', 'running'].includes(agent.status))"
         :sending="groups.isSending"
-        :tool-trace-visible="showTools"
+        :tool-trace-visible="showThinking"
         :reference="reference"
         :mention-options="mentionOptions"
         :attachments-enabled="uploadsEnabled"
         placeholder="发消息给群聊，输入 @ 提及 Agent"
         @send="send"
         @stop="groups.agents.filter(agent => ['queued', 'running'].includes(agent.status)).forEach(agent => groups.interruptAgent(agent.id))"
-        @tool-trace-toggle="showTools = !showTools"
+        @tool-trace-toggle="toggleShowThinking"
         @clear-reference="quoted = null"
       />
     </div>
