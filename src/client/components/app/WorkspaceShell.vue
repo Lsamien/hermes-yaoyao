@@ -59,7 +59,8 @@ const navItems: NavItem[] = [
 
 // The active workspace is already represented by its main canvas and sidebar
 // context. Keep this strip focused on destinations the user can switch to.
-const featureNavItems = computed(() => navItems.filter(item => item.key !== activeNav.value.key))
+const featureNavItems = computed(() => navItems.filter(item => item.key !== activeNav.value.key
+  && !(activeNav.value.key === 'groups' && item.key === 'files')))
 
 const activeNav = computed(() => {
   const item = navItems.find(entry => route.path.startsWith(entry.path))
@@ -69,7 +70,7 @@ const activeNav = computed(() => {
 const contextHeading = computed(() => ({
   chat: '历史记录',
   groups: '群聊记录',
-  files: '文件筛选',
+  files: '历史记录',
 })[activeNav.value.key])
 
 const hasPrimaryAction = computed(() => activeNav.value.key === 'chat' || activeNav.value.key === 'groups')
