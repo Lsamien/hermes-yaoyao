@@ -24,6 +24,8 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   await expect(page.getByRole('button', { name: '文件库', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '产物', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '新建群聊' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '新建群聊' })).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(page.getByRole('button', { name: '新建群聊' })).toHaveCSS('font-weight', '580')
   await expect(page.getByRole('button', { name: '管理群聊' })).toBeVisible()
   await expect(page.getByRole('button', { name: '发送消息' })).toBeVisible()
 
@@ -243,6 +245,8 @@ test('uses the unified Grok-style sidebar, search trigger, and persistent collap
   await expect(sidebar.locator('.sidebar-account-switcher')).toHaveCount(1)
   await expect(page.getByRole('button', { name: '搜索', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '新建聊天', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '新建聊天', exact: true })).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(page.getByRole('button', { name: '新建聊天', exact: true })).toHaveCSS('font-weight', '580')
   await expect(sidebar.getByText('历史记录', { exact: true })).toBeVisible()
 
   const searchTrigger = page.getByRole('button', { name: '搜索', exact: true })

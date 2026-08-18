@@ -493,13 +493,16 @@ onBeforeUnmount(() => {
   padding: 0 11px;
   border: 0;
   border-radius: 10px;
-  background: var(--surface-soft);
+  background: transparent;
   color: var(--text-primary);
   cursor: pointer;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 580;
 }
-.sidebar-primary-action :deep(button:hover) { background: var(--surface-hover); }
+.sidebar-primary-action :deep(button:hover),
+.sidebar-primary-action :deep(button:focus-visible) { background: var(--surface-soft); }
+.sidebar-primary-action :deep(button:focus-visible) { outline: 0; box-shadow: inset 0 0 0 1px var(--line-strong); }
+.sidebar-primary-action :deep(button:active) { background: var(--surface-hover); }
 .sidebar-primary-action :deep(button > span) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .sidebar-feature-nav { display: flex; flex-direction: column; gap: 1px; padding: 0 0 9px; }
