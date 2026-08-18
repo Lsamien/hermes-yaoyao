@@ -9,6 +9,7 @@ import CreateGroupDialog from '@/components/groups/CreateGroupDialog.vue'
 import GroupManager from '@/components/groups/GroupManager.vue'
 import PreviewModal from '@/components/library/PreviewModal.vue'
 import type { UiLibraryItem } from '@/components/library/types'
+import { mediaItemsFromMessages, previewItemFromUrl } from '@/components/library/mediaSequence'
 import MessageTimeline from '@/components/messages/MessageTimeline.vue'
 import type { UiMessage } from '@/components/messages/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
@@ -34,6 +35,7 @@ const filteredRooms = computed(() => groups.rooms
   .filter(room => !search.value.trim() || `${room.name} ${room.lastMessage?.content || ''}`.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())))
 const sidebarItems = computed(() => filteredRooms.value.map(roomSidebarItem))
 const messages = computed(() => groups.messages.map(groupMessageToUi))
+const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
 const agents = computed(() => groups.agents.map(agentToUi))
 const connected = computed(() => ['connected', 'ready'].includes(groups.connectionState))
 const activeInteraction = computed(() => groupInteraction(groups.pendingInteractions[0]))
@@ -96,13 +98,13 @@ async function archiveRoom() {
 }
 
 function openLocalFile({ name, url }: { name: string; url: string }) {
-  const extension = name.split('.').at(-1)?.toLowerCase() || ''
-  const kind: UiLibraryItem['kind'] = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'avif'].includes(extension) ? 'image'
-    : ['mp4', 'mov', 'webm', 'mkv'].includes(extension) ? 'video'
-      : ['mp3', 'wav', 'm4a', 'aac', 'ogg'].includes(extension) ? 'audio'
-        : extension === 'pdf' ? 'pdf'
-          : ['md', 'markdown', 'txt', 'json', 'yaml', 'yml', 'csv', 'js', 'ts', 'py', 'sh'].includes(extension) ? 'text' : 'file'
-  preview.value = { id: `local:${url}`, name, kind, previewUrl: url, downloadUrl: url }
+  preview.value = previewItemFromUrl(name, url)
+}
+
+function openAttachment(attachment: NonNullable<UiMessage['attachments']>[number]) {
+  const item = previewItemFromUrl(attachment.name, attachment.url || '', attachment.id, attachment.kind)
+  item.size = attachment.size
+  preview.value = item
 }
 
 onMounted(async () => {
@@ -163,6 +165,7 @@ watch(() => route.params.roomId, async roomId => {
         empty-description="使用 @ 提及指定 Agent，或直接发送消息触发已启用自动回复的成员。"
         @load-older="groups.loadOlder"
         @quote="quoted = $event"
+        @preview="openAttachment"
         @preview-file="openLocalFile"
         @approve="activeInteraction && groups.approveInteraction(activeInteraction.id, $event ? 'once' : 'deny')"
         @clarify="activeInteraction && groups.clarifyInteraction(activeInteraction.id, $event)"
@@ -213,7 +216,7 @@ watch(() => route.params.roomId, async roomId => {
   </WorkspaceView>
 
   <CreateGroupDialog :open="createOpen" :profiles="profiles" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
-  <PreviewModal v-if="preview" :item="preview" @close="preview = null" @add-to-composer="preview = null" @source="preview = null" />
+  <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="preview = null" @source="preview = null" />
 </template>
 
 <style scoped>

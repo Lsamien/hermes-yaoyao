@@ -47,6 +47,7 @@ const messages = [
   { id: 'message-tool', role: 'tool', tool_name: 'file_search', tool_call_id: 'tool-1', summary: '扫描产物目录', result: { path: '/tmp/demo-report.pdf', count: 1 }, timestamp: now() - 175 },
   { id: 'message-assistant', role: 'assistant', content: '已整理完成。下面是 **验收摘要**：\n\n- 普通聊天已连接\n- 群聊 v2 已就绪\n- [打开报告](https://example.com/report)', reasoning_content: '先核对会话与文件索引。', timestamp: now() - 170 },
   { id: 'message-image', role: 'assistant', content: '预览图：![夭夭 Logo](/brand/AppIcon-1024.png)', timestamp: now() - 160 },
+  { id: 'message-image-second', role: 'assistant', content: '第二张：![夭夭 Logo 2](/brand/AppIcon-1024.png?variant=2)', timestamp: now() - 155 },
   { id: 'message-legacy-media', role: 'assistant', content: '历史兼容：MEDIA:/brand/AppIcon-1024.png', timestamp: now() - 150 },
   { id: 'message-local-link', role: 'assistant', content: '[方案草稿.md](/Users/samien/Agents/方案草稿.md)', timestamp: now() - 145 },
   { id: 'message-delegation', role: 'user', content: '[ASYNC DELEGATION BATCH COMPLETE]\n后台子任务已经完成。', display_kind: 'async_delegation_complete', display_metadata: { task_count: 2, completed_count: 2, failed_count: 0, duration_seconds: 71 }, timestamp: now() - 140 },

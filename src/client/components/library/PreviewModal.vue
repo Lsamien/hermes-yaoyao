@@ -8,7 +8,7 @@ const emit = defineEmits<{ close: []; addToComposer: [item: UiLibraryItem]; sour
 
 const mediaItems = computed(() => {
   const candidates = props.items.filter(item => item.kind === 'image' || item.kind === 'video')
-  return candidates.some(item => item.id === props.item.id) ? candidates : [props.item]
+  return candidates.some(item => item.id === props.item.id || item.previewUrl === props.item.previewUrl) ? candidates : [props.item]
 })
 const activeIndex = ref(0)
 const activeItem = computed(() => mediaItems.value[activeIndex.value] ?? props.item)
@@ -17,7 +17,7 @@ const canNext = computed(() => activeIndex.value < mediaItems.value.length - 1)
 let swipeStart: number | undefined
 
 function resetActiveItem() {
-  const index = mediaItems.value.findIndex(item => item.id === props.item.id)
+  const index = mediaItems.value.findIndex(item => item.id === props.item.id || item.previewUrl === props.item.previewUrl)
   activeIndex.value = index >= 0 ? index : 0
 }
 function previous() { if (canPrevious.value) activeIndex.value -= 1 }
