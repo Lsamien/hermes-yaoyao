@@ -168,7 +168,8 @@ describe('8800 BFF', () => {
           search: url.searchParams,
           headers: new Headers(init?.headers),
         })
-        return jsonResponse({ detail: 'Not Found' }, { status: 404 })
+        const status = (init?.method ?? 'GET') === 'PATCH' ? 405 : 404
+        return jsonResponse({ detail: status === 405 ? 'Method Not Allowed' : 'Not Found' }, { status })
       }
       return baseGateway(input, init)
     }) as typeof fetch

@@ -132,7 +132,7 @@ async function chooseSession(id: string) {
   await ensureRouteProfile(profile)
   if (chat.activeProfileName !== profile) await chat.loadSessions(profile)
   await chat.selectSession(id, profile)
-  await chat.markRead(id, profile)
+  await chat.markRead(id, profile).catch(() => undefined)
   quoted.value = null
 }
 

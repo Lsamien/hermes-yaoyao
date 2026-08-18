@@ -82,6 +82,19 @@ test('restores a routed conversation even when unread-count refresh fails', asyn
   await expect(page.getByText('已整理完成。下面是', { exact: false })).toBeVisible()
 })
 
+test('opens a conversation even when marking it read is unsupported', async ({ page }) => {
+  const pageErrors: string[] = []
+  page.on('pageerror', error => pageErrors.push(error.message))
+  await page.route('**/api/app/sessions/unread/*', async route => {
+    await route.fulfill({ status: 405, contentType: 'application/json', body: JSON.stringify({ error: 'Method Not Allowed' }) })
+  })
+
+  await page.getByRole('option').filter({ hasText: '第二个会话' }).click()
+  await expect(page).toHaveURL(/\/chat\/session-second\?profile=yaoyao/)
+  await expect(page.getByText('已整理完成。下面是', { exact: false })).toBeVisible()
+  expect(pageErrors).toEqual([])
+})
+
 test('restores a legacy session link under its owning Agent profile', async ({ page }) => {
   await page.goto('/chat/session-yaoer')
   await expect(page.getByText('瑶儿历史消息', { exact: true })).toBeVisible()

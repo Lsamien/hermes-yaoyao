@@ -182,7 +182,7 @@ async function proxyOptionalUnread(
       search: options.search,
       body: options.requestBody,
     })
-    if (response.status === 404) {
+    if (response.status === 404 || response.status === 405) {
       json(ctx, 200, fallback)
       return
     }
