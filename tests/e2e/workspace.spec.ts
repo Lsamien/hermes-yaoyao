@@ -73,6 +73,14 @@ test('restores a routed conversation even when unread-count refresh fails', asyn
   await expect(page.getByText('已整理完成。下面是', { exact: false })).toBeVisible()
 })
 
+test('restores a legacy session link under its owning Agent profile', async ({ page }) => {
+  await page.goto('/chat/session-yaoer')
+  await expect(page.getByText('瑶儿历史消息', { exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/\/chat\/session-yaoer\?profile=yaoer/)
+  await page.reload()
+  await expect(page.getByText('瑶儿历史消息', { exact: true })).toBeVisible()
+})
+
 test('renders historical assistant MEDIA as Markdown in chat and group chat', async ({ page }) => {
   await page.goto('/chat/session-demo')
   const image = page.locator('.markdown img[alt="夭夭 Logo"]')

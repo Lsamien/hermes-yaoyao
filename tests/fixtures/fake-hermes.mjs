@@ -37,6 +37,7 @@ const profiles = [
 const sessions = [
   { id: 'session-second', profile: 'yaoyao', source: 'web', title: '第二个会话', preview: '用于验证列表和切换', message_count: 2, tool_call_count: 0, started_at: now() - 7200, last_active_at: now() - 600 },
   { id: 'session-demo', profile: 'yaoyao', source: 'web', title: '夭夭 Web 验收会话', preview: '文件库与群聊已经就绪', message_count: 4, tool_call_count: 1, started_at: now() - 3600, last_active_at: now(), pinned: true, model: 'gpt-5.6', provider: 'openai' },
+  { id: 'session-yaoer', profile: 'yaoer', source: 'web', title: '瑶儿专属会话', message_count: 1, tool_call_count: 0, started_at: now() - 3500, last_active_at: now() - 20, model: 'gpt-5.6', provider: 'openai' },
   ...Array.from({ length: 101 }, (_, index) => ({ id: `session-page-${index + 1}`, profile: 'yaoyao', source: 'web', title: `分页会话 ${index + 1}`, message_count: 0, tool_call_count: 0, started_at: now() - 10_000 - index, last_active_at: now() - 10_000 - index })),
 ]
 const messages = [
@@ -80,10 +81,19 @@ const server = createServer(async (request, response) => {
   if (url.pathname === '/api/profiles/sessions' || url.pathname === '/api/sessions') {
     const offset = Math.max(0, Number(url.searchParams.get('offset') || 0))
     const limit = Math.max(1, Number(url.searchParams.get('limit') || 100))
-    return json(response, 200, { sessions: sessions.slice(offset, offset + limit), total: sessions.length, offset, limit })
+    const scoped = url.searchParams.get('profile') ? sessions.filter(item => item.profile === url.searchParams.get('profile')) : sessions
+    return json(response, 200, { sessions: scoped.slice(offset, offset + limit), total: scoped.length, offset, limit })
   }
-  if (/^\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) return json(response, 200, { messages, pagination: { total: messages.length, returned: messages.length, limit: 150, hasMore: false } })
-  if (/^\/api\/sessions\/[^/]+$/.test(url.pathname)) return json(response, 200, sessions[0])
+  if (/^\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
+    const id = decodeURIComponent(url.pathname.split('/')[3])
+    const scopedMessages = id === 'session-yaoer' ? [{ id: 'yaoer-history', role: 'assistant', content: '瑶儿历史消息', timestamp: now() - 10 }] : messages
+    return json(response, 200, { messages: scopedMessages, pagination: { total: scopedMessages.length, returned: scopedMessages.length, limit: 150, hasMore: false } })
+  }
+  if (/^\/api\/sessions\/[^/]+$/.test(url.pathname)) {
+    const id = decodeURIComponent(url.pathname.split('/').at(-1))
+    const session = sessions.find(item => item.id === id && (!url.searchParams.get('profile') || item.profile === url.searchParams.get('profile')))
+    return session ? json(response, 200, session) : json(response, 404, { detail: 'Not found' })
+  }
   if (url.pathname === '/api/session-unread') return json(response, 200, { items: { 'session-demo': 0 } })
   if (url.pathname === '/api/plugins/yaoyao/v1/capabilities') return json(response, 200, { protocolVersion: 2, journalEpoch: epoch, latestCursor: 0, limits: { maxAgentsPerRoom: 8, maxMessageBytes: 65536, maxMessagePageSize: 100, defaultMaxReplyRounds: 3, unlimitedReplyRoundsValue: -1, maxAgentDisplayNameLength: 100 }, eventTypes: ['message.upsert', 'agent.status'] })
   if (url.pathname === '/api/plugins/yaoyao/v1/rooms') return json(response, 200, { items: [room], nextCursor: null })

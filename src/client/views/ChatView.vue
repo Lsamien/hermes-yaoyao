@@ -17,6 +17,7 @@ import { chatInteraction, chatMessagesToUi, sessionSidebarItem } from '@/compone
 import { consumeLibraryItemForComposer } from '@/components/workspace/pendingComposer'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
+import { getSession } from '@/api/sessions'
 
 const auth = useAuthStore()
 const chat = useChatStore()
@@ -74,19 +75,45 @@ const reasoningComposerOptions = computed<ComposerOption[]>(() => reasoningOptio
 })))
 const reasoningLabel = computed(() => reasoningOptions.find(option => option.id === (chat.reasoningEffort || ''))?.label || '默认')
 
+function routeProfile(): string {
+  const value = typeof route.query.profile === 'string' ? route.query.profile : ''
+  return auth.profiles.some(profile => profile.name === value) ? value : ''
+}
+
+function sessionLocation(id: string, profile: string) {
+  return { path: `/chat/${encodeURIComponent(id)}`, query: { profile } }
+}
+
+async function findLegacySessionProfile(sessionId: string): Promise<string> {
+  for (const profile of auth.profiles) {
+    try {
+      const session = await getSession(sessionId, profile.name)
+      if (session.id === sessionId) return profile.name
+    } catch { /* Try the next profile: 9119 returns 404 for a foreign session. */ }
+  }
+  return auth.activeProfile?.name || ''
+}
+
 async function refreshSessions() {
-  const profile = auth.activeProfile?.name
+  const requestedId = typeof route.params.sessionId === 'string' ? route.params.sessionId : ''
+  const profile = routeProfile() || (requestedId ? await findLegacySessionProfile(requestedId) : auth.activeProfile?.name || '')
+  if (profile && auth.activeProfile?.name !== profile) {
+    if (requestedId) await router.replace(sessionLocation(requestedId, profile))
+    auth.selectProfile(profile)
+    return
+  }
   // The session route is the authoritative navigation target. A secondary
   // unread-count request must never prevent its history from being restored.
   await chat.loadSessions(profile)
-  const requestedId = typeof route.params.sessionId === 'string' ? route.params.sessionId : ''
   if (requestedId && chat.activeSessionId !== requestedId) await chat.selectSession(requestedId, profile)
+  if (requestedId && profile && routeProfile() !== profile) await router.replace(sessionLocation(requestedId, profile))
   void chat.loadUnread(profile).catch(() => undefined)
 }
 
 async function chooseSession(id: string) {
   const session = chat.sessions.find(item => item.id === id)
-  await router.push(`/chat/${encodeURIComponent(id)}`)
+  await router.push(sessionLocation(id, session?.profile || auth.activeProfile?.name || 'default'))
+  if (session?.profile && auth.activeProfile?.name !== session.profile) auth.selectProfile(session.profile)
   await chat.selectSession(id, session?.profile)
   await chat.markRead(id, session?.profile)
   quoted.value = null
@@ -94,7 +121,7 @@ async function chooseSession(id: string) {
 
 async function createSession() {
   const id = chat.createSession(auth.activeProfile?.name)
-  await router.push(`/chat/${encodeURIComponent(id)}`)
+  await router.push(sessionLocation(id, auth.activeProfile?.name || 'default'))
 }
 
 async function send(payload: ComposerSubmit) {
@@ -153,7 +180,7 @@ async function deleteSession() {
 
 async function branch() {
   const id = await chat.branchSession()
-  if (id) await router.push(`/chat/${encodeURIComponent(id)}`)
+  if (id) await router.push(sessionLocation(id, chat.activeProfileName || auth.activeProfile?.name || 'default'))
 }
 
 async function revealSourceMessage() {
@@ -169,7 +196,8 @@ async function revealSourceMessage() {
 }
 
 onMounted(async () => {
-  await Promise.allSettled([refreshSessions(), chat.loadModels(auth.activeProfile?.name), chat.connect()])
+  await refreshSessions()
+  await Promise.allSettled([chat.loadModels(auth.activeProfile?.name), chat.connect()])
   await revealSourceMessage()
   const pendingFile = await consumeLibraryItemForComposer()
   if (pendingFile) composer.value?.attachFiles([pendingFile])
@@ -180,13 +208,21 @@ onBeforeUnmount(() => chat.disconnect())
 watch(() => auth.activeProfile?.name, async (profile, previous) => {
   if (!profile || profile === previous) return
   chat.switchProfile(profile)
-  await router.replace('/chat')
+  const requestedId = typeof route.params.sessionId === 'string' ? route.params.sessionId : ''
+  if (requestedId && routeProfile() === profile) {
+    chat.switchProfile(profile)
+    await Promise.allSettled([chat.loadSessions(profile), chat.loadModels(profile), chat.loadUnread(profile), chat.connect()])
+    await chat.selectSession(requestedId, profile)
+    return
+  }
+  await router.replace({ path: '/chat', query: { profile } })
   await Promise.allSettled([chat.loadSessions(profile), chat.loadModels(profile), chat.loadUnread(profile), chat.connect()])
 })
 
 watch(() => chat.activeSessionId, async id => {
-  if (!id || route.params.sessionId === id) return
-  await router.replace(`/chat/${encodeURIComponent(id)}`)
+  const profile = chat.activeProfileName || auth.activeProfile?.name || ''
+  if (!id || (route.params.sessionId === id && routeProfile() === profile)) return
+  await router.replace(sessionLocation(id, profile))
 })
 </script>
 
