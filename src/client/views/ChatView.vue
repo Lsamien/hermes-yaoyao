@@ -59,6 +59,7 @@ const messages = computed(() => chatMessagesToUi(chat.messages, profile => profi
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
 const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
 const activeSession = computed(() => chat.activeSession)
+const actionSession = computed(() => chat.sessions.find(session => session.id === actionSessionId.value))
 const connected = computed(() => ['connected', 'ready'].includes(chat.connectionState))
 const interaction = computed(() => chatInteraction(chat.pendingApproval, chat.pendingClarification))
 const reference = computed<ComposerReference | null>(() => quoted.value ? { id: quoted.value.id, content: quoted.value.content, author: quoted.value.author } : null)
@@ -233,6 +234,13 @@ async function saveRename() {
   closeSessionActions()
 }
 
+async function toggleSessionPinned() {
+  const session = actionSession.value
+  if (!session) return
+  await chat.setSessionPinned(session.id, !session.pinned, session.profile)
+  closeSessionActions()
+}
+
 async function deleteSession() {
   const session = chat.sessions.find(item => item.id === actionSessionId.value)
   if (!session) return
@@ -403,6 +411,7 @@ watch(() => chat.activeSessionId, async id => {
           <div><button class="quiet-button" type="button" @click="renaming = false">取消</button><button class="solid-button" type="button" @click="saveRename">保存</button></div>
         </template>
         <template v-else>
+          <button class="action-row" role="menuitem" type="button" @click="toggleSessionPinned"><AppIcon name="pin" :size="14" />{{ actionSession?.pinned ? '取消置顶' : '置顶会话' }}</button>
           <button class="action-row" role="menuitem" type="button" @click="renaming = true"><AppIcon name="edit" :size="14" />重命名</button>
           <button class="action-row danger" role="menuitem" type="button" @click="deleteSession"><AppIcon name="trash" :size="14" />删除会话</button>
         </template>

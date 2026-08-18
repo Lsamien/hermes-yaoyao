@@ -93,6 +93,12 @@ const server = createServer(async (request, response) => {
   if (/^\/api\/sessions\/[^/]+$/.test(url.pathname)) {
     const id = decodeURIComponent(url.pathname.split('/').at(-1))
     const session = sessions.find(item => item.id === id && (!url.searchParams.get('profile') || item.profile === url.searchParams.get('profile')))
+    if (session && request.method === 'PATCH') {
+      const input = await body(request)
+      if (typeof input.pinned === 'boolean') session.pinned = input.pinned
+      if (typeof input.title === 'string' && input.title.trim()) session.title = input.title.trim()
+      return json(response, 200, { ok: true, pinned: session.pinned, title: session.title })
+    }
     return session ? json(response, 200, session) : json(response, 404, { detail: 'Not found' })
   }
   if (url.pathname === '/api/session-unread') return json(response, 200, { items: { 'session-demo': 0 } })
