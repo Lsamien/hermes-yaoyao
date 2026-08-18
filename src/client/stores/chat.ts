@@ -109,7 +109,7 @@ export const useChatStore = defineStore('chat', () => {
       const shouldResume = hasConnectedOnce
       hasConnectedOnce = true
       const active = activeRouteState.value
-      if (shouldResume && active && !active.runtimeSessionId && !reconnectResumePromise) {
+      if (shouldResume && active?.isStreaming && !active.runtimeSessionId && !reconnectResumePromise) {
         reconnectResumePromise = ensureRuntime(active)
           .catch(cause => { active.error = errorMessage(cause) })
           .finally(() => { reconnectResumePromise = undefined })
@@ -332,10 +332,10 @@ export const useChatStore = defineStore('chat', () => {
     activeSessionId.value = sessionId
     activeProfileName.value = selectedProfile
     const state = ensureRoute(selectedProfile, sessionId)
-    await Promise.allSettled([connect(), state.historySynced ? Promise.resolve() : loadHistory(state)])
-    if (connectionState.value === 'connected' || connectionState.value === 'ready') {
-      try { await ensureRuntime(state) } catch (cause) { state.error = errorMessage(cause) }
-    }
+    // Reading an old session must not rewrite the server's last_active field.
+    // The runtime is attached lazily by send/interrupt/usage, or when a known
+    // in-flight turn reconnects. REST history remains authoritative here.
+    if (!state.historySynced) await loadHistory(state)
   }
 
   async function loadOlder(): Promise<void> {
