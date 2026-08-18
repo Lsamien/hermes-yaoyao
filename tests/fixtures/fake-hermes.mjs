@@ -58,10 +58,16 @@ const groupMessage = { seq: 1, id: '44444444-4444-4444-8444-444444444444', roomI
 const groupAssistantMessage = { seq: 2, id: '55555555-5555-4555-8555-555555555555', roomId, senderKind: 'agent', senderId: agentId, senderName: '夭夭', content: '历史兼容：MEDIA:/brand/AppIcon-1024.png', status: 'completed', createdAt: now() - 100, updatedAt: now() - 100 }
 const groupMessages = [groupMessage, groupAssistantMessage]
 const room = { id: roomId, name: '设计与工程协作', cwd: '/tmp', createdAt: now() - 2000, updatedAt: now(), archived: false, agentCount: 1, maxReplyRounds: 3, lastMessage: groupAssistantMessage, unreadCount: 0 }
+const rpcRequests = []
 const previewPdf = Buffer.from('JVBERi0xLjQKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFnZXMgMiAwIFI+PgplbmRvYmoKMiAwIG9iago8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PgplbmRvYmoKMyAwIG9iago8PC9UeXBlL1BhZ2UvUGFyZW50IDIgMCBSL01lZGlhQm94WzAgMCAyMDAgMjAwXT4+CmVuZG9iagp4cmVmCjAgNAowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTAgMDAwMDAgbiAKMDAwMDAwMDA1MyAwMDAwMCBuIAowMDAwMDAwMTA1IDAwMDAwIG4gCnRyYWlsZXIKPDwvU2l6ZSA0L1Jvb3QgMSAwIFI+PgpzdGFydHhyZWYKMTY2CiUlRU9G', 'base64')
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url || '/', `http://${request.headers.host}`)
+  if (url.pathname === '/__test/rpc-requests' && request.method === 'GET') return json(response, 200, { requests: rpcRequests })
+  if (url.pathname === '/__test/rpc-requests/reset' && request.method === 'POST') {
+    rpcRequests.length = 0
+    return json(response, 200, { ok: true })
+  }
   if (url.pathname === '/api/status') return json(response, 200, { version: 'test', overall: 'ok', auth_required: true, auth_providers: ['basic'], gateway_running: true, gateway_state: 'running' })
   if (url.pathname === '/api/auth/providers') return json(response, 200, { providers: [{ name: 'basic', display_name: '账号密码', supports_password: true }] })
   if (url.pathname === '/auth/password-login' && request.method === 'POST') {
@@ -126,9 +132,10 @@ server.on('upgrade', (request, socket, head) => {
     client.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'gateway.ready', payload: { capabilities: ['safe_interrupt', 'session_reasoning_config'] } } }))
     client.on('message', raw => {
       const requestFrame = JSON.parse(raw.toString())
+      rpcRequests.push(requestFrame)
       const respond = result => client.send(JSON.stringify({ jsonrpc: '2.0', id: requestFrame.id, result }))
-      if (requestFrame.method === 'session.resume') return respond({ session_id: 'runtime-demo', stored_session_id: requestFrame.params.session_id, messages: [] })
-      if (requestFrame.method === 'session.create') return respond({ session_id: 'runtime-new', stored_session_id: 'session-new' })
+      if (requestFrame.method === 'session.resume') return respond({ session_id: 'runtime-demo', stored_session_id: requestFrame.params.session_id, fast: false, messages: [] })
+      if (requestFrame.method === 'session.create') return respond({ session_id: 'runtime-new', stored_session_id: 'session-new', fast: requestFrame.params.fast === true })
       if (requestFrame.method === 'session.usage') return respond({ context_used: 12500, context_max: 114688, total: 12500, input: 9000, output: 3500 })
       if (requestFrame.method === 'prompt.submit') {
         respond({ status: 'accepted' })

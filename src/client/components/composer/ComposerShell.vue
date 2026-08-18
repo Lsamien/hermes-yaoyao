@@ -366,7 +366,11 @@ function onDocumentPointer(event: PointerEvent) {
 }
 
 watch(text, value => { persistDraft(value); nextTick(autoSize) })
-watch(() => props.draftKey, restoreDraft)
+watch(() => props.draftKey, () => {
+  restoreDraft()
+  reasoningOpen.value = false
+  settingsOpen.value = false
+})
 
 onMounted(() => {
   restoreDraft()

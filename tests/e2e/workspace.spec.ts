@@ -97,6 +97,50 @@ test('opens a conversation even when marking it read is unsupported', async ({ p
   expect(pageErrors).toEqual([])
 })
 
+test('syncs the blue fast-mode shortcut with the iOS-compatible session config', async ({ page }) => {
+  await page.request.post('http://127.0.0.1:19119/__test/rpc-requests/reset')
+  await page.goto('/chat/session-demo')
+  const fast = page.getByRole('button', { name: '快速模式：已关闭' })
+  await expect(fast).toHaveAttribute('aria-pressed', 'false')
+  await fast.click()
+  const enabled = page.getByRole('button', { name: '快速模式：已开启' })
+  await expect(enabled).toHaveAttribute('aria-pressed', 'true')
+  await expect(enabled).toHaveCSS('color', 'rgb(22, 119, 255)')
+
+  await page.getByRole('textbox', { name: '输入消息，Enter 发送，Shift + Enter 换行' }).fill('使用快速模式')
+  await page.getByRole('button', { name: '发送消息' }).click()
+  await expect(page.getByText('这是来自假 Gateway 的流式回复。', { exact: true })).toBeVisible()
+
+  const payload = await (await page.request.get('http://127.0.0.1:19119/__test/rpc-requests')).json() as { requests: Array<{ method: string; params: Record<string, unknown> }> }
+  const fastConfigIndex = payload.requests.findIndex(request => request.method === 'config.set' && request.params.key === 'fast')
+  const promptIndex = payload.requests.findIndex(request => request.method === 'prompt.submit')
+  expect(fastConfigIndex).toBeGreaterThanOrEqual(0)
+  expect(promptIndex).toBeGreaterThan(fastConfigIndex)
+  expect(payload.requests[fastConfigIndex]?.params).toMatchObject({ key: 'fast', value: 'fast', scope: 'session' })
+
+  await enabled.click()
+  await expect(page.getByRole('button', { name: '快速模式：已关闭' })).toHaveAttribute('aria-pressed', 'false')
+  await expect.poll(async () => {
+    const next = await (await page.request.get('http://127.0.0.1:19119/__test/rpc-requests')).json() as typeof payload
+    return next.requests.filter(request => request.method === 'config.set' && request.params.key === 'fast').at(-1)?.params.value
+  }).toBe('normal')
+})
+
+test('keeps the show-thinking preference across sessions of the same Agent', async ({ page }) => {
+  await page.goto('/chat/session-demo')
+  await expect(page.locator('.turn-trace')).toHaveCount(1)
+  await page.locator('.composer-tool[aria-label="设置"]').click()
+  const setting = page.getByRole('switch', { name: /显示思考/ })
+  await expect(setting).toHaveAttribute('aria-checked', 'true')
+  await setting.click()
+  await expect(page.locator('.turn-trace')).toHaveCount(0)
+  await page.getByRole('option').filter({ hasText: '第二个会话' }).click()
+  await expect(page.locator('.turn-trace')).toHaveCount(0)
+  await page.locator('.composer-tool[aria-label="设置"]').click()
+  await page.getByRole('switch', { name: /显示思考/ }).click()
+  await expect(page.locator('.turn-trace')).toHaveCount(1)
+})
+
 test('restores a legacy session link under its owning Agent profile', async ({ page }) => {
   await page.goto('/chat/session-yaoer')
   await expect(page.getByText('瑶儿历史消息', { exact: true })).toBeVisible()
