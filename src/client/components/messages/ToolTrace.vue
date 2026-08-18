@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { UiToolCall } from './types'
 
-const props = defineProps<{ tool: UiToolCall }>()
-const open = ref(props.tool.status === 'error')
+const props = withDefaults(defineProps<{ tool: UiToolCall; expanded?: boolean }>(), { expanded: false })
+const open = ref(props.expanded || props.tool.status === 'error')
 const statusLabel = computed(() => ({ running: '运行中', success: '完成', error: '失败', pending: '等待' })[props.tool.status])
-const detail = computed(() => {
-  const value = props.tool.output ?? props.tool.input
+function detail(value: unknown): string {
+  if (value === undefined || value === null || value === '') return ''
   if (typeof value === 'string') return value
   try { return JSON.stringify(value, null, 2) } catch { return String(value ?? '') }
-})
+}
+const inputDetail = computed(() => detail(props.tool.input))
+const outputDetail = computed(() => detail(props.tool.output))
+watch(() => props.expanded, value => { if (value) open.value = true })
 </script>
 
 <template>
@@ -19,7 +22,10 @@ const detail = computed(() => {
       <strong>{{ tool.name }}</strong>
       <small v-if="tool.status === 'error'">{{ statusLabel }}</small>
     </button>
-    <pre v-if="open && detail">{{ detail }}</pre>
+    <div v-if="open && (inputDetail || outputDetail)" class="tool-trace__details">
+      <section v-if="inputDetail"><small>输入</small><pre>{{ inputDetail }}</pre></section>
+      <section v-if="outputDetail"><small>输出</small><pre>{{ outputDetail }}</pre></section>
+    </div>
   </div>
 </template>
 
@@ -30,6 +36,6 @@ const detail = computed(() => {
 .tool-trace > button strong { font: inherit; font-weight: 400; letter-spacing: .01em; }
 .tool-trace > button small { color: var(--danger); font: inherit; }
 .tool-trace__caret { display: inline-block; width: 9px; color: var(--text-muted); font-size: 13px; line-height: 1; transition: transform 120ms ease; }.tool-trace__caret.open { transform: rotate(90deg); }
-pre { max-width: min(680px, 100%); max-height: 260px; margin: 4px 0 2px 16px; padding: 8px 10px; overflow: auto; border-left: 1px dashed var(--line-strong); background: transparent; color: var(--text-secondary); font: 10px/1.55 var(--font-code); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-trace__details { margin: 4px 0 4px 16px; border-left: 1px dashed var(--line-strong); }.tool-trace__details section + section { margin-top: 7px; }.tool-trace__details small { display: block; padding: 0 9px 2px; color: var(--text-muted); font: 8px/1.4 var(--font-ui); letter-spacing: .05em; }.tool-trace__details pre { max-width: min(680px, 100%); max-height: 260px; margin: 0; padding: 4px 9px 7px; overflow: auto; background: transparent; color: var(--text-secondary); font: 10px/1.55 var(--font-code); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tool-trace--error { color: var(--danger); }
 </style>

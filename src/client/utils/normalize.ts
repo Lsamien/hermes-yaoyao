@@ -192,7 +192,7 @@ export function normalizeChatMessage(value: unknown, sessionId: string, fallback
     profile: string(source.profile, fallbackProfile) || undefined,
     role,
     content,
-    reasoning: string(pick(source, 'reasoning', 'thinking')) || undefined,
+    reasoning: string(pick(source, 'reasoning', 'thinking', 'reasoning_content', 'reasoningContent')) || undefined,
     timestamp: number(pick(source, 'timestamp', 'created_at', 'createdAt', 'updated_at', 'updatedAt'), Date.now() / 1000),
     sequence: number(pick(source, 'seq', 'sequence')) || undefined,
     stage: status === 'error' || source.error ? 'failed' : 'settled',

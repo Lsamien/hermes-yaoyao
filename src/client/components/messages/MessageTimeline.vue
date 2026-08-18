@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import InteractionCard from './InteractionCard.vue'
 import MarkdownContent from './MarkdownContent.vue'
 import ToolTrace from './ToolTrace.vue'
+import TurnTrace from './TurnTrace.vue'
 import type { UiInteraction, UiLocalFileLink, UiMessage } from './types'
+import { buildMessageTimelineRows } from '@/utils/turnTrace'
 
 const props = withDefaults(defineProps<{
   messages: UiMessage[]
@@ -57,6 +59,7 @@ const emit = defineEmits<{
 const scroller = ref<HTMLElement | null>(null)
 const pinnedToBottom = ref(true)
 const showJump = ref(false)
+const timelineRows = computed(() => buildMessageTimelineRows(props.messages))
 
 function formatTime(value?: string | number | Date) {
   if (!value) return ''
@@ -172,8 +175,11 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
           {{ loadingOlder ? '正在加载…' : '加载更早消息' }}
         </button>
 
+        <template v-for="row in timelineRows" :key="row.id">
+        <TurnTrace v-if="row.kind === 'trace'" :group="row" />
         <article
-          v-for="message in messages"
+          v-else
+          v-for="message in [row.message]"
           :key="message.id"
           :data-message-id="message.id"
           class="message"
@@ -254,6 +260,7 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
             </template>
           </div>
         </article>
+        </template>
 
         <InteractionCard
           v-if="interaction"

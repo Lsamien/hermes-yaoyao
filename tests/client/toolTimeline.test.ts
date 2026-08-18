@@ -7,7 +7,7 @@ describe('ordinary chat tool timeline', () => {
   it('folds persisted function calls and their result rows into one expandable tool', () => {
     const user = normalizeChatMessage({ id: 'user-row', role: 'user', content: 'MEDIA:/tmp/keep-raw.png', timestamp: 0 }, 'session-1', 'default')
     const call = normalizeChatMessage({
-      id: 'assistant-call', role: 'assistant', content: '', tool_calls: JSON.stringify([{
+      id: 'assistant-call', role: 'assistant', content: '', reasoning_content: '先检查目录', tool_calls: JSON.stringify([{
         id: 'call-1', type: 'function', function: { name: 'terminal', arguments: '{"command":"pwd"}' },
       }]), timestamp: 1,
     }, 'session-1', 'default')
@@ -21,6 +21,7 @@ describe('ordinary chat tool timeline', () => {
     expect(timeline).toHaveLength(2)
     expect(timeline[0]).toMatchObject({ role: 'user', content: 'MEDIA:/tmp/keep-raw.png' })
     expect(timeline[1].role).toBe('assistant')
+    expect(timeline[1].reasoning).toBe('先检查目录')
     expect(timeline[1].tools).toEqual([expect.objectContaining({
       id: 'call-1', name: 'terminal', status: 'success', input: '{"command":"pwd"}', output: { output: '/tmp/work', exit_code: 0, error: null },
     })])
