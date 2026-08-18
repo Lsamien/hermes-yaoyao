@@ -131,3 +131,30 @@ Pinned sessions are now rendered as their own “已置顶 N” section, with th
 Chat and group timelines now use the reference cool blue-gray conversation canvas. Tool calls render as compact monospace “› tool_name” traces with expandable details; user attachments lead the right-aligned message bubble as a file card, followed by the user’s text. Thinking rows use the lightweight dashed disclosure treatment, and branch sessions receive a centered “FORK 来源” separator when parent metadata is present.
 
 final result: passed
+
+## File-library layout pass
+
+- Source visual truth: user-supplied Hermes Dashboard file-library screenshots (1645 × 899), showing type tags and a dense document grid.
+- Final browser-rendered implementation: `/tmp/hermes-yaoyao-files-current.png` (1280 × 720 CSS viewport, density 1), `/files`, light theme, authenticated 9119 session.
+- Focused evidence: in-app browser DOM confirmed the left context now contains 100 historical conversations, while the main file surface contains top-level `全部 / 图片 / 视频 / 音频 / 文档 / 其他` tags, search, refresh, and file cards. The group workspace exposes only `对话` in its feature strip; `文件库` is absent.
+
+**Findings**
+
+- No actionable P0/P1/P2 differences for the requested layout. The implementation intentionally retains the wider existing session sidebar rather than the reference’s narrow icon rail, because the user explicitly asked for the original conversation list in this location.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: existing Inter/system typography and compact 9–15px hierarchy retained; tag labels and card titles remain single-line and truncate safely.
+- Spacing and layout rhythm: file filters moved from the sidebar into a 46px top tag row; the main grid begins immediately below and session history occupies the prior filter column.
+- Colors and visual tokens: existing neutral white/gray token palette, selected tag surface, borders, and focus treatment retained.
+- Image quality and asset fidelity: real file thumbnails remain native image/video previews; document cards use the existing icon system.
+- Copy and content: all labels are localized and reflect live 9119 counts/status.
+
+**Implementation checklist**
+
+- [x] Move file type filtering and search to the main file-library toolbar.
+- [x] Restore conversation history in the file-library sidebar.
+- [x] Remove file-library navigation from group chat.
+- [x] Verify tag filtering, file grid, session list, and group navigation.
+
+final result: passed
