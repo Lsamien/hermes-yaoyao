@@ -134,7 +134,7 @@ server.on('upgrade', (request, socket, head) => {
       const requestFrame = JSON.parse(raw.toString())
       rpcRequests.push(requestFrame)
       const respond = result => client.send(JSON.stringify({ jsonrpc: '2.0', id: requestFrame.id, result }))
-      if (requestFrame.method === 'session.resume') return respond({ session_id: 'runtime-demo', stored_session_id: requestFrame.params.session_id, fast: false, messages: [] })
+      if (requestFrame.method === 'session.resume') return respond({ session_id: 'runtime-demo', stored_session_id: requestFrame.params.session_id, fast: requestFrame.params.session_id === 'session-yaoer', messages: [] })
       if (requestFrame.method === 'session.create') return respond({ session_id: 'runtime-new', stored_session_id: 'session-new', fast: requestFrame.params.fast === true })
       if (requestFrame.method === 'session.usage') return respond({ context_used: 12500, context_max: 114688, total: 12500, input: 9000, output: 3500 })
       if (requestFrame.method === 'prompt.submit') {

@@ -126,6 +126,19 @@ test('syncs the blue fast-mode shortcut with the iOS-compatible session config',
   }).toBe('normal')
 })
 
+test('reconciles an iOS fast-mode selection from the resumed 9119 session', async ({ page }) => {
+  await page.request.post('http://127.0.0.1:19119/__test/rpc-requests/reset')
+  await page.goto('/chat/session-yaoer?profile=yaoer')
+  await expect(page.getByRole('button', { name: '快速模式：已关闭' })).toBeVisible()
+  await page.getByRole('textbox', { name: '输入消息，Enter 发送，Shift + Enter 换行' }).fill('读取 iOS 快速模式')
+  await page.getByRole('button', { name: '发送消息' }).click()
+  await expect(page.getByRole('button', { name: '快速模式：已开启' })).toHaveCSS('color', 'rgb(22, 119, 255)')
+
+  const payload = await (await page.request.get('http://127.0.0.1:19119/__test/rpc-requests')).json() as { requests: Array<{ method: string; params: Record<string, unknown> }> }
+  expect(payload.requests.some(request => request.method === 'session.resume' && request.params.session_id === 'session-yaoer')).toBe(true)
+  expect(payload.requests.some(request => request.method === 'config.set' && request.params.key === 'fast')).toBe(false)
+})
+
 test('keeps the show-thinking preference across sessions of the same Agent', async ({ page }) => {
   await page.goto('/chat/session-demo')
   await expect(page.locator('.turn-trace')).toHaveCount(1)
