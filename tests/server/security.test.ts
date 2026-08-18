@@ -49,6 +49,12 @@ describe('server security boundary', () => {
     expect(isExactOrigin('https://attacker.example', 'yaoyao.internal', false)).toBe(false)
   })
 
+  it('accepts a configured public Origin when the reverse proxy rewrites Host internally', () => {
+    const allowed = new Set(['yaoyao-lc.samien.cn'])
+    expect(isExactOrigin('http://yaoyao-lc.samien.cn', '10.1.5.100', false, allowed)).toBe(true)
+    expect(isExactOrigin('http://attacker.example', '10.1.5.100', false, allowed)).toBe(false)
+  })
+
   it('requires an exact scheme and host Origin', () => {
     expect(isExactOrigin('http://127.0.0.1:8800', '127.0.0.1:8800', false)).toBe(true)
     expect(isExactOrigin('https://127.0.0.1:8800', '127.0.0.1:8800', false)).toBe(true)

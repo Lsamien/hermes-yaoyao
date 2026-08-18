@@ -407,7 +407,7 @@ export function installWebSocketRelay(
     const host = request.headers.host
     const origin = typeof request.headers.origin === 'string' ? request.headers.origin : undefined
     const secure = Boolean(config.tlsCert)
-    if (!isAllowedHostHeader(host, config) || !isExactOrigin(origin, host, secure)) {
+    if (!isAllowedHostHeader(host, config) || !isExactOrigin(origin, host, secure, config.allowedHosts)) {
       rejectUpgrade(socket, 403, 'Host or Origin rejected')
       return
     }

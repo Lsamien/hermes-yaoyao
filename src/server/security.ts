@@ -54,6 +54,7 @@ export function isExactOrigin(
   origin: string | undefined,
   host: string | undefined,
   secure: boolean,
+  allowedHosts: ReadonlySet<string> = new Set(),
 ): boolean {
   if (!origin || !host) return false
   const expected = expectedRequestOrigin(host, secure)
@@ -62,7 +63,22 @@ export function isExactOrigin(
   if (actual === expected) return true
   // A TLS-terminating reverse proxy forwards HTTP internally while the
   // browser's same-origin request correctly carries an https Origin.
-  return !secure && actual === expectedRequestOrigin(host, true)
+  if (!secure && actual === expectedRequestOrigin(host, true)) return true
+  try {
+    return allowedHosts.has(new URL(actual).hostname.toLowerCase().replace(/\.$/, ''))
+  } catch {
+    return false
+  }
+}
+
+export function acceptedRequestOrigin(
+  origin: string | undefined,
+  host: string | undefined,
+  secure: boolean,
+  allowedHosts: ReadonlySet<string>,
+): string | null {
+  if (!isExactOrigin(origin, host, secure, allowedHosts)) return null
+  return canonicalOrigin(origin!)
 }
 
 export function appendSetCookies(ctx: Koa.Context, values: readonly string[]): void {

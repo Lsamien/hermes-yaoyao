@@ -8,7 +8,7 @@ import type { ServerConfig } from './config.js'
 import { isLoopbackUpstream } from './config.js'
 import { HttpError } from './errors.js'
 import { canonicalEpoch, groupCursor, type RealtimeChannel, RealtimeLeaseStore } from './leases.js'
-import { accountKeyFromCookieHeader, CsrfProtection, expectedRequestOrigin, requestAccountKey } from './security.js'
+import { acceptedRequestOrigin, accountKeyFromCookieHeader, CsrfProtection, requestAccountKey } from './security.js'
 import {
   applyUpstreamCookies,
   CookieJar,
@@ -335,7 +335,12 @@ async function issueLease(
     credential = { name: 'token', value: match[1] }
   }
 
-  const origin = expectedRequestOrigin(ctx.host, ctx.secure || Boolean(dependencies.config.tlsCert))
+  const origin = acceptedRequestOrigin(
+    ctx.get('origin'),
+    ctx.get('host'),
+    ctx.secure || Boolean(dependencies.config.tlsCert),
+    dependencies.config.allowedHosts,
+  )
   if (!origin) throw new HttpError(400, 'Invalid request host', 'invalid_host')
   const accountKeys = new Set([
     requestAccountKey(ctx.req),

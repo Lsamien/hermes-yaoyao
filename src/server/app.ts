@@ -115,7 +115,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
   app.use(async (ctx, next) => {
     if (ctx.path.startsWith('/api/app/') && isMutation(ctx.method)) {
       const secure = ctx.secure || Boolean(config.tlsCert)
-      if (!isExactOrigin(ctx.get('origin'), ctx.get('host'), secure)) {
+      if (!isExactOrigin(ctx.get('origin'), ctx.get('host'), secure, config.allowedHosts)) {
         throw new HttpError(403, 'Request Origin is not allowed', 'invalid_origin')
       }
       if (!csrf.verify(ctx.get('cookie'), ctx.get('x-csrf-token'))) {
