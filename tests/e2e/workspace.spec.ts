@@ -195,6 +195,7 @@ test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ pag
   await page.getByRole('button', { name: '会话操作' }).click()
   const sessionMenu = page.getByRole('menu', { name: '会话操作' })
   await expect(sessionMenu.getByText('取消置顶', { exact: true })).toBeVisible()
+  await expect(sessionMenu.getByRole('menuitem', { name: '取消置顶' }).locator('path')).toHaveAttribute('d', /M9 4v6l-2 4v2h10/)
   await expect(sessionMenu.getByText('重命名', { exact: true })).toBeVisible()
   await expect(sessionMenu.getByText('删除会话', { exact: true })).toBeVisible()
   await expect(page.getByText('置顶会话', { exact: true })).toHaveCount(0)

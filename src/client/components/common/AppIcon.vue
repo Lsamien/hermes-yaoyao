@@ -107,7 +107,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 18 })
     <template v-else-if="name === 'trash'"><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v5M14 11v5" /></template>
     <template v-else-if="name === 'edit'"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z" /></template>
     <template v-else-if="name === 'panel'"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M15 3v18" /></template>
-    <template v-else-if="name === 'pin'"><path d="m14 4 6 6-3 1-4 4-1 5-2-2-2-2 5-1 4-4zM4 20l5-5" /></template>
+    <template v-else-if="name === 'pin'"><path d="M9 4v6l-2 4v2h10v-2l-2-4V4M12 16v5M8 4h8" /></template>
   </svg>
 </template>
 
