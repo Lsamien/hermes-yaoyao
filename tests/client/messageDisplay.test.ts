@@ -6,14 +6,29 @@ describe('displayContentForMessage', () => {
   it('turns persisted user @file markers into attachment cards and removes marker text', () => {
     const message = normalizeChatMessage({
       id: 'user-file', role: 'user', timestamp: 1,
-      content: '刘博士的技术介绍。\n\n[用户附加文件：大模型推理优化报告.docx]\n@file:\\/Users/samien/.hermes/attachments/大模型推理优化报告.docx',
+      content: [
+        '刘博士的技术介绍。',
+        '',
+        '[用户附加文件：大模型推理优化报告.docx]',
+        '@file:\\/Users/samien/.hermes/attachments/大模型推理优化报告.docx',
+        '',
+        '[用户附加文件：MMLU_PRO_多模型协同评测系统_技术报告PPT_(1).pptx]',
+        '@file:`/Users/samien/.hermes/attachments/MMLU_PRO_多模型协同评测系统_技术报告PPT_(1).pptx`',
+      ].join('\n'),
     }, 'session-1', 'default')
     expect(message.content).toBe('刘博士的技术介绍。')
-    expect(message.attachments).toEqual([expect.objectContaining({
-      name: '大模型推理优化报告.docx',
-      path: '/Users/samien/.hermes/attachments/大模型推理优化报告.docx',
-      kind: 'file',
-    })])
+    expect(message.attachments).toEqual([
+      expect.objectContaining({
+        name: '大模型推理优化报告.docx',
+        path: '/Users/samien/.hermes/attachments/大模型推理优化报告.docx',
+        kind: 'file',
+      }),
+      expect.objectContaining({
+        name: 'MMLU_PRO_多模型协同评测系统_技术报告PPT_(1).pptx',
+        path: '/Users/samien/.hermes/attachments/MMLU_PRO_多模型协同评测系统_技术报告PPT_(1).pptx',
+        kind: 'file',
+      }),
+    ])
   })
   it('hides expanded attached context while restoring a missing reference', () => {
     const content = [

@@ -175,7 +175,7 @@ function attachmentMime(name: string): { mimeType: string; kind: ChatAttachment[
 function extractPersistedAttachments(content: string): { content: string; attachments: ChatAttachment[] } {
   const attachments: ChatAttachment[] = []
   const cleaned = content.replace(
-    /\[用户附加\s*(文件|图片|PDF)\s*：\s*([^\]\r\n]+)\]\s*(?:\r?\n)?@file:\s*((?:\\?\/)[^\r\n]+)/g,
+    /\[用户附加\s*(文件|图片|PDF)\s*：\s*([^\]\r\n]+)\]\s*(?:\r?\n)?@file:\s*(`[^`\r\n]+`|'[^'\r\n]+'|"[^"\r\n]+"|(?:\\?\/)[^\r\n]+)/g,
     (_match, _type: string, rawName: string, rawPath: string) => {
       const name = rawName.trim()
       const path = rawPath.trim().replace(/\\\//g, '/').replace(/^[`'"]|[`'"]$/g, '')
