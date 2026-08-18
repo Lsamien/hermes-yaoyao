@@ -3,9 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/common/AppIcon.vue'
 import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
-import ChoiceDialog from '@/components/common/ChoiceDialog.vue'
 import type { ChoiceOption } from '@/components/common/types'
 import ComposerShell from '@/components/composer/ComposerShell.vue'
+import ModelChoiceDialog from '@/components/composer/ModelChoiceDialog.vue'
 import type { ComposerOption, ComposerReference, ComposerSubmit } from '@/components/composer/types'
 import PreviewInspector from '@/components/library/PreviewInspector.vue'
 import PreviewModal from '@/components/library/PreviewModal.vue'
@@ -36,6 +36,7 @@ const filePreview = ref<UiLibraryItem | null>(null)
 const mediaPreviewIndex = ref<number | null>(null)
 const outlineOpen = ref(false)
 const modelDialog = ref(false)
+const modelSwitching = ref(false)
 const showThinking = ref(true)
 const queueMode = ref(false)
 const actionSessionId = ref('')
@@ -72,7 +73,6 @@ const forkSourceTitle = computed(() => {
   if (!parentId) return ''
   return chat.sessions.find(session => session.id === parentId && session.profile === activeSession.value?.profile)?.title || parentId
 })
-const modelOptions = computed<ChoiceOption[]>(() => chat.models.map(model => ({ id: `${model.provider}:${model.id}`, label: model.name || model.id, description: model.provider })))
 const selectedModelId = computed(() => chat.selectedModel ? `${chat.selectedModel.provider}:${chat.selectedModel.id}` : '')
 const reasoningOptions: ChoiceOption[] = [
   { id: '', label: '默认', description: '使用模型或 Profile 的默认强度' },
@@ -194,10 +194,20 @@ async function addMediaToComposer(media: PreviewMedia) {
 }
 
 async function selectModel(id: string) {
+  if (id === selectedModelId.value) {
+    modelDialog.value = false
+    return
+  }
   const [provider, ...rest] = id.split(':')
   const model = chat.models.find(item => item.provider === provider && item.id === rest.join(':'))
-  if (model) await chat.setModel(model)
-  modelDialog.value = false
+  if (!model || modelSwitching.value) return
+  modelSwitching.value = true
+  try {
+    await chat.setModel(model)
+    modelDialog.value = false
+  } finally {
+    modelSwitching.value = false
+  }
 }
 
 function selectReasoning(id: string) {
@@ -453,7 +463,7 @@ watch(() => chat.activeSessionId, async id => {
   <PreviewModal v-if="filePreview" :item="filePreview" :items="conversationMediaItems" @close="filePreview = null" @add-to-composer="addPreviewToComposer" @source="filePreview = null" />
   <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" @add="addMediaToComposer" />
 
-  <ChoiceDialog :open="modelDialog" title="选择模型" :options="modelOptions" :selected-id="selectedModelId" @close="modelDialog = false" @select="selectModel" />
+  <ModelChoiceDialog :open="modelDialog" :options="chat.models" :selected-id="selectedModelId" :busy="modelSwitching" @close="modelDialog = false" @select="selectModel" />
 
   <Teleport to="body">
     <Transition name="session-menu">

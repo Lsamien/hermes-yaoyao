@@ -10,6 +10,33 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole('navigation')).toBeVisible()
 })
 
+test('uses the yaoyao-webui grouped model picker without a mobile full-screen sheet', async ({ page }) => {
+  await page.goto('/chat/session-demo')
+  await page.locator('.composer-tool--model').click()
+
+  const dialog = page.getByRole('dialog', { name: '选择模型' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByPlaceholder('搜索模型名称或 ID')).toBeFocused()
+  await expect(dialog.locator('.model-dialog__group-header')).toContainText('OpenAI')
+  await expect(dialog.locator('.model-dialog__item--active')).toContainText('gpt-5.6')
+
+  const desktopBox = await dialog.boundingBox()
+  expect(desktopBox?.width).toBeGreaterThanOrEqual(450)
+  expect(desktopBox?.width).toBeLessThanOrEqual(480)
+
+  await dialog.getByPlaceholder('搜索模型名称或 ID').fill('gpt-5.5')
+  await expect(dialog.locator('.model-dialog__item')).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.locator('.composer-tool--model').click()
+  const mobileBox = await dialog.boundingBox()
+  expect(mobileBox?.x).toBeGreaterThanOrEqual(12)
+  expect(mobileBox?.width).toBeLessThanOrEqual(366)
+  expect(mobileBox?.height).toBeLessThan(820)
+})
+
 test('navigates every 9119 workspace without blank transitions', async ({ page }) => {
   const consoleErrors: string[] = []
   page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()) })
