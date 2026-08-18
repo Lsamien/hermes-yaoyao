@@ -1,4 +1,5 @@
 import type { UiMessage } from '@/components/messages/types'
+import { normalizeAssistantMediaMarkdown } from '@/utils/mediaMarkdown'
 import type { LibraryKind, UiLibraryItem } from './types'
 
 const imageExtensions = new Set(['apng', 'avif', 'bmp', 'gif', 'heic', 'heif', 'ico', 'jfif', 'jpeg', 'jpg', 'jxl', 'png', 'svg', 'tif', 'tiff', 'webp'])
@@ -32,8 +33,9 @@ export function mediaItemsFromMessages(messages: UiMessage[]): UiLibraryItem[] {
       if (!attachment.url || !['image', 'video'].includes(attachment.kind || 'file')) continue
       append(previewItemFromUrl(attachment.name, attachment.url, `${message.id}:${attachment.id}`, attachment.kind))
     }
+    const content = message.role === 'assistant' ? normalizeAssistantMediaMarkdown(message.content) : message.content
     const markdownMedia = /!\[[^\]]*\]\(([^)\s]+)\)|\[[^\]]+\]\(([^)\s]+)\)/g
-    for (let match = markdownMedia.exec(message.content); match; match = markdownMedia.exec(message.content)) {
+    for (let match = markdownMedia.exec(content); match; match = markdownMedia.exec(content)) {
       const url = match[1] || match[2]
       if (!url) continue
       const item = previewItemFromUrl(nameFromUrl(url), url, `${message.id}:${url}`)

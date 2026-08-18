@@ -6,11 +6,9 @@ import type { UiLibraryItem } from './types'
 
 const props = withDefaults(defineProps<{
   item: UiLibraryItem
-  canPrevious?: boolean
-  canNext?: boolean
   showClose?: boolean
-}>(), { canPrevious: false, canNext: false, showClose: false })
-const emit = defineEmits<{ close: []; previous: []; next: []; addToComposer: [item: UiLibraryItem]; source: [item: UiLibraryItem] }>()
+}>(), { showClose: false })
+const emit = defineEmits<{ close: []; addToComposer: [item: UiLibraryItem]; source: [item: UiLibraryItem] }>()
 
 const canInline = computed(() => !!props.item.previewUrl)
 const isTextual = computed(() => ['text', 'code'].includes(props.item.kind))
@@ -96,8 +94,6 @@ watch(() => props.item.id, loadRichPreview, { immediate: true, flush: 'post' })
     <header>
       <strong :title="item.name">{{ item.title || item.name }}</strong>
       <div class="preview-header-actions">
-        <button v-if="canPrevious" class="icon-button" type="button" aria-label="上一张媒体" title="上一张媒体" @click="emit('previous')"><AppIcon name="chevron-left" :size="16" /></button>
-        <button v-if="canNext" class="icon-button" type="button" aria-label="下一张媒体" title="下一张媒体" @click="emit('next')"><AppIcon class="preview-next-icon" name="chevron-left" :size="16" /></button>
         <button v-if="item.sourceSessionId" class="icon-button" type="button" aria-label="跳转到来源消息" title="跳转到来源消息" @click="emit('source', item)"><AppIcon name="external" :size="15" /></button>
         <a v-if="item.downloadUrl || item.previewUrl" class="icon-button" :href="item.downloadUrl || item.previewUrl" download aria-label="下载" title="下载"><AppIcon name="download" :size="16" /></a>
         <button class="icon-button" type="button" aria-label="加入输入框" title="加入输入框" @click="emit('addToComposer', item)"><AppIcon name="plus" :size="17" /></button>
@@ -122,9 +118,8 @@ watch(() => props.item.id, loadRichPreview, { immediate: true, flush: 'post' })
 
 <style scoped>
 .preview-inspector { display: flex; height: 100%; min-height: 0; flex-direction: column; overflow: hidden; }
-header { display: flex; min-height: 56px; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); } header > strong { min-width: 0; flex: 1; overflow: hidden; font-size: 12px; font-weight: 630; text-overflow: ellipsis; white-space: nowrap; }.preview-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; }.preview-header-actions .icon-button { display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; text-decoration: none; }.preview-header-actions .icon-button:hover { background: var(--surface-soft); color: var(--text-primary); }.preview-next-icon { transform: rotate(180deg); }
-.preview-next-icon { transform: rotate(180deg); }
-.preview-stage { display: grid; min-height: 0; flex: 1 1 auto; place-items: center; overflow: hidden; background: var(--surface-soft); touch-action: pan-y; }.preview-stage img, .preview-stage video { display: block; width: 100%; height: 100%; object-fit: contain; }.preview-stage audio { width: calc(100% - 34px); }.preview-stage object { width: 100%; height: 100%; border: 0; }.preview-text { width: 100%; height: 100%; box-sizing: border-box; padding: 16px; overflow: auto; background: var(--surface-raised); }.preview-text pre { margin: 0; color: var(--text-secondary); font: 10px/1.65 var(--font-code); white-space: pre-wrap; overflow-wrap: anywhere; }
+header { display: flex; min-height: 56px; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); } header > strong { min-width: 0; flex: 1; overflow: hidden; font-size: 12px; font-weight: 630; text-overflow: ellipsis; white-space: nowrap; }.preview-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; }.preview-header-actions .icon-button { display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; text-decoration: none; }.preview-header-actions .icon-button:hover { background: var(--surface-soft); color: var(--text-primary); }
+.preview-stage { display: grid; min-height: 0; flex: 1 1 auto; place-items: center; overflow: hidden; background: var(--surface-soft); touch-action: pan-y; }.preview-stage img, .preview-stage video { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: contain; }.preview-stage audio { width: calc(100% - 34px); }.preview-stage object { width: 100%; height: 100%; border: 0; }.preview-text { width: 100%; height: 100%; box-sizing: border-box; padding: 16px; overflow: auto; background: var(--surface-raised); }.preview-text pre { margin: 0; color: var(--text-secondary); font: 10px/1.65 var(--font-code); white-space: pre-wrap; overflow-wrap: anywhere; }
 .preview-office { width: 100%; height: 100%; overflow: auto; background: #e6e6e4; color: #111; }.preview-office :deep(.docx-wrapper) { padding: 18px 0; background: #e6e6e4; }.preview-office :deep(.docx) { margin-bottom: 14px; box-shadow: 0 4px 18px rgba(0,0,0,.12); }
 .preview-pdf { display: flex; width: 100%; height: 100%; box-sizing: border-box; align-items: center; flex-direction: column; gap: 12px; padding: 12px; overflow: auto; background: #dadad7; }.preview-pdf :deep(.pdf-page) { flex: 0 0 auto; overflow: hidden; background: #fff; box-shadow: 0 3px 14px rgba(0,0,0,.15); }.preview-pdf :deep(canvas) { display: block; }
 .preview-sheet { width: 100%; height: 100%; overflow: auto; background: var(--surface-raised); }.preview-sheet table { min-width: 100%; border-collapse: collapse; font-size: 9px; }.preview-sheet td { min-width: 72px; max-width: 240px; padding: 6px 8px; overflow: hidden; border: 1px solid var(--line); color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }.preview-sheet tr:first-child td { position: sticky; top: 0; background: var(--surface-soft); color: var(--text-primary); font-weight: 600; }
