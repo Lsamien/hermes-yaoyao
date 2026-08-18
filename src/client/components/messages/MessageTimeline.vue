@@ -181,7 +181,7 @@ function deliveryLabel(status?: UiMessage['status']): string {
 
 function formatThinkingElapsed(value: number): string {
   const seconds = Math.max(0, Math.floor(value / 1000))
-  return `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`
+  return `${seconds} 秒`
 }
 
 watch(() => props.messages.length, async () => {
@@ -353,7 +353,6 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
         </template>
 
         <div v-if="showThinkingIndicator" class="thinking-indicator" role="status" aria-live="polite" aria-label="正在思考">
-          <span class="thinking-indicator__icon"><AppIcon name="brain" :size="15" /><i /><i /><i /></span>
           <span><strong>正在思考</strong><small>{{ formatThinkingElapsed(thinkingElapsedMs) }}</small></span>
         </div>
 
@@ -395,8 +394,8 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
 .dark .message--user .message__body { background: #2d323a; }
 .message--user .message__meta { display: none; }
 .message__delivery { display: flex; min-height: 18px; align-items: center; justify-content: flex-end; gap: 4px; margin: 5px 1px -4px; color: var(--text-muted); font-size: 9px; }.message__delivery--accepted { color: var(--success); }.message__delivery--failed, .message__delivery--unknown-receipt { color: var(--danger); }
-.thinking-indicator { display: flex; min-height: 42px; align-items: center; gap: 10px; margin: 5px 0 20px; color: var(--text-muted); }.thinking-indicator__icon { display: flex; width: 30px; height: 30px; align-items: center; justify-content: center; gap: 2px; border-radius: 10px; background: var(--surface-soft); animation: thinking-breathe 1.8s ease-in-out infinite; }.thinking-indicator__icon i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; animation: thinking-dot 1.2s ease-in-out infinite; }.thinking-indicator__icon i:nth-of-type(2) { animation-delay: .16s; }.thinking-indicator__icon i:nth-of-type(3) { animation-delay: .32s; }.thinking-indicator > span:last-child { display: flex; flex-direction: column; gap: 2px; }.thinking-indicator strong { color: var(--text-secondary); font-size: 11px; font-weight: 600; background: linear-gradient(90deg, var(--text-muted), var(--text-primary), var(--text-muted)); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: thinking-shimmer 2.2s linear infinite; }.thinking-indicator small { font-size: 9px; font-variant-numeric: tabular-nums; }
-@keyframes thinking-breathe { 50% { opacity: .58; transform: scale(.94); } } @keyframes thinking-dot { 0%, 70%, 100% { opacity: .25; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-2px); } } @keyframes thinking-shimmer { to { background-position: -200% 0; } }
+.thinking-indicator { display: flex; min-height: 34px; align-items: center; margin: 5px 0 20px; color: var(--text-muted); }.thinking-indicator > span { display: inline-flex; align-items: baseline; gap: 7px; }.thinking-indicator strong { color: var(--text-secondary); font-size: 11px; font-weight: 600; background: linear-gradient(90deg, var(--text-muted), var(--text-primary), var(--text-muted)); background-size: 200% 100%; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: thinking-shimmer 2.2s linear infinite; }.thinking-indicator small { font-size: 9px; font-variant-numeric: tabular-nums; }
+@keyframes thinking-shimmer { to { background-position: -200% 0; } }
 .message--system { justify-content: center; }.message--system .message__avatar, .message--system .message__meta { display: none; }.message--system .message__body { max-width: 82%; padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--text-muted); text-align: center; }
 .delegation-event { min-width: 230px; max-width: 460px; text-align: left; }.delegation-event summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }.delegation-event summary::-webkit-details-marker { display: none; }.delegation-event summary > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.delegation-event strong { color: var(--text-secondary); font-size: 11px; font-weight: 650; }.delegation-event small { color: var(--text-muted); font-size: 9px; }.delegation-event :deep(.markdown) { max-height: 260px; margin-top: 9px; overflow: auto; color: var(--text-secondary); font-size: 10px; }
 .system-event { max-width: 460px; text-align: left; }.system-event summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; color: var(--text-muted); font-size: 10px; }.system-event summary::-webkit-details-marker { display: none; }.system-event :deep(.markdown) { max-height: 220px; margin-top: 8px; overflow: auto; color: var(--text-secondary); font-size: 10px; }
@@ -426,5 +425,5 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
   .message-stack { padding: 18px 14px 30px; }.message { margin-bottom: 18px; }.message__body { max-width: calc(100% - 37px); }.message--user .message__body { max-width: 88%; }.message__content :deep(.markdown) { font-size: 13px; }
   .message__actions { opacity: .65; }.message__meta time { display: none; }
 }
-@media (prefers-reduced-motion: reduce) { .thinking-indicator__icon, .thinking-indicator__icon i, .thinking-indicator strong { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .thinking-indicator strong { animation: none; } }
 </style>
