@@ -165,6 +165,31 @@ async function proxy(
   })
 }
 
+async function proxyOptionalUnread(
+  ctx: Koa.Context,
+  upstream: UpstreamClient,
+  path: string,
+  options: {
+    search?: URLSearchParams
+    method?: string
+    requestBody?: unknown
+  },
+  fallback: unknown,
+): Promise<void> {
+  await withJar(ctx, async (jar) => {
+    const response = await upstream.request(path, jar, {
+      method: options.method,
+      search: options.search,
+      body: options.requestBody,
+    })
+    if (response.status === 404) {
+      json(ctx, 200, fallback)
+      return
+    }
+    sendUpstreamResponse(ctx, response, jar)
+  })
+}
+
 async function bootstrap(
   ctx: Koa.Context,
   dependencies: RouteDependencies,
@@ -492,17 +517,28 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     await searchSessions(ctx, dependencies)
   })
   router.get('/api/app/sessions/unread', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, '/api/session-unread', {
-      search: searchFrom(ctx, ['profile']),
-    })
+    const search = searchFrom(ctx, ['profile'])
+    await proxyOptionalUnread(
+      ctx,
+      dependencies.upstream,
+      '/api/session-unread',
+      { search },
+      { profile: search.get('profile') || '', total_unread: 0, sessions: [], supported: false },
+    )
   })
   router.patch('/api/app/sessions/unread/:sessionID', async (ctx) => {
     const id = safeIdentifier(ctx.params.sessionID, 'session ID')
-    await proxy(ctx, dependencies.upstream, `/api/session-unread/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      search: searchFrom(ctx, ['profile']),
-      requestBody: body(ctx),
-    })
+    await proxyOptionalUnread(
+      ctx,
+      dependencies.upstream,
+      `/api/session-unread/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        search: searchFrom(ctx, ['profile']),
+        requestBody: body(ctx),
+      },
+      { ok: true, supported: false },
+    )
   })
   router.get('/api/app/sessions', async (ctx) => {
     const search = searchFrom(ctx, ['limit', 'offset', 'order', 'archived', 'profile', 'source'])

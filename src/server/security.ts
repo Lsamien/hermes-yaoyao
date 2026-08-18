@@ -3,7 +3,7 @@ import type { IncomingMessage } from 'node:http'
 import type Koa from 'koa'
 import { parse, serialize } from 'cookie'
 import type { ServerConfig } from './config.js'
-import { isPrivateHost } from './config.js'
+import { isLoopbackHost, isPrivateHost } from './config.js'
 
 export const CSRF_COOKIE = 'hermes_yaoyao_csrf'
 
@@ -161,7 +161,10 @@ export function applySecurityHeaders(ctx: Koa.Context, tls: boolean): void {
     "media-src 'self' blob:",
     `connect-src 'self' ${socketOrigin}`,
   ].join('; '))
-  ctx.set('Cross-Origin-Opener-Policy', 'same-origin')
+  const requestHostname = splitHostPort(ctx.host)?.hostname ?? ''
+  if (tls || isLoopbackHost(requestHostname)) {
+    ctx.set('Cross-Origin-Opener-Policy', 'same-origin')
+  }
   ctx.set('Referrer-Policy', 'no-referrer')
   ctx.set('X-Content-Type-Options', 'nosniff')
   ctx.set('X-Frame-Options', 'DENY')

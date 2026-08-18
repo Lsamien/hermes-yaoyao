@@ -140,6 +140,62 @@ describe('8800 BFF', () => {
     expect(response.headers['content-security-policy']).toContain("default-src 'self'")
   })
 
+  it('omits opener isolation on plaintext LAN origins but keeps it on loopback', async () => {
+    const runtime = createApplication({ config: makeConfig(), fetchImpl: fakeGateway([]) })
+    runtimes.push(runtime)
+    const lan = await request(runtime.app.callback())
+      .get('/healthz')
+      .set('Host', '192.168.153.155:8800')
+      .expect(200)
+    expect(lan.headers['cross-origin-opener-policy']).toBeUndefined()
+
+    const loopback = await request(runtime.app.callback())
+      .get('/healthz')
+      .set('Host', '127.0.0.1:8800')
+      .expect(200)
+    expect(loopback.headers['cross-origin-opener-policy']).toBe('same-origin')
+  })
+
+  it('degrades unsupported Gateway unread endpoints without browser 404 responses', async () => {
+    const records: RecordedRequest[] = []
+    const baseGateway = fakeGateway(records)
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      if (url.pathname.startsWith('/api/session-unread')) {
+        records.push({
+          path: url.pathname,
+          method: init?.method ?? 'GET',
+          search: url.searchParams,
+          headers: new Headers(init?.headers),
+        })
+        return jsonResponse({ detail: 'Not Found' }, { status: 404 })
+      }
+      return baseGateway(input, init)
+    }) as typeof fetch
+    const runtime = createApplication({ config: makeConfig(), fetchImpl })
+    runtimes.push(runtime)
+
+    const unread = await request(runtime.app.callback())
+      .get('/api/app/sessions/unread?profile=yaoer')
+      .set('Host', '127.0.0.1:8800')
+      .expect(200)
+    expect(unread.body).toEqual({ profile: 'yaoer', total_unread: 0, sessions: [], supported: false })
+
+    const bootstrap = await request(runtime.app.callback())
+      .get('/api/app/bootstrap')
+      .set('Host', '127.0.0.1:8800')
+      .expect(200)
+    const marked = await request(runtime.app.callback())
+      .patch('/api/app/sessions/unread/session-1?profile=yaoer')
+      .set('Host', '127.0.0.1:8800')
+      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Cookie', cookieHeader(bootstrap))
+      .set('X-CSRF-Token', bootstrap.body.csrfToken)
+      .send({ readMessageCount: 12 })
+      .expect(200)
+    expect(marked.body).toEqual({ ok: true, supported: false })
+  })
+
   it('requires exact Origin and CSRF on login, then sequences the Gateway login', async () => {
     const records: RecordedRequest[] = []
     const runtime = createApplication({ config: makeConfig(), fetchImpl: fakeGateway(records) })
