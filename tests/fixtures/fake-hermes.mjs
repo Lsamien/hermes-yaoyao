@@ -50,6 +50,7 @@ const messages = [
   { id: 'message-image-second', role: 'assistant', content: '第二张：![夭夭 Logo 2](/brand/AppIcon-1024.png?variant=2)', timestamp: now() - 155 },
   { id: 'message-legacy-media', role: 'assistant', content: '历史兼容：MEDIA:/brand/AppIcon-1024.png', timestamp: now() - 150 },
   { id: 'message-local-link', role: 'assistant', content: '[方案草稿.md](/Users/samien/Agents/方案草稿.md)', timestamp: now() - 145 },
+  { id: 'message-compaction', role: 'user', content: '[CONTEXT COMPACTION — REFERENCE ONLY]\n\n## Historical Task Snapshot\n\n- 已完成普通聊天验收\n- 保留当前会话上下文', timestamp: now() - 143 },
   { id: 'message-delegation', role: 'user', content: '[ASYNC DELEGATION BATCH COMPLETE]\n后台子任务已经完成。', display_kind: 'async_delegation_complete', display_metadata: { task_count: 2, completed_count: 2, failed_count: 0, duration_seconds: 71 }, timestamp: now() - 140 },
   { id: 'message-system', role: 'user', content: '[System: The active model for this chat has changed to gpt-5.6-terra via provider openai.]', timestamp: now() - 130 },
 ]

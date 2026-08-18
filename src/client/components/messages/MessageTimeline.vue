@@ -83,6 +83,11 @@ function systemSummary(content: string): string {
   return '系统信息'
 }
 
+function isCompactionEvent(message: UiMessage): boolean {
+  return message.timelineMetadata?.eventKind === 'compaction'
+    || message.content.trim().toLocaleLowerCase().startsWith('[context compaction')
+}
+
 function onScroll() {
   const el = scroller.value
   if (!el) return
@@ -195,6 +200,12 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
             <template v-if="message.timelineKind === 'delegation-complete'">
               <details class="delegation-event">
                 <summary><AppIcon name="groups" :size="14" /><span><strong>子任务已完成</strong><small>{{ delegationSummary(message.timelineMetadata) }}</small></span></summary>
+                <MarkdownContent v-if="message.content" :content="message.content" />
+              </details>
+            </template>
+            <template v-else-if="message.timelineKind === 'system' && isCompactionEvent(message)">
+              <details class="delegation-event compaction-event">
+                <summary><AppIcon name="archive" :size="14" /><span><strong>上下文已压缩</strong><small>压缩摘要已归档 · 点击查看</small></span></summary>
                 <MarkdownContent v-if="message.content" :content="message.content" />
               </details>
             </template>

@@ -83,8 +83,15 @@ function timelineMetadata(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 }
 
+const CONTEXT_COMPACTION_PREFIX = '[context compaction'
+
+function isContextCompactionMessage(message: ChatMessage): boolean {
+  return message.content.trim().toLocaleLowerCase().startsWith(CONTEXT_COMPACTION_PREFIX)
+    || message.displayKind?.toLocaleLowerCase().includes('compaction') === true
+}
+
 function isSystemTimelineMessage(message: ChatMessage): boolean {
-  return Boolean(message.displayKind) || /^\[system:/i.test(message.content.trim())
+  return Boolean(message.displayKind) || /^\[system:/i.test(message.content.trim()) || isContextCompactionMessage(message)
 }
 
 export function chatMessageToUi(message: ChatMessage, agentNameFor?: (profile?: string) => string | undefined): UiMessage {
@@ -143,7 +150,10 @@ export function chatMessagesToUi(messages: ChatMessage[], agentNameFor?: (profil
     if (isSystemTimelineMessage(message)) {
       ui.role = 'system'
       ui.timelineKind = message.displayKind === 'async_delegation_complete' ? 'delegation-complete' : 'system'
-      ui.timelineMetadata = timelineMetadata(message.displayMetadata)
+      ui.timelineMetadata = {
+        ...(timelineMetadata(message.displayMetadata) ?? {}),
+        eventKind: isContextCompactionMessage(message) ? 'compaction' : message.displayKind,
+      }
     }
     result.push(ui)
     if (message.role === 'assistant') {

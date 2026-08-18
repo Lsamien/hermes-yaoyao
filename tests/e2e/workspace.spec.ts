@@ -206,8 +206,21 @@ test('folds tool result rows into their expandable tool call', async ({ page }) 
 test('renders subtask completion as a collapsed timeline event', async ({ page }) => {
   await page.goto('/chat/session-demo')
   await expect(page.getByText('子任务已完成', { exact: true })).toBeVisible()
-  await expect(page.locator('.delegation-event')).toContainText('2 个子任务 · 2 已完成')
-  await expect(page.locator('.delegation-event')).not.toHaveAttribute('open', '')
+  const delegation = page.locator('.delegation-event').filter({ hasText: '子任务已完成' })
+  await expect(delegation).toContainText('2 个子任务 · 2 已完成')
+  await expect(delegation).not.toHaveAttribute('open', '')
+})
+
+test('renders context compaction as a collapsed timeline event', async ({ page }) => {
+  await page.goto('/chat/session-demo')
+  const compaction = page.locator('[data-message-id="message-compaction"] .compaction-event')
+  await expect(compaction).toContainText('上下文已压缩')
+  await expect(compaction).toContainText('压缩摘要已归档 · 点击查看')
+  await expect(compaction).not.toHaveAttribute('open', '')
+  await expect(compaction.getByText('Historical Task Snapshot', { exact: true })).toBeHidden()
+  await compaction.locator('summary').click()
+  await expect(compaction.getByText('Historical Task Snapshot', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-message-id="message-compaction"]')).toHaveClass(/message--system/)
 })
 
 test('renders model changes as a collapsed system event', async ({ page }) => {

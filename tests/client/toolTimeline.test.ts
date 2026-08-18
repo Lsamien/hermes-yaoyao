@@ -41,6 +41,16 @@ describe('ordinary chat tool timeline', () => {
     })
   })
 
+  it('classifies a persisted context compaction envelope as a system timeline event', () => {
+    const compacted = normalizeChatMessage({
+      id: 'compacted', role: 'user', content: '[CONTEXT COMPACTION — REFERENCE ONLY]\n\n## Historical Task Snapshot', timestamp: 1,
+    }, 'session-1', 'default')
+    const [timeline] = chatMessagesToUi([compacted])
+    expect(timeline).toMatchObject({
+      id: 'compacted', role: 'system', timelineKind: 'system', timelineMetadata: { eventKind: 'compaction' },
+    })
+  })
+
   it('groups one turn of reasoning and tools before its visible assistant reply', () => {
     const rows = buildMessageTimelineRows([
       { id: 'user', role: 'user', content: '检查一下' },
