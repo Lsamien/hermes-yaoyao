@@ -111,7 +111,10 @@ test('opens a local message file link as a floating preview card', async ({ page
   const card = page.getByRole('link', { name: '预览文件 方案草稿.md' })
   await expect(card).toHaveClass(/file-link-card/)
   await card.click()
-  await expect(page.getByRole('dialog', { name: '预览 方案草稿.md' })).toBeVisible()
+  const dialog = page.getByRole('dialog', { name: '预览 方案草稿.md' })
+  await expect(dialog).toBeVisible()
+  const stageHeight = await dialog.locator('.preview-stage').evaluate(stage => stage.getBoundingClientRect().height)
+  expect(stageHeight).toBeGreaterThan(500)
 })
 
 test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ page }) => {
