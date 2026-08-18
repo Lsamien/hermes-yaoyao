@@ -27,6 +27,10 @@ function iconFor(item: UiLibraryItem) {
   return item.kind
 }
 
+function kindLabel(item: UiLibraryItem) {
+  return ({ image: '图片', video: '视频', audio: '音频', pdf: '文档', document: '文档', code: '文档', text: '文档', link: '网页', file: '其他' } as const)[item.kind]
+}
+
 function formatSize(size?: number) {
   if (size === undefined) return ''
   if (size < 1024) return `${size} B`
@@ -60,7 +64,7 @@ function formatDate(value?: string | number | Date) {
         <div class="library-thumb" :class="`library-thumb--${item.kind}`">
           <img v-if="item.kind === 'image' && item.previewUrl" :src="item.previewUrl" :alt="item.name" loading="lazy" />
           <video v-else-if="item.kind === 'video' && item.previewUrl" :src="item.previewUrl" muted preload="metadata" />
-          <span v-else><AppIcon :name="iconFor(item)" :size="36" /><em>{{ item.name.split('.').at(-1)?.slice(0, 5).toUpperCase() }} · {{ item.kind }}</em></span>
+          <span v-else><AppIcon :name="iconFor(item)" :size="36" /><em>{{ item.name.split('.').at(-1)?.slice(0, 5).toUpperCase() }} · {{ kindLabel(item) }}</em></span>
           <div class="library-thumb__actions">
             <button type="button" title="加入输入框" aria-label="加入输入框" @click.stop="emit('addToComposer', item)"><AppIcon name="plus" :size="14" /></button>
             <button v-if="item.sourceSessionId" type="button" title="查看来源" aria-label="查看来源" @click.stop="emit('source', item)"><AppIcon name="external" :size="14" /></button>

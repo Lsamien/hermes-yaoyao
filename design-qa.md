@@ -132,6 +132,16 @@ Chat and group timelines now use the reference cool blue-gray conversation canva
 
 final result: passed
 
+## File-card scale pass
+
+- Source visual truth: current `yaoyao-webui` file-library implementation and user screenshot, using 220px minimum cards, 154px previews, 36px type icons, 13px titles, and 11px metadata.
+- Browser-rendered implementation: `/tmp/hermes-yaoyao-files-large-cards.png`, `/files`, 1280 × 720 CSS viewport, light theme.
+- Measured focused evidence: first live card width `224.5px`, preview height `154px`, title `13px`, metadata `11px`.
+- Typography, spacing, neutral colors, file-type icon scale, Chinese type labels, and real image/video thumbnail behavior now follow the reference proportions. The wider conversation sidebar remains an intentional product difference requested by the user.
+- No actionable P0/P1/P2 findings.
+
+final result: passed
+
 ## File-library layout pass
 
 - Source visual truth: user-supplied Hermes Dashboard file-library screenshots (1645 × 899), showing type tags and a dense document grid.
