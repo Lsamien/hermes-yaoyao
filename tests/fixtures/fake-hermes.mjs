@@ -45,7 +45,7 @@ const messages = [
   { id: 'message-thinking-tool', role: 'assistant', content: '', reasoning_content: '先检索文件，再归纳结果。', tool_calls: [{ id: 'tool-thinking', type: 'function', function: { name: 'file_search', arguments: '{"query":"产物"}' } }], timestamp: now() - 177 },
   { id: 'message-tool-call', role: 'assistant', content: '', tool_calls: [{ id: 'tool-1', type: 'function', function: { name: 'file_search', arguments: '{"query":"产物"}' } }], timestamp: now() - 176 },
   { id: 'message-tool', role: 'tool', tool_name: 'file_search', tool_call_id: 'tool-1', summary: '扫描产物目录', result: { path: '/tmp/demo-report.pdf', count: 1 }, timestamp: now() - 175 },
-  { id: 'message-assistant', role: 'assistant', content: '已整理完成。下面是 **验收摘要**：\n\n- 普通聊天已连接\n- 群聊 v2 已就绪\n- [打开报告](https://example.com/report)', reasoning_content: '先核对会话与文件索引。', timestamp: now() - 170 },
+  { id: 'message-assistant', role: 'assistant', content: '已整理完成。下面是 **验收摘要**：\n\n## 验收摘要\n\n- 普通聊天已连接\n- 群聊 v2 已就绪\n- [打开报告](https://example.com/report)', reasoning_content: '先核对会话与文件索引。', timestamp: now() - 170 },
   { id: 'message-image', role: 'assistant', content: '预览图：![夭夭 Logo](/brand/AppIcon-1024.png)', timestamp: now() - 160 },
   { id: 'message-image-second', role: 'assistant', content: '第二张：![夭夭 Logo 2](/brand/AppIcon-1024.png?variant=2)', timestamp: now() - 155 },
   { id: 'message-legacy-media', role: 'assistant', content: '历史兼容：MEDIA:/brand/AppIcon-1024.png', timestamp: now() - 150 },
