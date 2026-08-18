@@ -14,6 +14,7 @@ import type { PreviewMedia } from '@/components/library/ImagePreviewLightbox.vue
 import type { UiLibraryItem } from '@/components/library/types'
 import { mediaItemsFromMessages, mediaUrlIdentity, previewItemFromUrl } from '@/components/library/mediaSequence'
 import MessageTimeline from '@/components/messages/MessageTimeline.vue'
+import SessionOutline from '@/components/messages/SessionOutline.vue'
 import type { UiMessage } from '@/components/messages/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
@@ -32,6 +33,7 @@ const quoted = ref<UiMessage | null>(null)
 const preview = ref<UiLibraryItem | null>(null)
 const filePreview = ref<UiLibraryItem | null>(null)
 const mediaPreviewIndex = ref<number | null>(null)
+const outlineOpen = ref(false)
 const modelDialog = ref(false)
 const showTools = ref(true)
 const queueMode = ref(false)
@@ -41,6 +43,7 @@ const renameValue = ref('')
 const actionMenuPosition = ref({ x: 8, y: 8 })
 const composer = ref<InstanceType<typeof ComposerShell> | null>(null)
 const timeline = ref<InstanceType<typeof MessageTimeline> | null>(null)
+const headerSessionMenuButton = ref<HTMLButtonElement | null>(null)
 const restoringRouteProfile = ref('')
 
 const sessions = computed(() => [...chat.sessions]
@@ -129,6 +132,8 @@ async function refreshSessions() {
 }
 
 async function chooseSession(id: string) {
+  outlineOpen.value = false
+  preview.value = null
   const session = chat.sessions.find(item => item.id === id)
   const profile = session?.profile || auth.activeProfile?.name || 'default'
   await router.push(sessionLocation(id, profile))
@@ -140,6 +145,8 @@ async function chooseSession(id: string) {
 }
 
 async function createSession() {
+  outlineOpen.value = false
+  preview.value = null
   const id = chat.createSession(auth.activeProfile?.name)
   await router.push(sessionLocation(id, auth.activeProfile?.name || 'default'))
 }
@@ -155,7 +162,7 @@ function openAttachment(attachment: NonNullable<UiMessage['attachments']>[number
   const item = previewItemFromUrl(attachment.name, attachment.url || '', attachment.id, attachment.kind)
   item.size = attachment.size
   if (item.kind === 'image' || item.kind === 'video') openMedia(item)
-  else preview.value = item
+  else { outlineOpen.value = false; preview.value = item }
 }
 
 function openMedia(item: UiLibraryItem) {
@@ -167,7 +174,7 @@ function openMedia(item: UiLibraryItem) {
 function openLocalFile({ name, url }: { name: string; url: string }) {
   const item = previewItemFromUrl(name, url)
   if (item.kind === 'image' || item.kind === 'video') openMedia(item)
-  else filePreview.value = item
+  else { outlineOpen.value = false; filePreview.value = item }
 }
 
 async function addPreviewToComposer(item: UiLibraryItem) {
@@ -241,6 +248,27 @@ async function toggleSessionPinned() {
   closeSessionActions()
 }
 
+async function openSessionOutline() {
+  const session = actionSession.value
+  if (!session) return
+  closeSessionActions()
+  if (session.id !== chat.activeSessionId || session.profile !== chat.activeProfileName) await chooseSession(session.id)
+  preview.value = null
+  outlineOpen.value = true
+}
+
+function closeInspector() {
+  const restoreMenuFocus = outlineOpen.value
+  preview.value = null
+  outlineOpen.value = false
+  if (restoreMenuFocus) void nextTick(() => headerSessionMenuButton.value?.focus())
+}
+
+function navigateOutline(target: { messageId: string; anchorId: string }) {
+  timeline.value?.scrollToAnchor(target.messageId, target.anchorId)
+  if (window.matchMedia('(max-width: 900px)').matches) closeInspector()
+}
+
 async function deleteSession() {
   const session = chat.sessions.find(item => item.id === actionSessionId.value)
   if (!session) return
@@ -284,6 +312,8 @@ onBeforeUnmount(() => {
 
 watch(() => auth.activeProfile?.name, async (profile, previous) => {
   if (!profile || profile === previous) return
+  outlineOpen.value = false
+  preview.value = null
   if (restoringRouteProfile.value === profile) {
     restoringRouteProfile.value = ''
     return
@@ -307,7 +337,7 @@ watch(() => chat.activeSessionId, async id => {
 </script>
 
 <template>
-  <WorkspaceView sidebar-title="对话" :sidebar-subtitle="`${sessions.length} 个会话`" :inspector-open="!!preview" @close-inspector="preview = null">
+  <WorkspaceView sidebar-title="对话" :sidebar-subtitle="`${sessions.length} 个会话`" :inspector-open="!!preview || outlineOpen" :inspector-close-label="outlineOpen ? '关闭会话大纲' : '关闭预览'" @close-inspector="closeInspector">
     <template #sidebar-action>
       <button class="sidebar-primary-action" type="button" title="新建聊天" aria-label="新建聊天" @click="createSession">
         <YaoYaoSidebarIcon name="add" />
@@ -360,7 +390,7 @@ watch(() => chat.activeSessionId, async id => {
         @clarify="interaction && chat.respondToClarification(interaction.id, $event)"
       >
         <template #header-actions>
-          <button v-if="activeSession" class="icon-button header-session-menu" type="button" title="会话操作" aria-label="会话操作" @click="openSessionActions(activeSession.id, $event)"><AppIcon name="dots" :size="18" /></button>
+          <button v-if="activeSession" ref="headerSessionMenuButton" class="icon-button header-session-menu" type="button" title="会话操作" aria-label="会话操作" @click="openSessionActions(activeSession.id, $event)"><AppIcon name="dots" :size="18" /></button>
         </template>
       </MessageTimeline>
       <p v-if="chat.error" class="chat-error" role="alert"><AppIcon name="alert" :size="13" />{{ chat.error }}</p>
@@ -395,7 +425,10 @@ watch(() => chat.activeSessionId, async id => {
       />
     </div>
 
-    <template #inspector><PreviewInspector v-if="preview" :item="preview" @close="preview = null" @add-to-composer="addPreviewToComposer" /></template>
+    <template #inspector>
+      <SessionOutline v-if="outlineOpen" :messages="messages" :has-older="chat.hasMoreBefore" @navigate="navigateOutline" />
+      <PreviewInspector v-else-if="preview" :item="preview" @close="preview = null" @add-to-composer="addPreviewToComposer" />
+    </template>
   </WorkspaceView>
 
   <PreviewModal v-if="filePreview" :item="filePreview" :items="conversationMediaItems" @close="filePreview = null" @add-to-composer="addPreviewToComposer" @source="filePreview = null" />
@@ -411,6 +444,7 @@ watch(() => chat.activeSessionId, async id => {
           <div><button class="quiet-button" type="button" @click="renaming = false">取消</button><button class="solid-button" type="button" @click="saveRename">保存</button></div>
         </template>
         <template v-else>
+          <button class="action-row" role="menuitem" type="button" @click="openSessionOutline"><AppIcon name="menu" :size="14" />会话大纲</button>
           <button class="action-row" role="menuitem" type="button" @click="toggleSessionPinned"><AppIcon :name="actionSession?.pinned ? 'pin-off' : 'pin'" :size="14" />{{ actionSession?.pinned ? '取消置顶' : '置顶会话' }}</button>
           <button class="action-row" role="menuitem" type="button" @click="renaming = true"><AppIcon name="edit" :size="14" />重命名</button>
           <button class="action-row danger" role="menuitem" type="button" @click="deleteSession"><AppIcon name="trash" :size="14" />删除会话</button>

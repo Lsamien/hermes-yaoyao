@@ -25,6 +25,7 @@ const props = withDefaults(defineProps<{
   sidebarTitle?: string
   sidebarSubtitle?: string
   inspectorOpen?: boolean
+  inspectorCloseLabel?: string
 }>(), {
   userName: '',
   profileName: '',
@@ -34,6 +35,7 @@ const props = withDefaults(defineProps<{
   sidebarTitle: '',
   sidebarSubtitle: '',
   inspectorOpen: false,
+  inspectorCloseLabel: '关闭预览',
 })
 
 const emit = defineEmits<{
@@ -384,7 +386,7 @@ onBeforeUnmount(() => {
     <Transition name="inspector-slide">
       <aside v-if="inspectorOpen" class="workspace-inspector">
         <div class="workspace-inspector__close">
-          <button class="icon-button" type="button" aria-label="关闭预览" @click="emit('closeInspector')">
+          <button class="icon-button" type="button" :aria-label="inspectorCloseLabel" :title="inspectorCloseLabel" @click="emit('closeInspector')">
             <AppIcon name="close" />
           </button>
         </div>

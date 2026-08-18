@@ -8,7 +8,8 @@ withDefaults(defineProps<{
   sidebarTitle: string
   sidebarSubtitle?: string
   inspectorOpen?: boolean
-}>(), { sidebarSubtitle: '', inspectorOpen: false })
+  inspectorCloseLabel?: string
+}>(), { sidebarSubtitle: '', inspectorOpen: false, inspectorCloseLabel: '关闭预览' })
 
 const emit = defineEmits<{ closeInspector: [] }>()
 const auth = useAuthStore()
@@ -33,6 +34,7 @@ function selectProfile(label: string) { auth.selectProfile(profileNameMap.value.
     :sidebar-title="sidebarTitle"
     :sidebar-subtitle="sidebarSubtitle"
     :inspector-open="inspectorOpen"
+    :inspector-close-label="inspectorCloseLabel"
     @logout="logout"
     @toggle-theme="theme.toggle"
     @select-profile="selectProfile"
