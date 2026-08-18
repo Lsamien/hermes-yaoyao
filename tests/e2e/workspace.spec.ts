@@ -191,9 +191,29 @@ test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ pag
   await expect(page.locator('.message--user .message__meta')).toHaveCSS('display', 'none')
   await expect(page.getByRole('button', { name: '会话操作' })).toBeVisible()
   await page.getByRole('button', { name: '会话操作' }).click()
-  await expect(page.getByText('重命名', { exact: true })).toBeVisible()
-  await expect(page.getByText('删除会话', { exact: true })).toBeVisible()
+  const sessionMenu = page.getByRole('menu', { name: '会话操作' })
+  await expect(sessionMenu.getByText('重命名', { exact: true })).toBeVisible()
+  await expect(sessionMenu.getByText('删除会话', { exact: true })).toBeVisible()
   await expect(page.getByText('置顶会话', { exact: true })).toHaveCount(0)
+  const menuBox = await sessionMenu.evaluate(element => element.getBoundingClientRect().toJSON())
+  expect(menuBox.width).toBeLessThanOrEqual(220)
+  expect(menuBox.height).toBeLessThan(100)
+  await expect(page.locator('.session-action-layer')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+
+  const compactSession = page.locator('.desktop-sidebar .sidebar-item--single-line').first()
+  const compactMetrics = await compactSession.evaluate(element => {
+    const title = element.querySelector('strong')
+    return {
+      height: element.getBoundingClientRect().height,
+      weight: title ? Number(getComputedStyle(title).fontWeight) : 0,
+    }
+  })
+  expect(compactMetrics.height).toBeLessThanOrEqual(31)
+  expect(compactMetrics.weight).toBeLessThan(500)
+  await compactSession.click({ button: 'right' })
+  await expect(sessionMenu).toBeVisible()
+  await page.keyboard.press('Escape')
   const composer = page.locator('.composer-shell')
   await expect(composer).toBeVisible()
   const geometry = await composer.evaluate(element => {

@@ -34,7 +34,8 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   select: [id: string]
   search: [value: string]
-  more: [id: string]
+  more: [id: string, event: MouseEvent]
+  contextMenu: [id: string, event: MouseEvent]
   loadMore: []
 }>()
 
@@ -127,6 +128,7 @@ defineExpose({ focusSearch })
             tabindex="0"
             :aria-selected="row.item.id === activeId || row.item.active"
             @click="emit('select', row.item.id)"
+            @contextmenu.prevent.stop="emit('contextMenu', row.item.id, $event)"
             @keydown.enter.prevent="emit('select', row.item.id)"
             @keydown.space.prevent="emit('select', row.item.id)"
           >
@@ -145,7 +147,7 @@ defineExpose({ focusSearch })
                 <b v-if="row.item.unread">{{ row.item.unread > 99 ? '99+' : row.item.unread }}</b>
               </span>
             </span>
-            <button class="sidebar-item__more" type="button" aria-label="更多操作" @click.stop="emit('more', row.item.id)">
+            <button class="sidebar-item__more" type="button" aria-label="更多操作" @click.stop="emit('more', row.item.id, $event)">
               <AppIcon name="dots" :size="16" />
             </button>
           </div>
@@ -179,11 +181,11 @@ defineExpose({ focusSearch })
 .sidebar-item { position: relative; display: flex; align-items: center; gap: 7px; width: 100%; min-height: 42px; padding: 4px 7px; border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; transition: background-color 120ms ease, color 120ms ease; }
 .sidebar-item:hover { background: var(--surface-soft); }
 .sidebar-item.active { background: var(--surface-hover); }
-.sidebar-item--single-line { min-height: 34px; padding-block: 3px; }
+.sidebar-item--single-line { min-height: 31px; padding-block: 1px; }
 .sidebar-item--single-line .sidebar-item__copy { display: block; }
-.sidebar-item--single-line .sidebar-item__row { min-height: 28px; }
-.sidebar-item--single-line .sidebar-item__row strong { font-size: 12px; }
-.sidebar-item--single-line .sidebar-item__more { top: 3px; }
+.sidebar-item--single-line .sidebar-item__row { min-height: 27px; }
+.sidebar-item--single-line .sidebar-item__row strong { font-size: 11.5px; font-weight: 450; }
+.sidebar-item--single-line .sidebar-item__more { top: 1px; }
 .sidebar-item__icon { position: relative; display: grid; place-items: center; width: 23px; height: 23px; flex: 0 0 23px; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; }
 .sidebar-item.active .sidebar-item__icon, .sidebar-item:hover .sidebar-item__icon { color: var(--text-secondary); }
 .sidebar-item__icon--avatar { background: var(--surface-hover); color: var(--text-secondary); font-size: 9px; font-weight: 700; }

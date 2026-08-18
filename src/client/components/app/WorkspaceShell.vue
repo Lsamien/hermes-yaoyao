@@ -515,6 +515,8 @@ onBeforeUnmount(() => {
 .sidebar-context__body :deep(.library-search) { margin-bottom: 10px; }
 .sidebar-context__body :deep(.sidebar-list) { padding-inline: 10px; }
 .sidebar-context__body :deep(.sidebar-item) { min-height: 42px; padding: 5px 9px; }
+.sidebar-context__body :deep(.sidebar-item.sidebar-item--single-line) { min-height: 31px; padding: 1px 7px; }
+.sidebar-context__body :deep(.sidebar-item--single-line .sidebar-item__row strong) { font-size: 11.5px; font-weight: 450; }
 .sidebar-context__body :deep(.sidebar-item__icon) { width: 25px; height: 25px; flex-basis: 25px; border: 0; border-radius: 7px; background: transparent; }
 .sidebar-context__body :deep(.sidebar-item__icon--avatar) { background: var(--surface-soft); color: var(--text-secondary); }
 .sidebar-context__body :deep(.sidebar-item__row strong) { font-size: 12px; }

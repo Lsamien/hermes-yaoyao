@@ -38,6 +38,7 @@ const queueMode = ref(false)
 const actionSessionId = ref('')
 const renaming = ref(false)
 const renameValue = ref('')
+const actionMenuPosition = ref({ x: 8, y: 8 })
 const composer = ref<InstanceType<typeof ComposerShell> | null>(null)
 const timeline = ref<InstanceType<typeof MessageTimeline> | null>(null)
 const restoringRouteProfile = ref('')
@@ -82,6 +83,7 @@ const reasoningComposerOptions = computed<ComposerOption[]>(() => reasoningOptio
   detail: option.description,
 })))
 const reasoningLabel = computed(() => reasoningOptions.find(option => option.id === (chat.reasoningEffort || ''))?.label || '默认')
+const actionMenuStyle = computed(() => ({ left: `${actionMenuPosition.value.x}px`, top: `${actionMenuPosition.value.y}px` }))
 
 function routeProfile(): string {
   const value = typeof route.query.profile === 'string' ? route.query.profile : ''
@@ -193,25 +195,49 @@ function selectReasoning(id: string) {
   chat.reasoningEffort = id || undefined
 }
 
-function openSessionActions(id: string) {
+function openSessionActions(id: string, event?: MouseEvent) {
   actionSessionId.value = id
   const session = chat.sessions.find(item => item.id === id)
   renameValue.value = session?.title || ''
   renaming.value = false
+  const menuWidth = 208
+  const menuHeight = 176
+  const inset = 8
+  const anchor = event?.currentTarget instanceof HTMLElement ? event.currentTarget.getBoundingClientRect() : null
+  const requestedX = event?.type === 'contextmenu' ? event.clientX : anchor ? anchor.right - menuWidth : window.innerWidth - menuWidth - 14
+  const requestedY = event?.type === 'contextmenu' ? event.clientY : anchor ? anchor.bottom + 5 : 46
+  actionMenuPosition.value = {
+    x: Math.max(inset, Math.min(requestedX, window.innerWidth - menuWidth - inset)),
+    y: Math.max(inset, Math.min(requestedY, window.innerHeight - menuHeight - inset)),
+  }
+}
+
+function closeSessionActions() {
+  actionSessionId.value = ''
+  renaming.value = false
+}
+
+function handleSessionActionPointer(event: PointerEvent) {
+  if (!actionSessionId.value || (event.target as HTMLElement).closest('.session-actions')) return
+  closeSessionActions()
+}
+
+function handleSessionActionKey(event: KeyboardEvent) {
+  if (event.key === 'Escape' && actionSessionId.value) closeSessionActions()
 }
 
 async function saveRename() {
   const session = chat.sessions.find(item => item.id === actionSessionId.value)
   if (!session || !renameValue.value.trim()) return
   await chat.renameSession(session.id, renameValue.value.trim(), session.profile)
-  actionSessionId.value = ''
+  closeSessionActions()
 }
 
 async function deleteSession() {
   const session = chat.sessions.find(item => item.id === actionSessionId.value)
   if (!session) return
   await chat.removeSession(session.id, session.profile)
-  actionSessionId.value = ''
+  closeSessionActions()
   if (route.params.sessionId === session.id) await router.replace('/chat')
 }
 
@@ -233,6 +259,8 @@ async function revealSourceMessage() {
 }
 
 onMounted(async () => {
+  document.addEventListener('pointerdown', handleSessionActionPointer)
+  document.addEventListener('keydown', handleSessionActionKey)
   await refreshSessions()
   await Promise.allSettled([chat.loadModels(auth.activeProfile?.name), chat.connect()])
   await revealSourceMessage()
@@ -240,7 +268,11 @@ onMounted(async () => {
   if (pendingFile) composer.value?.attachFiles([pendingFile])
 })
 
-onBeforeUnmount(() => chat.disconnect())
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handleSessionActionPointer)
+  document.removeEventListener('keydown', handleSessionActionKey)
+  chat.disconnect()
+})
 
 watch(() => auth.activeProfile?.name, async (profile, previous) => {
   if (!profile || profile === previous) return
@@ -290,6 +322,7 @@ watch(() => chat.activeSessionId, async id => {
         @load-more="chat.loadMoreSessions(auth.activeProfile?.name)"
         @select="chooseSession"
         @more="openSessionActions"
+        @context-menu="openSessionActions"
       />
     </template>
 
@@ -319,7 +352,7 @@ watch(() => chat.activeSessionId, async id => {
         @clarify="interaction && chat.respondToClarification(interaction.id, $event)"
       >
         <template #header-actions>
-          <button v-if="activeSession" class="icon-button header-session-menu" type="button" title="会话操作" aria-label="会话操作" @click="openSessionActions(activeSession.id)"><AppIcon name="dots" :size="18" /></button>
+          <button v-if="activeSession" class="icon-button header-session-menu" type="button" title="会话操作" aria-label="会话操作" @click="openSessionActions(activeSession.id, $event)"><AppIcon name="dots" :size="18" /></button>
         </template>
       </MessageTimeline>
       <p v-if="chat.error" class="chat-error" role="alert"><AppIcon name="alert" :size="13" />{{ chat.error }}</p>
@@ -363,20 +396,17 @@ watch(() => chat.activeSessionId, async id => {
   <ChoiceDialog :open="modelDialog" title="选择模型" :options="modelOptions" :selected-id="selectedModelId" @close="modelDialog = false" @select="selectModel" />
 
   <Teleport to="body">
-    <Transition name="choice-fade">
-      <div v-if="actionSessionId" class="session-action-layer" @mousedown.self="actionSessionId = ''">
-        <section class="session-actions" role="dialog" aria-modal="true" aria-label="会话操作">
-          <header><strong>会话操作</strong><button class="icon-button" type="button" aria-label="关闭" @click="actionSessionId = ''"><AppIcon name="close" /></button></header>
-          <template v-if="renaming">
-            <label>会话名称<input v-model="renameValue" maxlength="120" autofocus @keydown.enter="saveRename" /></label>
-            <div><button class="quiet-button" type="button" @click="renaming = false">取消</button><button class="solid-button" type="button" @click="saveRename">保存</button></div>
-          </template>
-          <template v-else>
-            <button class="action-row" type="button" @click="renaming = true"><AppIcon name="edit" :size="15" />重命名</button>
-            <button class="action-row danger" type="button" @click="deleteSession"><AppIcon name="trash" :size="15" />删除会话</button>
-          </template>
-        </section>
-      </div>
+    <Transition name="session-menu">
+      <section v-if="actionSessionId" class="session-actions" :style="actionMenuStyle" role="menu" aria-label="会话操作" @contextmenu.prevent>
+        <template v-if="renaming">
+          <label>会话名称<input v-model="renameValue" maxlength="120" autofocus @keydown.enter="saveRename" /></label>
+          <div><button class="quiet-button" type="button" @click="renaming = false">取消</button><button class="solid-button" type="button" @click="saveRename">保存</button></div>
+        </template>
+        <template v-else>
+          <button class="action-row" role="menuitem" type="button" @click="renaming = true"><AppIcon name="edit" :size="14" />重命名</button>
+          <button class="action-row danger" role="menuitem" type="button" @click="deleteSession"><AppIcon name="trash" :size="14" />删除会话</button>
+        </template>
+      </section>
     </Transition>
   </Teleport>
 </template>
@@ -388,8 +418,7 @@ watch(() => chat.activeSessionId, async id => {
 .sidebar-primary-action:focus-visible { box-shadow: inset 0 0 0 1px var(--line-strong); }
 .header-session-menu { color: var(--text-muted); background: transparent; }.header-session-menu:hover { color: var(--text-primary); background: var(--surface-soft); }
 .chat-error { display: flex; width: min(760px, calc(100% - 32px)); margin: 0 auto 4px; align-items: center; gap: 6px; color: var(--danger); font-size: 9px; }
-.session-action-layer { position: fixed; z-index: 205; inset: 0; display: grid; place-items: center; padding: 18px; background: var(--scrim); backdrop-filter: blur(4px); }
-.session-actions { width: min(340px, 100%); padding: 12px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface-raised); box-shadow: var(--shadow-float); }.session-actions header { display: flex; min-height: 40px; align-items: center; justify-content: space-between; padding: 0 2px 7px 7px; }.session-actions header strong { font-size: 13px; }.action-row { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 9px; padding: 0 9px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); cursor: pointer; text-align: left; }.action-row:hover { background: var(--surface-soft); color: var(--text-primary); }.action-row.danger { color: var(--danger); }.session-actions label { display: flex; flex-direction: column; gap: 6px; color: var(--text-muted); font-size: 10px; }.session-actions input { height: 38px; padding: 0 9px; border: 1px solid var(--line); border-radius: 9px; outline: 0; background: var(--surface-soft); color: var(--text-primary); }.session-actions input:focus { border-color: var(--line-strong); }.session-actions > div { display: flex; justify-content: flex-end; gap: 7px; margin-top: 13px; }
-@media (max-width: 600px) { .session-action-layer { place-items: end center; padding: 0; }.session-actions { width: 100%; border-radius: 17px 17px 0 0; padding-bottom: max(12px, env(safe-area-inset-bottom)); } }
-@media (prefers-reduced-motion: reduce) { .sidebar-primary-action { transition: none; } }
+.session-actions { position: fixed; z-index: 205; width: 208px; box-sizing: border-box; padding: 6px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-raised); box-shadow: 0 12px 34px rgba(0,0,0,.16); }.action-row { display: flex; width: 100%; min-height: 34px; align-items: center; gap: 8px; padding: 0 9px; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 11px; text-align: left; }.action-row:hover, .action-row:focus-visible { outline: 0; background: var(--surface-soft); color: var(--text-primary); }.action-row.danger { color: var(--danger); }.session-actions label { display: flex; flex-direction: column; gap: 6px; padding: 4px; color: var(--text-muted); font-size: 9px; }.session-actions input { width: 100%; height: 32px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; outline: 0; background: var(--surface-soft); color: var(--text-primary); font-size: 11px; }.session-actions input:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }.session-actions > div { display: flex; justify-content: flex-end; gap: 5px; margin-top: 7px; padding: 0 4px 3px; }.session-actions :deep(.quiet-button), .session-actions :deep(.solid-button) { min-height: 29px; padding-inline: 10px; font-size: 10px; }
+.session-menu-enter-active, .session-menu-leave-active { transition: opacity 100ms ease, transform 120ms var(--ease-out); transform-origin: top right; }.session-menu-enter-from, .session-menu-leave-to { opacity: 0; transform: translateY(-3px) scale(.98); }
+@media (prefers-reduced-motion: reduce) { .sidebar-primary-action, .session-menu-enter-active, .session-menu-leave-active { transition: none; } }
 </style>
