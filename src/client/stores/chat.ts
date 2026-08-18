@@ -15,6 +15,7 @@ import { createId, routeKey } from '@/utils/id'
 import { applyChatEvent, mergeChatMessages } from '@/utils/messageReducer'
 import { bool, normalizeChatMessage, number, record, string, values } from '@/utils/normalize'
 import { appendSessionPage, pinnedSessionsFirst } from '@/utils/sessionOrder'
+import { moveSessionFastMode, readSessionFastMode, writeSessionFastMode } from '@/utils/sessionPreferences'
 import { useAuthStore } from './auth'
 
 interface CachedHistory { messages: ChatMessage[]; total: number; savedAt: number }
@@ -34,6 +35,13 @@ function errorMessage(cause: unknown): string {
 
 function resultRecord(value: JsonValue): Record<string, unknown> { return record(value) }
 
+function optionalBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  if (value === 'true' || value === 'fast') return true
+  if (value === 'false' || value === 'normal') return false
+  return undefined
+}
+
 export const useChatStore = defineStore('chat', () => {
   const auth = useAuthStore()
   const sessions = ref<SessionSummary[]>([])
@@ -51,7 +59,6 @@ export const useChatStore = defineStore('chat', () => {
   const unreadCounts = ref<Record<string, number>>({})
   const selectedModel = ref<ModelOption>()
   const reasoningEffort = ref<string>()
-  const fastMode = ref<boolean>()
   const socket = new ChatRpcSocket()
   const runtimeRoutes = new Map<string, string>()
   const desiredModelRoutes = new Set<string>()
@@ -71,6 +78,7 @@ export const useChatStore = defineStore('chat', () => {
     if (!activeSessionId.value || !activeProfileName.value) return undefined
     return routes[routeKey(activeProfileName.value, activeSessionId.value)]
   })
+  const fastMode = computed(() => activeRouteState.value?.fastMode ?? false)
   const activeSession = computed(() => sessions.value.find(session => session.id === activeSessionId.value
     && (!activeProfileName.value || session.profile === activeProfileName.value)))
   const messages = computed(() => activeRouteState.value?.messages ?? [])
@@ -83,8 +91,15 @@ export const useChatStore = defineStore('chat', () => {
 
   function ensureRoute(profile: string, sessionId: string): ChatRouteState {
     const key = routeKey(profile, sessionId)
-    routes[key] ??= emptyRoute(profile, sessionId)
+    if (!routes[key]) {
+      routes[key] = emptyRoute(profile, sessionId)
+      routes[key].fastMode = readSessionFastMode(auth.user?.id ?? 'local', profile, sessionId)
+    }
     return routes[key]
+  }
+
+  function persistFastMode(state: ChatRouteState): void {
+    writeSessionFastMode(auth.user?.id ?? 'local', state.route.profile, state.route.sessionId, state.fastMode ?? false)
   }
 
   function cacheScope(profile: string): string {
@@ -117,7 +132,10 @@ export const useChatStore = defineStore('chat', () => {
     }
     if (state === 'failed') {
       runtimeRoutes.clear()
-      for (const route of Object.values(routes)) route.runtimeSessionId = undefined
+      for (const route of Object.values(routes)) {
+        route.runtimeSessionId = undefined
+        route.serverFastMode = undefined
+      }
       error.value = reason || '聊天实时连接已断开'
       scheduleReconnect()
     }
@@ -140,6 +158,9 @@ export const useChatStore = defineStore('chat', () => {
     runtimeRoutes.set(runtimeSessionId, newKey)
     if (activeSessionId.value === oldState.route.sessionId && activeProfileName.value === oldState.route.profile) {
       activeSessionId.value = storedSessionId
+    }
+    if (newKey !== oldKey) {
+      moveSessionFastMode(auth.user?.id ?? 'local', oldState.route.profile, oldState.route.sessionId, storedSessionId, migrated.fastMode ?? false)
     }
     const draftIndex = sessions.value.findIndex(session => session.id === oldState.route.sessionId && session.profile === oldState.route.profile)
     const now = Date.now() / 1000
@@ -166,6 +187,13 @@ export const useChatStore = defineStore('chat', () => {
         state = migrateRoute(key, storedId, runtimeId)
         key = routeKey(state.route.profile, storedId)
       }
+    }
+    const info = record(payload.info)
+    const liveFastMode = optionalBoolean(payload.fast ?? info.fast)
+    if (liveFastMode !== undefined && (event.type === 'session.info' || (event.type === 'session.command' && payload.action === 'fast'))) {
+      state.serverFastMode = liveFastMode
+      if (!state.fastModeDirty) state.fastMode = liveFastMode
+      persistFastMode(state)
     }
     const attributedPayload = { ...payload, session_id: state.route.sessionId } as JsonValue
     routes[key] = applyChatEvent(state, {
@@ -197,7 +225,10 @@ export const useChatStore = defineStore('chat', () => {
     runtimePromises.clear()
     desiredModelRoutes.clear()
     pendingModelConfirmations.clear()
-    for (const state of Object.values(routes)) state.runtimeSessionId = undefined
+    for (const state of Object.values(routes)) {
+      state.runtimeSessionId = undefined
+      state.serverFastMode = undefined
+    }
   }
 
   function switchProfile(profile: string): void {
@@ -376,12 +407,19 @@ export const useChatStore = defineStore('chat', () => {
         profile: initialState.route.profile, source: 'web', close_on_disconnect: false,
       }
       if (reasoningEffort.value) params.reasoning_effort = reasoningEffort.value
-      if (fastMode.value !== undefined) params.fast = fastMode.value
+      params.fast = initialState.fastMode ?? false
       const result = resultRecord(await socket.request('session.create', params))
       const runtimeId = string(result.session_id ?? result.sessionId)
       const storedId = string(result.stored_session_id ?? result.storedSessionId ?? result.session_key)
       if (!runtimeId || !storedId) throw new Error('Hermes 未返回新会话标识')
-      return migrateRoute(initialKey, storedId, runtimeId)
+      const migrated = migrateRoute(initialKey, storedId, runtimeId)
+      const info = record(result.info)
+      const liveFastMode = optionalBoolean(result.fast ?? info.fast)
+      migrated.serverFastMode = liveFastMode ?? migrated.fastMode ?? false
+      if (!migrated.fastModeDirty && liveFastMode !== undefined) migrated.fastMode = liveFastMode
+      migrated.fastModeDirty = false
+      persistFastMode(migrated)
+      return migrated
     }
     const result = resultRecord(await socket.request('session.resume', {
       session_id: initialState.route.sessionId,
@@ -393,6 +431,11 @@ export const useChatStore = defineStore('chat', () => {
     if (!runtimeId) throw new Error('Hermes 未返回运行会话标识')
     const storedId = string(result.stored_session_id ?? result.storedSessionId ?? result.session_key, initialState.route.sessionId)
     const migrated = migrateRoute(initialKey, storedId, runtimeId)
+    const info = record(result.info)
+    const liveFastMode = optionalBoolean(result.fast ?? info.fast)
+    migrated.serverFastMode = liveFastMode
+    if (!migrated.fastModeDirty && liveFastMode !== undefined) migrated.fastMode = liveFastMode
+    persistFastMode(migrated)
     const resumedMessages = values(result.messages)
       .map(value => normalizeChatMessage(value, storedId, migrated.route.profile))
     if (resumedMessages.length) migrated.messages = mergeChatMessages(migrated.messages, resumedMessages, 'snapshot')
@@ -515,10 +558,14 @@ export const useChatStore = defineStore('chat', () => {
           session_id: runtimeId, key: 'reasoning', value: reasoningEffort.value, scope: 'session',
         })
       }
-      if (fastMode.value !== undefined) {
+      const desiredFastMode = state.fastMode ?? false
+      if (state.serverFastMode !== desiredFastMode) {
         await socket.request('config.set', {
-          session_id: runtimeId, key: 'fast', value: fastMode.value ? 'fast' : 'normal', scope: 'session',
+          session_id: runtimeId, key: 'fast', value: desiredFastMode ? 'fast' : 'normal', scope: 'session',
         })
+        state.serverFastMode = desiredFastMode
+        state.fastModeDirty = false
+        persistFastMode(state)
       }
       const parts = trimmed ? [trimmed] : []
       for (const file of files) {
@@ -681,6 +728,9 @@ export const useChatStore = defineStore('chat', () => {
       }
       return false
     }
+    // Match iOS: switching a model invalidates the cached fast-mode server
+    // state, so the desired mode is re-applied before the next prompt.
+    state.serverFastMode = undefined
     return true
   }
 
@@ -700,6 +750,29 @@ export const useChatStore = defineStore('chat', () => {
     desiredModelRoutes.add(key)
     if (!state.runtimeSessionId) return
     if (await configureModel(state, model, false)) desiredModelRoutes.delete(key)
+  }
+
+  async function setFastMode(enabled: boolean): Promise<void> {
+    const state = activeRouteState.value
+    if (!state) return
+    const previous = state.fastMode ?? false
+    state.fastMode = enabled
+    state.fastModeDirty = true
+    persistFastMode(state)
+    if (!state.runtimeSessionId || state.isStreaming || !['connected', 'ready'].includes(connectionState.value)) return
+    try {
+      await socket.request('config.set', {
+        session_id: state.runtimeSessionId, key: 'fast', value: enabled ? 'fast' : 'normal', scope: 'session',
+      })
+      state.serverFastMode = enabled
+      state.fastModeDirty = false
+    } catch (cause) {
+      state.fastMode = previous
+      state.fastModeDirty = false
+      persistFastMode(state)
+      error.value = `快速模式未同步：${errorMessage(cause)}`
+      throw cause
+    }
   }
 
   async function refreshContextUsage(): Promise<void> {
@@ -724,6 +797,6 @@ export const useChatStore = defineStore('chat', () => {
     error, models, selectedModel, reasoningEffort, fastMode, contextUsage, pendingApproval, pendingClarification, unreadCounts,
     loadSessions, loadMoreSessions, selectSession, loadOlder, createSession, connect, disconnect, send, interrupt,
     respondToApproval, respondToClarification, branchSession, renameSession, setSessionPinned, removeSession,
-    loadModels, setModel, refreshContextUsage, loadUnread, markRead, switchProfile,
+    loadModels, setModel, setFastMode, refreshContextUsage, loadUnread, markRead, switchProfile,
   }
 })

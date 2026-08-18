@@ -196,6 +196,9 @@ export interface ChatRouteState {
   isLoadingHistory: boolean
   isStreaming: boolean
   isQueued: boolean
+  fastMode?: boolean
+  serverFastMode?: boolean
+  fastModeDirty?: boolean
   liveStatus?: string
   usage?: ChatUsage
   pendingApproval?: ApprovalRequest
