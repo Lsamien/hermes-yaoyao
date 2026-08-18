@@ -29,8 +29,9 @@ export function isAllowedHostHeader(value: string | undefined, config: ServerCon
   if (!value) return false
   const parsed = splitHostPort(value)
   if (!parsed) return false
-  if (parsed.port !== String(config.port)) return false
-  return isPrivateHost(parsed.hostname) || config.allowedHosts.has(parsed.hostname)
+  if (config.allowedHosts.has(parsed.hostname)) return true
+  if (!isPrivateHost(parsed.hostname)) return false
+  return parsed.port === String(config.port) || parsed.port === undefined || parsed.port === '80' || parsed.port === '443'
 }
 
 function canonicalOrigin(origin: string): string | null {
@@ -56,7 +57,12 @@ export function isExactOrigin(
 ): boolean {
   if (!origin || !host) return false
   const expected = expectedRequestOrigin(host, secure)
-  return expected !== null && canonicalOrigin(origin) === expected
+  const actual = canonicalOrigin(origin)
+  if (expected === null || actual === null) return false
+  if (actual === expected) return true
+  // A TLS-terminating reverse proxy forwards HTTP internally while the
+  // browser's same-origin request correctly carries an https Origin.
+  return !secure && actual === expectedRequestOrigin(host, true)
 }
 
 export function appendSetCookies(ctx: Koa.Context, values: readonly string[]): void {

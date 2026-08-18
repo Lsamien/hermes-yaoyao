@@ -30,14 +30,28 @@ describe('server security boundary', () => {
     expect(isAllowedHostHeader('192.168.10.8:8800', value)).toBe(true)
     expect(isAllowedHostHeader('yaoyao.internal:8800', value)).toBe(true)
     expect(isAllowedHostHeader('127.0.0.1:9999', value)).toBe(false)
-    expect(isAllowedHostHeader('127.0.0.1', value)).toBe(false)
+    expect(isAllowedHostHeader('127.0.0.1', value)).toBe(true)
+    expect(isAllowedHostHeader('192.168.10.8:443', value)).toBe(true)
+    expect(isAllowedHostHeader('yaoyao.internal', value)).toBe(true)
     expect(isAllowedHostHeader('attacker.example:8800', value)).toBe(false)
     expect(isAllowedHostHeader('127.0.0.1@attacker.example', value)).toBe(false)
   })
 
+  it('accepts the configured production reverse-proxy domain on public ports', () => {
+    const value = config({ allowedHosts: new Set(['yaoyao-lc.samien.cn']) })
+    expect(isAllowedHostHeader('yaoyao-lc.samien.cn', value)).toBe(true)
+    expect(isAllowedHostHeader('yaoyao-lc.samien.cn:443', value)).toBe(true)
+    expect(isAllowedHostHeader('other.samien.cn', value)).toBe(false)
+  })
+
+  it('accepts an HTTPS browser Origin behind an HTTP TLS-terminating proxy', () => {
+    expect(isExactOrigin('https://yaoyao.internal', 'yaoyao.internal', false)).toBe(true)
+    expect(isExactOrigin('https://attacker.example', 'yaoyao.internal', false)).toBe(false)
+  })
+
   it('requires an exact scheme and host Origin', () => {
     expect(isExactOrigin('http://127.0.0.1:8800', '127.0.0.1:8800', false)).toBe(true)
-    expect(isExactOrigin('https://127.0.0.1:8800', '127.0.0.1:8800', false)).toBe(false)
+    expect(isExactOrigin('https://127.0.0.1:8800', '127.0.0.1:8800', false)).toBe(true)
     expect(isExactOrigin('http://127.0.0.1:8801', '127.0.0.1:8800', false)).toBe(false)
     expect(isExactOrigin('null', '127.0.0.1:8800', false)).toBe(false)
   })
