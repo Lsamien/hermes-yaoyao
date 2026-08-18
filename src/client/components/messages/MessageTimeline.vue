@@ -158,6 +158,17 @@ function hasConversationActions(message: UiMessage): boolean {
   return message.role === 'user' || (message.role === 'assistant' && Boolean(message.content.trim()))
 }
 
+function deliveryLabel(status?: UiMessage['status']): string {
+  return ({
+    preparing: '正在准备附件',
+    attached: '附件已就绪',
+    pending: '正在发送',
+    accepted: '已发送',
+    failed: '发送失败',
+    'unknown-receipt': '回执未知，请检查后重试',
+  } as Partial<Record<NonNullable<UiMessage['status']>, string>>)[status || 'settled'] || ''
+}
+
 watch(() => props.messages.length, async () => {
   if (!pinnedToBottom.value) return
   await nextTick()
@@ -271,6 +282,17 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
               />
             </div>
 
+            <div
+              v-if="message.role === 'user' && deliveryLabel(message.status)"
+              class="message__delivery"
+              :class="`message__delivery--${message.status}`"
+              role="status"
+              aria-live="polite"
+            >
+              <AppIcon :name="message.status === 'accepted' ? 'check' : message.status === 'failed' || message.status === 'unknown-receipt' ? 'alert' : 'dots'" :size="11" />
+              {{ deliveryLabel(message.status) }}
+            </div>
+
             <div v-if="message.role !== 'user' && message.attachments?.length" class="message__attachments">
               <button v-for="attachment in message.attachments" :key="attachment.id" type="button" @click="emit('preview', attachment)">
                 <img v-if="attachment.kind === 'image' && attachment.url" :src="attachment.url" :alt="attachment.name" />
@@ -340,6 +362,7 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
 .message--user .message__body { max-width: min(610px, 76%); padding: 11px 15px; border-radius: 20px 20px 6px 20px; background: #eceff3; }
 .dark .message--user .message__body { background: #2d323a; }
 .message--user .message__meta { display: none; }
+.message__delivery { display: flex; min-height: 18px; align-items: center; justify-content: flex-end; gap: 4px; margin: 5px 1px -4px; color: var(--text-muted); font-size: 9px; }.message__delivery--accepted { color: var(--success); }.message__delivery--failed, .message__delivery--unknown-receipt { color: var(--danger); }
 .message--system { justify-content: center; }.message--system .message__avatar, .message--system .message__meta { display: none; }.message--system .message__body { max-width: 82%; padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--text-muted); text-align: center; }
 .delegation-event { min-width: 230px; max-width: 460px; text-align: left; }.delegation-event summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }.delegation-event summary::-webkit-details-marker { display: none; }.delegation-event summary > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.delegation-event strong { color: var(--text-secondary); font-size: 11px; font-weight: 650; }.delegation-event small { color: var(--text-muted); font-size: 9px; }.delegation-event :deep(.markdown) { max-height: 260px; margin-top: 9px; overflow: auto; color: var(--text-secondary); font-size: 10px; }
 .system-event { max-width: 460px; text-align: left; }.system-event summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; color: var(--text-muted); font-size: 10px; }.system-event summary::-webkit-details-marker { display: none; }.system-event :deep(.markdown) { max-height: 220px; margin-top: 8px; overflow: auto; color: var(--text-secondary); font-size: 10px; }

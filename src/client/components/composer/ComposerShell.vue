@@ -498,7 +498,7 @@ defineExpose({
           <button v-if="mode === 'chat' && streaming && canSubmit" class="queue-toggle" :class="{ active: queueMode }" type="button" :title="queueMode ? '消息将排队发送' : '消息将 Steer 当前会话'" @click="emit('queueToggle')">
             {{ queueMode ? '排队' : 'Steer' }}
           </button>
-          <span v-if="sending" class="composer-sending" aria-label="正在发送" />
+          <span v-if="sending" class="composer-sending" role="status" aria-live="polite"><i />正在发送</span>
           <span class="composer-send-hitbox">
             <button
               class="composer-send"
@@ -598,7 +598,7 @@ defineExpose({
 .composer-send:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 7px 16px rgba(41,36,39,.22); }
 .composer-send:disabled { cursor: not-allowed; background: #9f9f9f; color: #fff; }
 .composer-send--stop { background: var(--accent); }
-.composer-sending { width: 5px; height: 5px; border-radius: 50%; background: var(--warning); animation: composer-pulse 1s ease-in-out infinite; }
+.composer-sending { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 9px; white-space: nowrap; }.composer-sending i { width: 5px; height: 5px; border-radius: 50%; background: var(--warning); animation: composer-pulse 1s ease-in-out infinite; }
 @keyframes composer-pulse { 50% { opacity: .25; transform: scale(.7); } }
 .composer-attachments { display: flex; width: 100%; max-width: 760px; margin: 0 auto 9px; flex-wrap: wrap; gap: 7px; }
 .composer-attachment { position: relative; display: flex; max-width: 210px; min-height: 48px; align-items: center; gap: 8px; padding: 6px 28px 6px 9px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-raised); color: var(--text-secondary); }
