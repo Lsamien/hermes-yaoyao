@@ -8,6 +8,7 @@ import ToolTrace from './ToolTrace.vue'
 import TurnTrace from './TurnTrace.vue'
 import type { UiInteraction, UiLocalFileLink, UiMessage } from './types'
 import { buildMessageTimelineRows } from '@/utils/turnTrace'
+import { displayContentForMessage } from '@/utils/messageDisplay'
 
 const props = withDefaults(defineProps<{
   messages: UiMessage[]
@@ -128,7 +129,7 @@ function scrollToAnchor(messageId: string, anchorId: string): boolean {
 }
 
 async function copyMessage(message: UiMessage) {
-  await navigator.clipboard.writeText(message.content)
+  await navigator.clipboard.writeText(displayContentForMessage(message.role, message.content))
 }
 
 function hasConversationActions(message: UiMessage): boolean {
@@ -237,7 +238,7 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
 
             <div class="message__content">
               <MarkdownContent
-                :content="message.content"
+                :content="displayContentForMessage(message.role, message.content)"
                 :streaming="message.status === 'streaming'"
                 :legacy-media="message.role === 'assistant'"
                 :plain="message.role === 'user'"
