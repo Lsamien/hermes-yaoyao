@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import { displayContentForMessage } from '@/utils/messageDisplay'
+import { normalizeChatMessage } from '@/utils/normalize'
 
 describe('displayContentForMessage', () => {
+  it('turns persisted user @file markers into attachment cards and removes marker text', () => {
+    const message = normalizeChatMessage({
+      id: 'user-file', role: 'user', timestamp: 1,
+      content: '刘博士的技术介绍。\n\n[用户附加文件：大模型推理优化报告.docx]\n@file:\\/Users/samien/.hermes/attachments/大模型推理优化报告.docx',
+    }, 'session-1', 'default')
+    expect(message.content).toBe('刘博士的技术介绍。')
+    expect(message.attachments).toEqual([expect.objectContaining({
+      name: '大模型推理优化报告.docx',
+      path: '/Users/samien/.hermes/attachments/大模型推理优化报告.docx',
+      kind: 'file',
+    })])
+  })
   it('hides expanded attached context while restoring a missing reference', () => {
     const content = [
       '帮我看看这个文件',

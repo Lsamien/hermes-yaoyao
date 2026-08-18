@@ -163,6 +163,31 @@ export function normalizeAttachment(value: unknown, index = 0): ChatAttachment {
   }
 }
 
+function attachmentMime(name: string): { mimeType: string; kind: ChatAttachment['kind'] } {
+  const extension = name.split('.').at(-1)?.toLocaleLowerCase() || ''
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'avif', 'bmp', 'tif', 'tiff'].includes(extension)) {
+    return { mimeType: `image/${extension === 'jpg' ? 'jpeg' : extension}`, kind: 'image' }
+  }
+  if (extension === 'pdf') return { mimeType: 'application/pdf', kind: 'pdf' }
+  return { mimeType: 'application/octet-stream', kind: 'file' }
+}
+
+function extractPersistedAttachments(content: string): { content: string; attachments: ChatAttachment[] } {
+  const attachments: ChatAttachment[] = []
+  const cleaned = content.replace(
+    /\[用户附加\s*(文件|图片|PDF)\s*：\s*([^\]\r\n]+)\]\s*(?:\r?\n)?@file:\s*((?:\\?\/)[^\r\n]+)/g,
+    (_match, _type: string, rawName: string, rawPath: string) => {
+      const name = rawName.trim()
+      const path = rawPath.trim().replace(/\\\//g, '/').replace(/^[`'"]|[`'"]$/g, '')
+      if (!path.startsWith('/')) return _match
+      const media = attachmentMime(name)
+      attachments.push({ id: `persisted:${path}`, name, path, url: path, size: 0, ...media })
+      return ''
+    },
+  ).replace(/\n{3,}/g, '\n\n').trim()
+  return { content: cleaned, attachments }
+}
+
 export function normalizeChatMessage(value: unknown, sessionId: string, fallbackProfile?: string): ChatMessage {
   const source = record(value)
   const contentValue = pick(source, 'content', 'text', 'output')
@@ -182,6 +207,12 @@ export function normalizeChatMessage(value: unknown, sessionId: string, fallback
   }
   const roleValue = string(source.role, 'assistant')
   const role = ['user', 'assistant', 'tool', 'system'].includes(roleValue) ? roleValue as ChatMessage['role'] : 'system'
+  if (role === 'user' && content.includes('@file:')) {
+    const persisted = extractPersistedAttachments(content)
+    content = persisted.content
+    const known = new Set(attachments.map(item => item.path || item.url || item.name))
+    attachments.push(...persisted.attachments.filter(item => !known.has(item.path || item.url || item.name)))
+  }
   const id = string(pick(source, 'id', 'message_id', 'messageId')) || `history-${sessionId}-${number(source.timestamp)}-${Math.random()}`
   const status = string(pick(source, 'status', 'finish_reason', 'finishReason'))
   return {

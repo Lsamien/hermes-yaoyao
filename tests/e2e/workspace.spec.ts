@@ -222,6 +222,15 @@ test('renders historical assistant MEDIA as Markdown in chat and group chat', as
   await expect(page.locator('.markdown img[alt="AppIcon-1024.png"]')).toBeVisible()
 })
 
+test('renders persisted user file markers as attachment cards', async ({ page }) => {
+  await page.goto('/chat/session-demo?profile=yaoyao')
+  const userMessage = page.locator('[data-message-id="message-user-file"]')
+  await expect(userMessage).toContainText('查看附件')
+  await expect(userMessage.getByRole('button', { name: /测试报告\.docx/ })).toBeVisible()
+  await expect(userMessage).not.toContainText('@file:')
+  await expect(userMessage).not.toContainText('用户附加文件')
+})
+
 test('folds tool result rows into their expandable tool call', async ({ page }) => {
   await page.goto('/chat/session-demo')
   const trace = page.locator('.turn-trace').first()

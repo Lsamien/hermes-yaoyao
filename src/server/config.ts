@@ -9,6 +9,7 @@ export interface ServerConfig {
   allowedHosts: ReadonlySet<string>
   home: string
   mediaRoot: string
+  attachmentsRoot: string
   mediaOwner: string
   tlsCert?: string
   tlsKey?: string
@@ -86,6 +87,7 @@ export function loadServerConfig(
   const upstream = parseUpstream(env.HERMES_YAOYAO_UPSTREAM)
   const home = resolve(env.HERMES_YAOYAO_HOME?.trim() || `${homedir()}/.hermes-yaoyao`)
   const mediaRoot = resolve(env.HERMES_YAOYAO_MEDIA_ROOT?.trim() || `${homedir()}/Agents`)
+  const attachmentsRoot = resolve(`${homedir()}/.hermes/attachments`)
   const tlsCert = env.HERMES_YAOYAO_TLS_CERT?.trim() || undefined
   const tlsKey = env.HERMES_YAOYAO_TLS_KEY?.trim() || undefined
   if (Boolean(tlsCert) !== Boolean(tlsKey)) {
@@ -112,6 +114,7 @@ export function loadServerConfig(
     allowedHosts,
     home,
     mediaRoot,
+    attachmentsRoot,
     mediaOwner: basename(homedir()),
     tlsCert,
     tlsKey,

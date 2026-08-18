@@ -25,7 +25,9 @@ afterEach(() => {
 function makeConfig(upstream = 'http://127.0.0.1:9119'): ServerConfig {
   const home = mkdtempSync(join(tmpdir(), 'hermes-yaoyao-server-'))
   const mediaRoot = join(home, 'media')
+  const attachmentsRoot = join(home, 'attachments')
   mkdirSync(mediaRoot)
+  mkdirSync(attachmentsRoot)
   homes.push(home)
   return {
     host: '127.0.0.1',
@@ -34,6 +36,7 @@ function makeConfig(upstream = 'http://127.0.0.1:9119'): ServerConfig {
     allowedHosts: new Set(),
     home,
     mediaRoot,
+    attachmentsRoot,
     mediaOwner: 'samien',
     allowInsecureLan: false,
     insecureLan: false,
@@ -124,6 +127,19 @@ describe('8800 BFF', () => {
     expect(response.headers['content-disposition']).toContain('inline')
     await request(runtime.app.callback())
       .get('/Users/samien/Agents/../state.db').set('Host', '127.0.0.1:8800').set('Cookie', cookies).expect(404)
+  })
+  it('serves persisted Hermes attachment references from the restricted attachment root', async () => {
+    const config = makeConfig()
+    writeFileSync(join(config.attachmentsRoot, '报告.docx'), 'document bytes')
+    const runtime = createApplication({ config, fetchImpl: fakeGateway([]) })
+    runtimes.push(runtime)
+    const bootstrap = await request(runtime.app.callback())
+      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const response = await request(runtime.app.callback())
+      .get('/Users/samien/.hermes/attachments/报告.docx')
+      .set('Host', '127.0.0.1:8800').set('Cookie', cookieHeader(bootstrap)).expect(200)
+    expect(response.headers['content-length']).toBe(String(Buffer.byteLength('document bytes')))
+    expect(response.headers['content-disposition']).toContain('inline')
   })
   it('bootstraps sequentially without exposing the upstream address', async () => {
     const records: RecordedRequest[] = []

@@ -42,6 +42,7 @@ const sessions = [
 ]
 const messages = [
   { id: 'message-user', role: 'user', content: '请检查今天生成的产物。MEDIA:/brand/AppIcon-1024.png', timestamp: now() - 180 },
+  { id: 'message-user-file', role: 'user', content: '查看附件\n\n[用户附加文件：测试报告.docx]\n@file:/Users/samien/.hermes/attachments/测试报告.docx', timestamp: now() - 179 },
   { id: 'message-thinking-tool', role: 'assistant', content: '', reasoning_content: '先检索文件，再归纳结果。', tool_calls: [{ id: 'tool-thinking', type: 'function', function: { name: 'file_search', arguments: '{"query":"产物"}' } }], timestamp: now() - 177 },
   { id: 'message-tool-call', role: 'assistant', content: '', tool_calls: [{ id: 'tool-1', type: 'function', function: { name: 'file_search', arguments: '{"query":"产物"}' } }], timestamp: now() - 176 },
   { id: 'message-tool', role: 'tool', tool_name: 'file_search', tool_call_id: 'tool-1', summary: '扫描产物目录', result: { path: '/tmp/demo-report.pdf', count: 1 }, timestamp: now() - 175 },
