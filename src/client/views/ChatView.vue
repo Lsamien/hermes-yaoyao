@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/common/AppIcon.vue'
+import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 import ChoiceDialog from '@/components/common/ChoiceDialog.vue'
 import type { ChoiceOption } from '@/components/common/types'
 import ComposerShell from '@/components/composer/ComposerShell.vue'
@@ -242,7 +243,7 @@ watch(() => chat.activeSessionId, async id => {
   <WorkspaceView sidebar-title="对话" :sidebar-subtitle="`${sessions.length} 个会话`" :inspector-open="!!preview" @close-inspector="preview = null">
     <template #sidebar-action>
       <button class="sidebar-primary-action" type="button" title="新建聊天" aria-label="新建聊天" @click="createSession">
-        <AppIcon name="edit" :size="17" />
+        <YaoYaoSidebarIcon name="add" />
         <span>新建聊天</span>
       </button>
     </template>

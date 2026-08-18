@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/common/AppIcon.vue'
 import BrandMark from '@/components/common/BrandMark.vue'
+import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 
 type NavItem = {
   key: 'chat' | 'groups' | 'files'
@@ -88,6 +89,10 @@ function closeMenus(event: MouseEvent) {
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
   try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0') } catch { /* optional persistence */ }
+}
+
+function navIcon(key: NavItem['key']): 'chat' | 'folder' | 'people' {
+  return key === 'groups' ? 'people' : key === 'files' ? 'folder' : 'chat'
 }
 
 async function openSidebarSearch(host: HTMLElement | null) {
@@ -193,7 +198,7 @@ onBeforeUnmount(() => {
         :tabindex="sidebarSearchOpen ? -1 : 0"
         @click="openSidebarSearch(desktopSidebarContext)"
       >
-        <AppIcon name="search" :size="18" />
+        <YaoYaoSidebarIcon name="search" />
         <span>搜索</span>
       </button>
 
@@ -211,7 +216,7 @@ onBeforeUnmount(() => {
           :title="item.label"
           @click="navigate(item.path)"
         >
-          <AppIcon :name="item.icon" :size="18" />
+          <YaoYaoSidebarIcon :name="navIcon(item.key)" />
           <span>{{ item.label }}</span>
         </button>
       </nav>

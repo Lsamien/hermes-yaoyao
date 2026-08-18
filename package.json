@@ -26,6 +26,7 @@
   "dependencies": {
     "@koa/bodyparser": "^5.0.0",
     "@koa/router": "^15.4.0",
+    "@vicons/ionicons5": "^0.13.0",
     "@vicons/tabler": "^0.13.0",
     "busboy": "^1.6.0",
     "cookie": "^1.0.2",

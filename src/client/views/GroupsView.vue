@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/common/AppIcon.vue'
+import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ComposerShell from '@/components/composer/ComposerShell.vue'
 import type { ComposerOption, ComposerReference, ComposerSubmit } from '@/components/composer/types'
@@ -127,7 +128,7 @@ watch(() => route.params.roomId, async roomId => {
   <WorkspaceView sidebar-title="群聊" :sidebar-subtitle="groups.availability === 'available' ? `${filteredRooms.length} 个活跃房间` : '9119 群聊 v2'" :inspector-open="managerOpen && !!room" @close-inspector="managerOpen = false">
     <template #sidebar-action>
       <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" title="新建群聊" aria-label="新建群聊" @click="createOpen = true">
-        <AppIcon name="edit" :size="17" />
+        <YaoYaoSidebarIcon name="add" />
         <span>新建群聊</span>
       </button>
     </template>
