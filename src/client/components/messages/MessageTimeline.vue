@@ -61,7 +61,9 @@ const emit = defineEmits<{
 const scroller = ref<HTMLElement | null>(null)
 const pinnedToBottom = ref(true)
 const showJump = ref(false)
+const copiedMessageId = ref('')
 const timelineRows = computed(() => buildMessageTimelineRows(props.messages))
+let copyResetTimer: number | undefined
 
 const formatTime = formatMessageTime
 
@@ -126,21 +128,30 @@ function scrollToAnchor(messageId: string, anchorId: string): boolean {
 
 async function copyMessage(message: UiMessage) {
   const text = displayContentForMessage(message.role, message.content)
+  let copied = false
   try {
     if (navigator.clipboard?.writeText && window.isSecureContext) {
       await navigator.clipboard.writeText(text)
-      return
+      copied = true
     }
   } catch { /* Fall through to the HTTP-compatible browser fallback. */ }
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', '')
-  textarea.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  const copied = document.execCommand('copy')
-  textarea.remove()
+  if (!copied) {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    copied = document.execCommand('copy')
+    textarea.remove()
+  }
   if (!copied) throw new Error('浏览器拒绝访问剪贴板')
+  copiedMessageId.value = message.id
+  if (copyResetTimer !== undefined) window.clearTimeout(copyResetTimer)
+  copyResetTimer = window.setTimeout(() => {
+    copiedMessageId.value = ''
+    copyResetTimer = undefined
+  }, 1400)
 }
 
 function hasConversationActions(message: UiMessage): boolean {
@@ -276,7 +287,13 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
 
             <div v-if="hasConversationActions(message)" class="message__actions">
               <time v-if="message.role === 'assistant' && !showAssistantIdentity && message.createdAt" class="message__action-time">{{ formatTime(message.createdAt) }}</time>
-              <button type="button" title="复制" aria-label="复制消息" @click="copyMessage(message)"><AppIcon name="copy" :size="13" /></button>
+              <button
+                type="button"
+                :class="{ 'message-action--copied': copiedMessageId === message.id }"
+                :title="copiedMessageId === message.id ? '已复制' : '复制'"
+                :aria-label="copiedMessageId === message.id ? '已复制' : '复制消息'"
+                @click="copyMessage(message)"
+              ><AppIcon :name="copiedMessageId === message.id ? 'check' : 'copy'" :size="13" /></button>
               <button type="button" title="引用" aria-label="引用消息" @click="emit('quote', message)"><AppIcon name="quote" :size="13" /></button>
               <button v-if="message.role === 'assistant'" type="button" title="从这里分支" aria-label="从这里分支" @click="emit('branch', message)"><AppIcon name="branch" :size="13" /></button>
             </div>
@@ -334,7 +351,7 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
 .message__attachments { display: flex; margin-top: 8px; flex-wrap: wrap; gap: 7px; }.message__attachments button { display: flex; min-width: 90px; max-width: 210px; min-height: 42px; align-items: center; gap: 7px; padding: 5px 8px; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--text-secondary); cursor: pointer; }.message__attachments button:hover { border-color: var(--line-strong); }.message__attachments img { width: 48px; height: 48px; margin: -5px 0 -5px -8px; object-fit: cover; }.message__attachments button > span { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 7px; background: var(--surface-soft); }.message__attachments strong { min-width: 0; overflow: hidden; font-size: 10px; font-weight: 520; text-overflow: ellipsis; white-space: nowrap; }
 .message--user .message__attachments { margin: 0 0 9px; }.message--user .message__attachments button { width: 100%; max-width: none; min-height: 50px; padding: 7px 9px; border: 0; border-radius: 11px; background: rgba(255,255,255,.48); color: var(--text-primary); }.message--user .message__attachments button > span { width: 28px; height: 28px; background: rgba(255,255,255,.65); }.message--user .message__attachments strong { font-size: 11px; font-weight: 560; }.dark .message--user .message__attachments button { background: rgba(255,255,255,.08); }
 .message__tools { margin-top: 9px; }.message__error { display: flex; align-items: center; gap: 5px; margin: 7px 0 0; color: var(--danger); font-size: 9px; }
-.message__actions { display: flex; position: absolute; left: -3px; top: 100%; gap: 2px; padding-top: 2px; opacity: 0; transition: opacity 120ms ease; }.message:hover .message__actions, .message:focus-within .message__actions { opacity: 1; }.message--user .message__actions { right: 0; left: auto; }.message__actions button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; }.message__actions button:hover { background: var(--surface-soft); color: var(--text-primary); }
+.message__actions { display: flex; position: absolute; left: -3px; top: 100%; gap: 2px; padding-top: 2px; opacity: 0; transition: opacity 120ms ease; }.message:hover .message__actions, .message:focus-within .message__actions { opacity: 1; }.message--user .message__actions { right: 0; left: auto; }.message__actions button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; }.message__actions button:hover { background: var(--surface-soft); color: var(--text-primary); }.message__actions .message-action--copied { color: var(--success); }
 .message--assistant-anonymous .message__actions { align-items: center; }.message__action-time { min-width: 36px; padding: 0 4px 0 3px; color: var(--text-muted); font-size: 9px; font-variant-numeric: tabular-nums; }
 .message--failed .message__body { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
 .message--revealed .message__body { animation: reveal-message 1.8s ease; }
