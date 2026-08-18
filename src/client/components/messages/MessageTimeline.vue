@@ -9,6 +9,7 @@ import TurnTrace from './TurnTrace.vue'
 import type { UiInteraction, UiLocalFileLink, UiMessage } from './types'
 import { buildMessageTimelineRows } from '@/utils/turnTrace'
 import { displayContentForMessage } from '@/utils/messageDisplay'
+import { formatMessageTime } from '@/utils/messageTime'
 
 const props = withDefaults(defineProps<{
   messages: UiMessage[]
@@ -62,12 +63,7 @@ const pinnedToBottom = ref(true)
 const showJump = ref(false)
 const timelineRows = computed(() => buildMessageTimelineRows(props.messages))
 
-function formatTime(value?: string | number | Date) {
-  if (!value) return ''
-  const date = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(date)
-}
+const formatTime = formatMessageTime
 
 function delegationSummary(metadata?: Record<string, unknown>): string {
   const total = Number(metadata?.task_count ?? 0)
@@ -129,7 +125,22 @@ function scrollToAnchor(messageId: string, anchorId: string): boolean {
 }
 
 async function copyMessage(message: UiMessage) {
-  await navigator.clipboard.writeText(displayContentForMessage(message.role, message.content))
+  const text = displayContentForMessage(message.role, message.content)
+  try {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+      return
+    }
+  } catch { /* Fall through to the HTTP-compatible browser fallback. */ }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  textarea.remove()
+  if (!copied) throw new Error('浏览器拒绝访问剪贴板')
 }
 
 function hasConversationActions(message: UiMessage): boolean {
