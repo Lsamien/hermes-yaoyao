@@ -35,6 +35,7 @@ const renaming = ref(false)
 const renameValue = ref('')
 const composer = ref<InstanceType<typeof ComposerShell> | null>(null)
 const timeline = ref<InstanceType<typeof MessageTimeline> | null>(null)
+const restoringRouteProfile = ref('')
 
 const sessions = computed(() => [...chat.sessions]
   .filter(session => !['cron', 'ios_group'].includes(session.source))
@@ -94,13 +95,20 @@ async function findLegacySessionProfile(sessionId: string): Promise<string> {
   return auth.activeProfile?.name || ''
 }
 
+async function ensureRouteProfile(profile: string): Promise<void> {
+  if (!profile || auth.activeProfile?.name === profile) return
+  chat.switchProfile(profile)
+  restoringRouteProfile.value = profile
+  auth.selectProfile(profile)
+  await nextTick()
+}
+
 async function refreshSessions() {
   const requestedId = typeof route.params.sessionId === 'string' ? route.params.sessionId : ''
   const profile = routeProfile() || (requestedId ? await findLegacySessionProfile(requestedId) : auth.activeProfile?.name || '')
   if (profile && auth.activeProfile?.name !== profile) {
     if (requestedId) await router.replace(sessionLocation(requestedId, profile))
-    auth.selectProfile(profile)
-    return
+    await ensureRouteProfile(profile)
   }
   // The session route is the authoritative navigation target. A secondary
   // unread-count request must never prevent its history from being restored.
@@ -112,10 +120,12 @@ async function refreshSessions() {
 
 async function chooseSession(id: string) {
   const session = chat.sessions.find(item => item.id === id)
-  await router.push(sessionLocation(id, session?.profile || auth.activeProfile?.name || 'default'))
-  if (session?.profile && auth.activeProfile?.name !== session.profile) auth.selectProfile(session.profile)
-  await chat.selectSession(id, session?.profile)
-  await chat.markRead(id, session?.profile)
+  const profile = session?.profile || auth.activeProfile?.name || 'default'
+  await router.push(sessionLocation(id, profile))
+  await ensureRouteProfile(profile)
+  if (chat.activeProfileName !== profile) await chat.loadSessions(profile)
+  await chat.selectSession(id, profile)
+  await chat.markRead(id, profile)
   quoted.value = null
 }
 
@@ -207,10 +217,13 @@ onBeforeUnmount(() => chat.disconnect())
 
 watch(() => auth.activeProfile?.name, async (profile, previous) => {
   if (!profile || profile === previous) return
+  if (restoringRouteProfile.value === profile) {
+    restoringRouteProfile.value = ''
+    return
+  }
   chat.switchProfile(profile)
   const requestedId = typeof route.params.sessionId === 'string' ? route.params.sessionId : ''
   if (requestedId && routeProfile() === profile) {
-    chat.switchProfile(profile)
     await Promise.allSettled([chat.loadSessions(profile), chat.loadModels(profile), chat.loadUnread(profile), chat.connect()])
     await chat.selectSession(requestedId, profile)
     return
