@@ -15,6 +15,14 @@ export function previewItemFromUrl(name: string, url: string, id = `local:${url}
   return { id, name, kind: kind || inferred, previewUrl: url, downloadUrl: url }
 }
 
+export function mediaUrlIdentity(url: string): string {
+  try {
+    return new URL(url, window.location.origin).href
+  } catch {
+    return url
+  }
+}
+
 function nameFromUrl(url: string): string {
   try { return decodeURIComponent(new URL(url, window.location.origin).pathname.split('/').at(-1) || '媒体') } catch { return '媒体' }
 }
@@ -24,8 +32,10 @@ export function mediaItemsFromMessages(messages: UiMessage[]): UiLibraryItem[] {
   const result: UiLibraryItem[] = []
   const seen = new Set<string>()
   const append = (item: UiLibraryItem) => {
-    if (!item.previewUrl || !['image', 'video'].includes(item.kind) || seen.has(item.previewUrl)) return
-    seen.add(item.previewUrl)
+    if (!item.previewUrl || !['image', 'video'].includes(item.kind)) return
+    const identity = mediaUrlIdentity(item.previewUrl)
+    if (seen.has(identity)) return
+    seen.add(identity)
     result.push(item)
   }
   for (const message of messages) {

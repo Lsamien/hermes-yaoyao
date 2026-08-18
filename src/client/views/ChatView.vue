@@ -12,7 +12,7 @@ import PreviewModal from '@/components/library/PreviewModal.vue'
 import ImagePreviewLightbox from '@/components/library/ImagePreviewLightbox.vue'
 import type { PreviewMedia } from '@/components/library/ImagePreviewLightbox.vue'
 import type { UiLibraryItem } from '@/components/library/types'
-import { mediaItemsFromMessages, previewItemFromUrl } from '@/components/library/mediaSequence'
+import { mediaItemsFromMessages, mediaUrlIdentity, previewItemFromUrl } from '@/components/library/mediaSequence'
 import MessageTimeline from '@/components/messages/MessageTimeline.vue'
 import type { UiMessage } from '@/components/messages/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
@@ -156,7 +156,8 @@ function openAttachment(attachment: NonNullable<UiMessage['attachments']>[number
 }
 
 function openMedia(item: UiLibraryItem) {
-  const index = lightboxMedia.value.findIndex(media => media.url === (item.previewUrl || item.downloadUrl))
+  const target = mediaUrlIdentity(item.previewUrl || item.downloadUrl || '')
+  const index = lightboxMedia.value.findIndex(media => mediaUrlIdentity(media.url) === target)
   mediaPreviewIndex.value = index >= 0 ? index : null
 }
 

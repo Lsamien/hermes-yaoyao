@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mediaItemsFromMessages, previewItemFromUrl } from '@/components/library/mediaSequence'
+import { mediaItemsFromMessages, mediaUrlIdentity, previewItemFromUrl } from '@/components/library/mediaSequence'
 import type { UiMessage } from '@/components/messages/types'
 
 describe('conversation media sequence', () => {
@@ -20,5 +20,11 @@ describe('conversation media sequence', () => {
 
   it('infers full-view media kind from a clicked conversation link', () => {
     expect(previewItemFromUrl('片段.webm', '/media/clip.webm')).toMatchObject({ kind: 'video', previewUrl: '/media/clip.webm' })
+  })
+
+  it('gives rendered and source Chinese paths the same media identity', () => {
+    expect(mediaUrlIdentity('/Users/samien/Agents/瑶儿/单视角图片.png')).toBe(
+      mediaUrlIdentity('/Users/samien/Agents/%E7%91%B6%E5%84%BF/%E5%8D%95%E8%A7%86%E8%A7%92%E5%9B%BE%E7%89%87.png'),
+    )
   })
 })
