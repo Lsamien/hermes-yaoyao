@@ -30,6 +30,14 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   await page.goto('/files')
   await expect(page.getByRole('heading', { name: '文件库', exact: true }).last()).toBeVisible()
   await expect(page.getByText('demo-report.pdf')).toBeVisible()
+  const firstFileCard = page.locator('.library-grid article').first()
+  const cardGeometry = await firstFileCard.evaluate(element => {
+    const card = element.getBoundingClientRect()
+    const preview = element.querySelector('.library-thumb')?.getBoundingClientRect()
+    return { width: card.width, previewHeight: preview?.height || 0 }
+  })
+  expect(cardGeometry.width).toBeGreaterThanOrEqual(220)
+  expect(cardGeometry.previewHeight).toBe(154)
   await page.getByText('demo-report.pdf').click()
   await expect(page.getByRole('dialog', { name: /预览 demo-report.pdf/ })).toBeVisible()
   await expect(page.locator('.preview-meta')).toHaveCount(0)
