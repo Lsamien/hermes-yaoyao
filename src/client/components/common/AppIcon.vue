@@ -40,6 +40,8 @@ type IconName =
   | 'edit'
   | 'panel'
   | 'pin'
+  | 'pin-filled'
+  | 'pin-off'
 
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 18 })
 </script>
@@ -108,6 +110,8 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 18 })
     <template v-else-if="name === 'edit'"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z" /></template>
     <template v-else-if="name === 'panel'"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M15 3v18" /></template>
     <template v-else-if="name === 'pin'"><path d="M9 4v6l-2 4v2h10v-2l-2-4V4M12 16v5M8 4h8" /></template>
+    <template v-else-if="name === 'pin-filled'"><path d="M8 3a1 1 0 0 0 0 2h1v4.72l-2.8 4.7A1 1 0 0 0 7.06 16H11v5a1 1 0 1 0 2 0v-5h3.94a1 1 0 0 0 .86-1.58L15 9.72V5h1a1 1 0 1 0 0-2z" fill="currentColor" stroke="none" /></template>
+    <template v-else-if="name === 'pin-off'"><path d="M9 4v6l-2 4v2h10v-2l-2-4V4M12 16v5M8 4h8" /><path d="M4 4l16 16" /></template>
   </svg>
 </template>
 

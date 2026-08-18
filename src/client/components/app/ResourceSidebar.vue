@@ -139,7 +139,7 @@ defineExpose({ focusSearch })
             </span>
             <span class="sidebar-item__copy">
               <span class="sidebar-item__row">
-                <strong><AppIcon v-if="row.item.pinned" name="pin" :size="12" />{{ row.item.title }}</strong>
+                <strong><AppIcon v-if="row.item.pinned" name="pin-filled" :size="12" />{{ row.item.title }}</strong>
                 <small v-if="row.item.meta">{{ row.item.meta }}</small>
               </span>
               <span v-if="!singleLine && row.item.subtitle" class="sidebar-item__row sidebar-item__row--secondary">

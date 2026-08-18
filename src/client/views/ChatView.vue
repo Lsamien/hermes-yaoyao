@@ -411,7 +411,7 @@ watch(() => chat.activeSessionId, async id => {
           <div><button class="quiet-button" type="button" @click="renaming = false">取消</button><button class="solid-button" type="button" @click="saveRename">保存</button></div>
         </template>
         <template v-else>
-          <button class="action-row" role="menuitem" type="button" @click="toggleSessionPinned"><AppIcon name="pin" :size="14" />{{ actionSession?.pinned ? '取消置顶' : '置顶会话' }}</button>
+          <button class="action-row" role="menuitem" type="button" @click="toggleSessionPinned"><AppIcon :name="actionSession?.pinned ? 'pin-off' : 'pin'" :size="14" />{{ actionSession?.pinned ? '取消置顶' : '置顶会话' }}</button>
           <button class="action-row" role="menuitem" type="button" @click="renaming = true"><AppIcon name="edit" :size="14" />重命名</button>
           <button class="action-row danger" role="menuitem" type="button" @click="deleteSession"><AppIcon name="trash" :size="14" />删除会话</button>
         </template>
