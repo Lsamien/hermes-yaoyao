@@ -102,8 +102,15 @@ test('renders historical assistant MEDIA as Markdown in chat and group chat', as
   await expect(mediaDialog.locator('img')).toHaveAttribute('src', /variant=2/)
   await page.keyboard.press('ArrowLeft')
   await expect(mediaDialog.locator('img')).not.toHaveAttribute('src', /variant=2/)
+  await expect(mediaDialog.getByRole('link', { name: /下载 AppIcon-1024\.png/ })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: /预览 AppIcon-1024.png/ })).toBeHidden()
+
+  await image.click()
+  const reopenedMediaDialog = page.getByRole('dialog', { name: /预览 AppIcon-1024.png/ })
+  await reopenedMediaDialog.getByRole('button', { name: '添加到聊天' }).click()
+  await expect(reopenedMediaDialog).toBeHidden()
+  await expect(page.locator('.composer-attachments img[alt="AppIcon-1024.png"]')).toBeVisible()
 
   await page.getByRole('button', { name: '群聊' }).click()
   await expect(page.locator('.markdown img[alt="AppIcon-1024.png"]')).toBeVisible()

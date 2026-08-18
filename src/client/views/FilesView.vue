@@ -6,6 +6,7 @@ import AppIcon from '@/components/common/AppIcon.vue'
 import LibraryGrid from '@/components/library/LibraryGrid.vue'
 import PreviewModal from '@/components/library/PreviewModal.vue'
 import ImagePreviewLightbox from '@/components/library/ImagePreviewLightbox.vue'
+import type { PreviewMedia } from '@/components/library/ImagePreviewLightbox.vue'
 import type { LibraryFilterOption, UiLibraryItem } from '@/components/library/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
@@ -57,6 +58,11 @@ function updateFilter(value: string) {
 async function addToComposer(item: UiLibraryItem) {
   if (!queueLibraryItemForComposer(item)) return
   await router.push('/chat')
+}
+
+async function addMediaToComposer(media: PreviewMedia) {
+  const item = items.value.find(candidate => (candidate.previewUrl || candidate.downloadUrl) === media.url)
+  if (item) await addToComposer(item)
 }
 
 async function openSource(item: UiLibraryItem) {
@@ -146,7 +152,7 @@ watch(() => auth.activeProfile?.name, profile => {
     </section>
   </WorkspaceView>
   <PreviewModal v-if="selected" :item="selected" :items="items" @close="selected = null" @add-to-composer="addToComposer" @source="openSource" />
-  <ImagePreviewLightbox v-model="mediaIndex" :images="lightboxMedia" />
+  <ImagePreviewLightbox v-model="mediaIndex" :images="lightboxMedia" @add="addMediaToComposer" />
 </template>
 
 <style scoped>

@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { ChevronBackOutline, ChevronForwardOutline, CloseOutline } from '@vicons/ionicons5'
+import { AddOutline, ChevronBackOutline, ChevronForwardOutline, CloseOutline, DownloadOutline } from '@vicons/ionicons5'
 
 export type PreviewMedia = { url: string; name: string; type?: 'image' | 'video' }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   images: PreviewMedia[]
   modelValue: number | null
   closeLabel?: string
+  addLabel?: string
+  canAdd?: boolean
   previousLabel?: string
   nextLabel?: string
-}>()
-const emit = defineEmits<{ 'update:modelValue': [value: number | null]; close: [] }>()
+}>(), { canAdd: true })
+const emit = defineEmits<{ 'update:modelValue': [value: number | null]; close: []; add: [media: PreviewMedia] }>()
 
 const dragStart = ref<{ pointerId: number; x: number } | null>(null)
 const previewMedia = computed(() => props.modelValue === null ? null : props.images[props.modelValue] || null)
@@ -58,7 +60,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       @pointerup="onPointerUp"
       @pointercancel="dragStart = null"
     >
-      <button class="image-preview-close" type="button" :aria-label="closeLabel || '关闭预览'" @click="close"><CloseOutline aria-hidden="true" /></button>
+      <div class="image-preview-actions">
+        <a :href="previewMedia.url" download :aria-label="`下载 ${previewMedia.name}`" :title="`下载 ${previewMedia.name}`"><DownloadOutline aria-hidden="true" /></a>
+        <button type="button" :disabled="canAdd === false" :aria-label="addLabel || '添加到聊天'" :title="canAdd === false ? '当前群聊不支持添加附件' : addLabel || '添加到聊天'" @click.stop="emit('add', previewMedia)"><AddOutline aria-hidden="true" /></button>
+        <button type="button" :aria-label="closeLabel || '关闭预览'" :title="closeLabel || '关闭预览'" @click="close"><CloseOutline aria-hidden="true" /></button>
+      </div>
       <button v-if="canPrevious" class="image-preview-nav image-preview-nav--previous" type="button" :aria-label="previousLabel || '上一张媒体'" @click.stop="move(-1)"><ChevronBackOutline aria-hidden="true" /></button>
       <Transition name="image-preview-change" mode="out-in">
         <video v-if="previewMedia.type === 'video'" :key="previewMedia.url" :src="previewMedia.url" :aria-label="previewMedia.name" class="image-preview-video" controls playsinline preload="metadata" @click.stop @pointerdown.stop @pointerup.stop />
@@ -74,11 +80,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .image-preview-overlay { position: fixed; z-index: 9999; inset: 0; display: flex; align-items: center; justify-content: center; isolation: isolate; background: rgba(0,0,0,.85); touch-action: none; user-select: none; }
 .image-preview-img, .image-preview-video { position: relative; z-index: 1; max-width: 90vw; max-height: 84vh; border-radius: 8px; object-fit: contain; box-shadow: 0 22px 64px rgba(0,0,0,.42); }
 .image-preview-video { width: min(90vw, 1200px); background: #000; }
-.image-preview-close, .image-preview-nav { position: absolute; z-index: 2; display: inline-flex; align-items: center; justify-content: center; border: 0; background: rgba(255,255,255,.12); color: #fff; cursor: pointer; backdrop-filter: blur(12px); transition: background .15s ease, transform .15s ease; }
-.image-preview-close:hover, .image-preview-close:focus-visible, .image-preview-nav:hover, .image-preview-nav:focus-visible { outline: none; background: rgba(255,255,255,.22); }
-.image-preview-close { top: 20px; right: 20px; width: 40px; height: 40px; border-radius: 50%; }.image-preview-close svg { width: 20px; height: 20px; }
+.image-preview-actions { position: absolute; z-index: 3; top: 20px; right: 20px; display: flex; align-items: center; gap: 8px; }
+.image-preview-actions > a, .image-preview-actions > button, .image-preview-nav { display: inline-flex; align-items: center; justify-content: center; border: 0; background: rgba(255,255,255,.12); color: #fff; cursor: pointer; backdrop-filter: blur(12px); transition: background .15s ease, transform .15s ease, opacity .15s ease; }
+.image-preview-actions > a, .image-preview-actions > button { width: 40px; height: 40px; padding: 0; border-radius: 50%; text-decoration: none; }
+.image-preview-actions svg { width: 20px; height: 20px; }
+.image-preview-actions > a:hover, .image-preview-actions > a:focus-visible, .image-preview-actions > button:hover, .image-preview-actions > button:focus-visible, .image-preview-nav:hover, .image-preview-nav:focus-visible { outline: none; background: rgba(255,255,255,.22); }
+.image-preview-actions > button:disabled { cursor: not-allowed; opacity: .38; }
 .image-preview-nav { top: 50%; width: 46px; height: 58px; border-radius: 14px; transform: translateY(-50%); }.image-preview-nav svg { width: 24px; height: 24px; }.image-preview-nav:hover, .image-preview-nav:focus-visible { transform: translateY(-50%) scale(1.04); }.image-preview-nav--previous { left: 24px; }.image-preview-nav--next { right: 24px; }
 .image-preview-counter { position: absolute; z-index: 2; bottom: 22px; left: 50%; padding: 6px 10px; border-radius: 999px; background: rgba(0,0,0,.46); color: rgba(255,255,255,.9); font-size: 12px; font-variant-numeric: tabular-nums; transform: translateX(-50%); }
 .image-preview-change-enter-active, .image-preview-change-leave-active { transition: opacity .16s ease, transform .16s ease; }.image-preview-change-enter-from { opacity: 0; transform: translateX(14px); }.image-preview-change-leave-to { opacity: 0; transform: translateX(-14px); }
-@media (max-width: 600px) { .image-preview-img, .image-preview-video { max-width: calc(100vw - 32px); max-height: 78vh; }.image-preview-video { width: calc(100vw - 32px); }.image-preview-close { top: max(14px, env(safe-area-inset-top)); right: 14px; }.image-preview-nav { width: 38px; height: 50px; border-radius: 12px; }.image-preview-nav--previous { left: 10px; }.image-preview-nav--next { right: 10px; } }
+@media (max-width: 600px) { .image-preview-img, .image-preview-video { max-width: calc(100vw - 32px); max-height: 78vh; }.image-preview-video { width: calc(100vw - 32px); }.image-preview-actions { top: max(14px, env(safe-area-inset-top)); right: 14px; gap: 6px; }.image-preview-actions > a, .image-preview-actions > button { width: 40px; height: 40px; }.image-preview-nav { width: 38px; height: 50px; border-radius: 12px; }.image-preview-nav--previous { left: 10px; }.image-preview-nav--next { right: 10px; } }
 </style>

@@ -10,6 +10,7 @@ import type { ComposerOption, ComposerReference, ComposerSubmit } from '@/compon
 import PreviewInspector from '@/components/library/PreviewInspector.vue'
 import PreviewModal from '@/components/library/PreviewModal.vue'
 import ImagePreviewLightbox from '@/components/library/ImagePreviewLightbox.vue'
+import type { PreviewMedia } from '@/components/library/ImagePreviewLightbox.vue'
 import type { UiLibraryItem } from '@/components/library/types'
 import { mediaItemsFromMessages, previewItemFromUrl } from '@/components/library/mediaSequence'
 import MessageTimeline from '@/components/messages/MessageTimeline.vue'
@@ -17,7 +18,7 @@ import type { UiMessage } from '@/components/messages/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
 import { chatInteraction, chatMessagesToUi, sessionSidebarItem } from '@/components/workspace/viewModels'
-import { consumeLibraryItemForComposer } from '@/components/workspace/pendingComposer'
+import { consumeLibraryItemForComposer, loadComposerFile } from '@/components/workspace/pendingComposer'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { getSession } from '@/api/sessions'
@@ -163,6 +164,21 @@ function openLocalFile({ name, url }: { name: string; url: string }) {
   const item = previewItemFromUrl(name, url)
   if (item.kind === 'image' || item.kind === 'video') openMedia(item)
   else filePreview.value = item
+}
+
+async function addPreviewToComposer(item: UiLibraryItem) {
+  const file = await loadComposerFile(item)
+  if (!file || !composer.value) return
+  composer.value.attachFiles([file])
+  preview.value = null
+  filePreview.value = null
+  mediaPreviewIndex.value = null
+  await nextTick()
+  composer.value?.focus()
+}
+
+async function addMediaToComposer(media: PreviewMedia) {
+  await addPreviewToComposer(previewItemFromUrl(media.name, media.url, `preview:${media.url}`, media.type))
 }
 
 async function selectModel(id: string) {
@@ -337,11 +353,11 @@ watch(() => chat.activeSessionId, async id => {
       />
     </div>
 
-    <template #inspector><PreviewInspector v-if="preview" :item="preview" @close="preview = null" @add-to-composer="preview = null" /></template>
+    <template #inspector><PreviewInspector v-if="preview" :item="preview" @close="preview = null" @add-to-composer="addPreviewToComposer" /></template>
   </WorkspaceView>
 
-  <PreviewModal v-if="filePreview" :item="filePreview" :items="conversationMediaItems" @close="filePreview = null" @add-to-composer="filePreview = null" @source="filePreview = null" />
-  <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" />
+  <PreviewModal v-if="filePreview" :item="filePreview" :items="conversationMediaItems" @close="filePreview = null" @add-to-composer="addPreviewToComposer" @source="filePreview = null" />
+  <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" @add="addMediaToComposer" />
 
   <ChoiceDialog :open="modelDialog" title="选择模型" :options="modelOptions" :selected-id="selectedModelId" @close="modelDialog = false" @select="selectModel" />
 

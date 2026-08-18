@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/common/AppIcon.vue'
 import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
@@ -10,12 +10,14 @@ import CreateGroupDialog from '@/components/groups/CreateGroupDialog.vue'
 import GroupManager from '@/components/groups/GroupManager.vue'
 import PreviewModal from '@/components/library/PreviewModal.vue'
 import ImagePreviewLightbox from '@/components/library/ImagePreviewLightbox.vue'
+import type { PreviewMedia } from '@/components/library/ImagePreviewLightbox.vue'
 import type { UiLibraryItem } from '@/components/library/types'
 import { mediaItemsFromMessages, previewItemFromUrl } from '@/components/library/mediaSequence'
 import MessageTimeline from '@/components/messages/MessageTimeline.vue'
 import type { UiMessage } from '@/components/messages/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
+import { loadComposerFile } from '@/components/workspace/pendingComposer'
 import { agentToUi, groupInteraction, groupMessageToUi, roomSidebarItem, roomToUi } from '@/components/workspace/viewModels'
 import { useAuthStore } from '@/stores/auth'
 import { useGroupsStore } from '@/stores/groups'
@@ -117,6 +119,21 @@ function openAttachment(attachment: NonNullable<UiMessage['attachments']>[number
   item.size = attachment.size
   if (item.kind === 'image' || item.kind === 'video') openMedia(item)
   else preview.value = item
+}
+
+async function addPreviewToComposer(item: UiLibraryItem) {
+  if (!uploadsEnabled.value) return
+  const file = await loadComposerFile(item)
+  if (!file || !composer.value) return
+  composer.value.attachFiles([file])
+  preview.value = null
+  mediaPreviewIndex.value = null
+  await nextTick()
+  composer.value?.focus()
+}
+
+async function addMediaToComposer(media: PreviewMedia) {
+  await addPreviewToComposer(previewItemFromUrl(media.name, media.url, `preview:${media.url}`, media.type))
 }
 
 onMounted(async () => {
@@ -228,8 +245,8 @@ watch(() => route.params.roomId, async roomId => {
   </WorkspaceView>
 
   <CreateGroupDialog :open="createOpen" :profiles="profiles" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
-  <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="preview = null" @source="preview = null" />
-  <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" />
+  <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="addPreviewToComposer" @source="preview = null" />
+  <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" :can-add="uploadsEnabled" @add="addMediaToComposer" />
 </template>
 
 <style scoped>
