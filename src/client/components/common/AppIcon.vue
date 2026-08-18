@@ -16,6 +16,7 @@ type IconName =
   | 'brain'
   | 'settings'
   | 'model'
+  | 'bolt'
   | 'arrow-up'
   | 'stop'
   | 'tools'
@@ -86,6 +87,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 18 })
     <template v-else-if="name === 'brain'"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-5-.1 2.5 2.5 0 0 1-3-3 3 3 0 0 1 0-5.8A2.5 2.5 0 0 1 7 6a2.5 2.5 0 0 1 2.5-4Z" /><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 5-.1 2.5 2.5 0 0 0 3-3 3 3 0 0 0 0-5.8A2.5 2.5 0 0 0 17 6a2.5 2.5 0 0 0-2.5-4Z" /></template>
     <template v-else-if="name === 'settings'"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5v.2h-4v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1-2.8-2.8.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.5-1H3v-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1 2.8-2.8.1.1a1.7 1.7 0 0 0 1.8.3 1.7 1.7 0 0 0 1-1.5V3h4v.2a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1 2.8 2.8-.1.1A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.5 1h.1v4h-.1a1.7 1.7 0 0 0-1.5 1Z" /></template>
     <template v-else-if="name === 'model'"><circle cx="12" cy="12" r="3" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l3 3M16 16l3 3M5 19l3-3M16 8l3-3" /></template>
+    <template v-else-if="name === 'bolt'"><path d="M13.3 2 4.5 13h6.2L9.8 22l9.7-12h-6.2z" fill="currentColor" stroke="none" /></template>
     <template v-else-if="name === 'arrow-up'"><path d="M12 19V5m-7 7 7-7 7 7" stroke-width="2.2" /></template>
     <template v-else-if="name === 'stop'"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none" /></template>
     <template v-else-if="name === 'tools'"><path d="M14.7 6.3a4 4 0 0 0-5-5L12 3.6 8.4 7.2 6.1 4.9a4 4 0 0 0 5 5l-7.4 7.4a2.1 2.1 0 0 0 3 3l7.4-7.4a4 4 0 0 0 5-5l-2.3 2.3-3.6-3.6z" /></template>

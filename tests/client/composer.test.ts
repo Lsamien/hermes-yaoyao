@@ -14,4 +14,15 @@ describe('composer availability', () => {
     expect(wrapper.find('[aria-label="停止生成"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="发送消息"]').exists()).toBe(false)
   })
+
+  it('places an accessible blue fast-mode toggle beside the model control', () => {
+    const wrapper = mount(ComposerShell, { props: { mode: 'chat', modelLabel: 'gpt-5.6-terra', fastMode: true } })
+    const model = wrapper.get('.composer-tool--model')
+    const fast = wrapper.get('.composer-fast-mode')
+    expect(model.element.nextElementSibling).toBe(fast.element)
+    expect(fast.attributes('aria-pressed')).toBe('true')
+    expect(fast.classes()).toContain('active')
+    fast.trigger('click')
+    expect(wrapper.emitted('fastModeToggle')?.[0]).toEqual([false])
+  })
 })

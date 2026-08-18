@@ -204,6 +204,10 @@ function selectReasoning(id: string) {
   chat.reasoningEffort = id || undefined
 }
 
+async function toggleFastMode(enabled: boolean) {
+  try { await chat.setFastMode(enabled) } catch { /* store restores the acknowledged state */ }
+}
+
 function restoreShowThinking(profile = auth.activeProfile?.name || 'default') {
   showThinking.value = readAgentShowThinking(auth.user?.id ?? 'local', profile)
 }
@@ -414,6 +418,8 @@ watch(() => chat.activeSessionId, async id => {
         :streaming="chat.isStreaming"
         :sending="chat.isSending"
         :model-label="chat.selectedModel?.name || '选择模型'"
+        :fast-mode="chat.fastMode"
+        :fast-mode-disabled="!chat.activeSessionId"
         :reasoning-effort="reasoningLabel"
         :reasoning-value="chat.reasoningEffort || ''"
         :reasoning-options="reasoningComposerOptions"
@@ -430,6 +436,7 @@ watch(() => chat.activeSessionId, async id => {
         @send="send"
         @stop="chat.interrupt"
         @model-click="modelDialog = true"
+        @fast-mode-toggle="toggleFastMode"
         @reasoning-change="selectReasoning"
         @settings-click="toggleShowThinking"
         @queue-toggle="queueMode = !queueMode"

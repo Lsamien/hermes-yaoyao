@@ -11,6 +11,8 @@ const props = withDefaults(defineProps<{
   streaming?: boolean
   sending?: boolean
   modelLabel?: string
+  fastMode?: boolean
+  fastModeDisabled?: boolean
   reasoningEffort?: string
   reasoningValue?: string
   reasoningOptions?: ComposerOption[]
@@ -30,6 +32,8 @@ const props = withDefaults(defineProps<{
   streaming: false,
   sending: false,
   modelLabel: '选择模型',
+  fastMode: false,
+  fastModeDisabled: false,
   reasoningEffort: '默认',
   reasoningValue: '',
   reasoningOptions: () => [],
@@ -47,6 +51,7 @@ const emit = defineEmits<{
   send: [payload: ComposerSubmit]
   stop: []
   modelClick: []
+  fastModeToggle: [enabled: boolean]
   reasoningChange: [value: string]
   settingsClick: []
   queueToggle: []
@@ -470,6 +475,19 @@ defineExpose({
           <button v-if="mode === 'chat'" class="composer-tool composer-tool--model" type="button" :disabled="disabled" :title="modelLabel" @click="emit('modelClick')">
             <AppIcon name="model" :size="15" /><span>{{ compactModel }}</span><AppIcon name="chevron-down" :size="11" />
           </button>
+          <button
+            v-if="mode === 'chat'"
+            class="composer-tool composer-tool--icon composer-fast-mode"
+            :class="{ active: fastMode }"
+            type="button"
+            :disabled="disabled || fastModeDisabled"
+            :aria-pressed="fastMode"
+            :aria-label="`快速模式：${fastMode ? '已开启' : '已关闭'}`"
+            title="快速模式：响应更快，消耗更多额度"
+            @click="emit('fastModeToggle', !fastMode)"
+          >
+            <AppIcon name="bolt" :size="15" />
+          </button>
           <span v-else class="composer-mention-hint"><b>@</b><span>提及 Agent</span></span>
         </div>
         <div class="composer-actions">
@@ -551,6 +569,9 @@ defineExpose({
 .composer-tool span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .composer-tool--icon { width: 28px; padding: 0; }
 .composer-tool--model { min-width: 0; }
+.composer-fast-mode.active { background: color-mix(in srgb, #1677ff 12%, transparent); color: #1677ff; }
+.composer-fast-mode.active:hover { background: color-mix(in srgb, #1677ff 18%, transparent); color: #1677ff; }
+.dark .composer-fast-mode.active { color: #4c9aff; }
 .composer-mention-hint { display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 11px; }
 .composer-mention-hint b { display: grid; place-items: center; width: 21px; height: 21px; border-radius: 7px; background: var(--surface-soft); color: var(--text-secondary); font-size: 12px; }
 .composer-popover { position: absolute; z-index: 30; bottom: calc(100% + 10px); left: 0; width: min(320px, calc(100vw - 48px)); padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-raised); box-shadow: var(--shadow-float); }
