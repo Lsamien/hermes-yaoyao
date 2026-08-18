@@ -9,6 +9,7 @@ import ComposerShell from '@/components/composer/ComposerShell.vue'
 import type { ComposerOption, ComposerReference, ComposerSubmit } from '@/components/composer/types'
 import PreviewInspector from '@/components/library/PreviewInspector.vue'
 import PreviewModal from '@/components/library/PreviewModal.vue'
+import ImagePreviewLightbox from '@/components/library/ImagePreviewLightbox.vue'
 import type { UiLibraryItem } from '@/components/library/types'
 import { mediaItemsFromMessages, previewItemFromUrl } from '@/components/library/mediaSequence'
 import MessageTimeline from '@/components/messages/MessageTimeline.vue'
@@ -29,6 +30,7 @@ const search = ref('')
 const quoted = ref<UiMessage | null>(null)
 const preview = ref<UiLibraryItem | null>(null)
 const filePreview = ref<UiLibraryItem | null>(null)
+const mediaPreviewIndex = ref<number | null>(null)
 const modelDialog = ref(false)
 const showTools = ref(true)
 const queueMode = ref(false)
@@ -53,6 +55,7 @@ const sidebarItems = computed(() => sessions.value.map(session => sessionSidebar
 )))
 const messages = computed(() => chatMessagesToUi(chat.messages, profile => profile ? agentNames.value.get(profile) : undefined))
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
+const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
 const activeSession = computed(() => chat.activeSession)
 const connected = computed(() => ['connected', 'ready'].includes(chat.connectionState))
 const interaction = computed(() => chatInteraction(chat.pendingApproval, chat.pendingClarification))
@@ -147,12 +150,19 @@ async function send(payload: ComposerSubmit) {
 function openAttachment(attachment: NonNullable<UiMessage['attachments']>[number]) {
   const item = previewItemFromUrl(attachment.name, attachment.url || '', attachment.id, attachment.kind)
   item.size = attachment.size
-  if (item.kind === 'image' || item.kind === 'video') filePreview.value = item
+  if (item.kind === 'image' || item.kind === 'video') openMedia(item)
   else preview.value = item
 }
 
+function openMedia(item: UiLibraryItem) {
+  const index = lightboxMedia.value.findIndex(media => media.url === (item.previewUrl || item.downloadUrl))
+  mediaPreviewIndex.value = index >= 0 ? index : null
+}
+
 function openLocalFile({ name, url }: { name: string; url: string }) {
-  filePreview.value = previewItemFromUrl(name, url)
+  const item = previewItemFromUrl(name, url)
+  if (item.kind === 'image' || item.kind === 'video') openMedia(item)
+  else filePreview.value = item
 }
 
 async function selectModel(id: string) {
@@ -331,6 +341,7 @@ watch(() => chat.activeSessionId, async id => {
   </WorkspaceView>
 
   <PreviewModal v-if="filePreview" :item="filePreview" :items="conversationMediaItems" @close="filePreview = null" @add-to-composer="filePreview = null" @source="filePreview = null" />
+  <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" />
 
   <ChoiceDialog :open="modelDialog" title="选择模型" :options="modelOptions" :selected-id="selectedModelId" @close="modelDialog = false" @select="selectModel" />
 

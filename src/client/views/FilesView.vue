@@ -5,6 +5,7 @@ import type { FileKind } from '@shared/types'
 import AppIcon from '@/components/common/AppIcon.vue'
 import LibraryGrid from '@/components/library/LibraryGrid.vue'
 import PreviewModal from '@/components/library/PreviewModal.vue'
+import ImagePreviewLightbox from '@/components/library/ImagePreviewLightbox.vue'
 import type { LibraryFilterOption, UiLibraryItem } from '@/components/library/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
@@ -19,10 +20,12 @@ const auth = useAuthStore()
 const chat = useChatStore()
 const router = useRouter()
 const selected = ref<UiLibraryItem | null>(null)
+const mediaIndex = ref<number | null>(null)
 const historySearch = ref('')
 let searchTimer: number | undefined
 
 const items = computed(() => files.filteredItems.map(fileToUi))
+const lightboxMedia = computed(() => items.value.filter(item => item.kind === 'image' || item.kind === 'video').map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
 const agentNames = computed(() => new Map(auth.profiles.map(profile => [profile.name, profile.agentName || profile.displayName || profile.name])))
 const historyItems = computed(() => chat.sessions
   .filter(session => !['cron', 'ios_group'].includes(session.source))
@@ -68,6 +71,15 @@ async function openSource(item: UiLibraryItem) {
       ...(item.sourceProfile ? { profile: item.sourceProfile } : {}),
     },
   })
+}
+
+function selectFile(item: UiLibraryItem) {
+  if (item.kind === 'image' || item.kind === 'video') {
+    const index = lightboxMedia.value.findIndex(media => media.url === (item.previewUrl || item.downloadUrl))
+    mediaIndex.value = index >= 0 ? index : null
+    return
+  }
+  selected.value = item
 }
 
 async function selectSession(id: string) {
@@ -126,7 +138,7 @@ watch(() => auth.activeProfile?.name, profile => {
         :has-more="files.hasMore"
         empty-title="文件库还是空的"
         empty-description="聊天中的图片、文档和附件会出现在这里。"
-        @select="selected = $event"
+        @select="selectFile"
         @load-more="files.loadMore"
         @add-to-composer="addToComposer"
         @source="openSource"
@@ -134,6 +146,7 @@ watch(() => auth.activeProfile?.name, profile => {
     </section>
   </WorkspaceView>
   <PreviewModal v-if="selected" :item="selected" :items="items" @close="selected = null" @add-to-composer="addToComposer" @source="openSource" />
+  <ImagePreviewLightbox v-model="mediaIndex" :images="lightboxMedia" />
 </template>
 
 <style scoped>

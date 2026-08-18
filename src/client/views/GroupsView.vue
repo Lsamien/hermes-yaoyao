@@ -9,6 +9,7 @@ import type { ComposerOption, ComposerReference, ComposerSubmit } from '@/compon
 import CreateGroupDialog from '@/components/groups/CreateGroupDialog.vue'
 import GroupManager from '@/components/groups/GroupManager.vue'
 import PreviewModal from '@/components/library/PreviewModal.vue'
+import ImagePreviewLightbox from '@/components/library/ImagePreviewLightbox.vue'
 import type { UiLibraryItem } from '@/components/library/types'
 import { mediaItemsFromMessages, previewItemFromUrl } from '@/components/library/mediaSequence'
 import MessageTimeline from '@/components/messages/MessageTimeline.vue'
@@ -29,6 +30,7 @@ const managerOpen = ref(false)
 const showTools = ref(true)
 const quoted = ref<UiMessage | null>(null)
 const preview = ref<UiLibraryItem | null>(null)
+const mediaPreviewIndex = ref<number | null>(null)
 const composer = ref<InstanceType<typeof ComposerShell> | null>(null)
 
 const filteredRooms = computed(() => groups.rooms
@@ -37,6 +39,7 @@ const filteredRooms = computed(() => groups.rooms
 const sidebarItems = computed(() => filteredRooms.value.map(roomSidebarItem))
 const messages = computed(() => groups.messages.map(groupMessageToUi))
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
+const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
 const agents = computed(() => groups.agents.map(agentToUi))
 const connected = computed(() => ['connected', 'ready'].includes(groups.connectionState))
 const activeInteraction = computed(() => groupInteraction(groups.pendingInteractions[0]))
@@ -99,13 +102,21 @@ async function archiveRoom() {
 }
 
 function openLocalFile({ name, url }: { name: string; url: string }) {
-  preview.value = previewItemFromUrl(name, url)
+  const item = previewItemFromUrl(name, url)
+  if (item.kind === 'image' || item.kind === 'video') openMedia(item)
+  else preview.value = item
+}
+
+function openMedia(item: UiLibraryItem) {
+  const index = lightboxMedia.value.findIndex(media => media.url === (item.previewUrl || item.downloadUrl))
+  mediaPreviewIndex.value = index >= 0 ? index : null
 }
 
 function openAttachment(attachment: NonNullable<UiMessage['attachments']>[number]) {
   const item = previewItemFromUrl(attachment.name, attachment.url || '', attachment.id, attachment.kind)
   item.size = attachment.size
-  preview.value = item
+  if (item.kind === 'image' || item.kind === 'video') openMedia(item)
+  else preview.value = item
 }
 
 onMounted(async () => {
@@ -218,6 +229,7 @@ watch(() => route.params.roomId, async roomId => {
 
   <CreateGroupDialog :open="createOpen" :profiles="profiles" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
   <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="preview = null" @source="preview = null" />
+  <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" />
 </template>
 
 <style scoped>
