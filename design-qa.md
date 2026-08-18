@@ -132,6 +132,22 @@ Chat and group timelines now use the reference cool blue-gray conversation canva
 
 final result: passed
 
+## Mobile login simplification pass
+
+- Source visual truth: the four user browser annotations attached in the current turn, captured at 542 × 788 and marking the product wordmark, brand block, login copy, and footer note.
+- Browser-rendered implementation: `/tmp/hermes-yaoyao-login-centered-542x788.jpg`, 542 × 788 CSS viewport, light theme, anonymous/error login state.
+- Density normalization: source and implementation use the same CSS viewport; implementation capture is 542 × 788 pixels at density 1.
+- Full-view comparison: the 72px AppIcon is centered over the form, the product wordmark is absent, “登录 Hermes” is centered, and both requested small-copy regions are removed.
+- Focused evidence: DOM measurements report panel center `271px` and Logo center `271px`; heading `text-align: center`; `.brand-mark__name`, `.login-copy p`, and `.login-note` counts are all `0`; no horizontal overflow and no console errors/warnings.
+- Fonts and typography: the existing UI font, 18px/630 login heading, and compact form hierarchy are preserved.
+- Spacing and layout rhythm: the centered brand-to-heading gap is 34px; form alignment and control sizing remain unchanged.
+- Colors and visual tokens: existing neutral canvas, form surfaces, error state, and theme control remain unchanged.
+- Image quality and asset fidelity: the original mobile AppIcon is retained at native proportions with no replacement asset.
+- Copy and content: “夭夭 Web”, the 9119 explanatory subtitle, and the credential-storage footer note are removed exactly as annotated.
+- No actionable P0/P1/P2 findings.
+
+final result: passed
+
 ## File-card scale pass
 
 - Source visual truth: current `yaoyao-webui` file-library implementation and user screenshot, using 220px minimum cards, 154px previews, 36px type icons, 13px titles, and 11px metadata.
