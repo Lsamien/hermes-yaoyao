@@ -169,7 +169,7 @@ export const useChatStore = defineStore('chat', () => {
       : { id: storedSessionId, profile: oldState.route.profile, source: 'web', title: '新会话', messageCount: 0, toolCallCount: 0, startedAt: now, updatedAt: now }
     if (draftIndex >= 0) sessions.value.splice(draftIndex, 1, summary)
     else sessions.value.unshift(summary)
-    return migrated
+    return routes[newKey]
   }
 
   socket.onEvent(event => {
@@ -608,7 +608,7 @@ export const useChatStore = defineStore('chat', () => {
         if (running) state.isStreaming = true
       } else {
         state.isQueued = status === 'queued'
-        if (running) {
+        if (running || status === 'accepted') {
           state.isQueued = false
           state.isStreaming = true
         }

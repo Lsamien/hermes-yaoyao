@@ -267,6 +267,15 @@ test('opens a local message file link as a floating preview card', async ({ page
   expect(stageHeight).toBeGreaterThan(500)
 })
 
+test('shows a thinking animation after submit until output starts', async ({ page }) => {
+  await page.goto('/chat/session-demo?profile=yaoyao')
+  await page.locator('.composer-textarea').fill('请开始思考')
+  await page.getByRole('button', { name: '发送消息' }).click()
+  await expect(page.locator('.thinking-indicator')).toBeVisible()
+  await expect(page.getByText('这是来自假 Gateway 的流式回复。', { exact: true })).toBeVisible()
+  await expect(page.locator('.thinking-indicator')).toHaveCount(0)
+})
+
 test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ page }) => {
   const logo = page.locator('.rail__brand img')
   await expect(logo).toHaveAttribute('src', '/brand/AppIcon-1024.png')

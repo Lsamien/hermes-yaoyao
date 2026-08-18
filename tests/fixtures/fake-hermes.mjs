@@ -144,7 +144,7 @@ server.on('upgrade', (request, socket, head) => {
           client.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'message.start', session_id: requestFrame.params.session_id, profile: 'yaoyao', payload: { message_id: 'stream-demo' } } }))
           client.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'message.delta', session_id: requestFrame.params.session_id, profile: 'yaoyao', payload: { message_id: 'stream-demo', delta: '这是来自假 Gateway 的流式回复。' } } }))
           client.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'message.complete', session_id: requestFrame.params.session_id, profile: 'yaoyao', payload: { message_id: 'stream-demo', text: '这是来自假 Gateway 的流式回复。', status: 'complete' } } }))
-        }, 20)
+        }, 1200)
         return
       }
       respond({ ok: true })

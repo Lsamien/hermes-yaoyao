@@ -201,6 +201,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :connected="connected"
         :synced="!!groups.selectedRoom"
         :show-tools="showThinking"
+        :thinking="groups.isSending || groups.agents.some(agent => ['queued', 'running'].includes(agent.status))"
         :interaction="activeInteraction"
         :mention-names="mentionNames"
         empty-title="让多个 Agent 一起工作"

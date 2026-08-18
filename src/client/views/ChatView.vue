@@ -402,6 +402,7 @@ watch(() => chat.activeSessionId, async id => {
         :connected="connected"
         :synced="chat.historySynced"
         :show-tools="showThinking"
+        :thinking="chat.isSending || chat.isStreaming"
         :show-assistant-identity="false"
         :interaction="interaction"
         empty-logo
