@@ -169,8 +169,9 @@ export function requestAccountKey(request: IncomingMessage): string {
   return accountKeyFromCookieHeader(request.headers.cookie, request.socket.remoteAddress)
 }
 
-export function applySecurityHeaders(ctx: Koa.Context, tls: boolean): void {
+export function applySecurityHeaders(ctx: Koa.Context, tls: boolean, allowedHosts: ReadonlySet<string> = new Set()): void {
   const socketOrigin = `${tls ? 'wss' : 'ws'}://${ctx.host}`
+  const proxySocketOrigins = [...allowedHosts].flatMap(host => [`ws://${host}`, `wss://${host}`])
   ctx.set('Content-Security-Policy', [
     "default-src 'self'",
     "base-uri 'none'",
@@ -181,7 +182,7 @@ export function applySecurityHeaders(ctx: Koa.Context, tls: boolean): void {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "media-src 'self' blob:",
-    `connect-src 'self' ${socketOrigin}`,
+    `connect-src 'self' ${socketOrigin} ${proxySocketOrigins.join(' ')}`.trim(),
   ].join('; '))
   const requestHostname = splitHostPort(ctx.host)?.hostname ?? ''
   if (tls || isLoopbackHost(requestHostname)) {

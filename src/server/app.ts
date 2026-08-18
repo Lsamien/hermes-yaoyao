@@ -106,7 +106,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     }
   })
   app.use(async (ctx, next) => {
-    applySecurityHeaders(ctx, Boolean(config.tlsCert))
+    applySecurityHeaders(ctx, Boolean(config.tlsCert), config.allowedHosts)
     if (!isAllowedHostHeader(ctx.get('host'), config)) {
       throw new HttpError(421, 'Request Host is not allowed', 'invalid_host')
     }

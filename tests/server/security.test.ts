@@ -6,6 +6,7 @@ import {
   CsrfProtection,
   isAllowedHostHeader,
   isExactOrigin,
+  applySecurityHeaders,
 } from '../../src/server/security.js'
 
 function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
@@ -53,6 +54,14 @@ describe('server security boundary', () => {
     const allowed = new Set(['yaoyao-lc.samien.cn'])
     expect(isExactOrigin('http://yaoyao-lc.samien.cn', '10.1.5.100', false, allowed)).toBe(true)
     expect(isExactOrigin('http://attacker.example', '10.1.5.100', false, allowed)).toBe(false)
+  })
+
+  it('adds configured reverse-proxy domains to the WebSocket CSP', () => {
+    const headers: Record<string, string> = {}
+    const ctx = { host: '10.1.5.100', set(name: string, value: string) { headers[name] = value } } as unknown as Koa.Context
+    applySecurityHeaders(ctx, false, new Set(['yaoyao-lc.samien.cn']))
+    expect(headers['Content-Security-Policy']).toContain('ws://yaoyao-lc.samien.cn')
+    expect(headers['Content-Security-Policy']).toContain('wss://yaoyao-lc.samien.cn')
   })
 
   it('requires an exact scheme and host Origin', () => {
