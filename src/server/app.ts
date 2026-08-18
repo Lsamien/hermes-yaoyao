@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
+import { join } from 'node:path'
 import { bodyParser } from '@koa/bodyparser'
 import Koa from 'koa'
 import type { ServerConfig } from './config.js'
@@ -41,11 +42,34 @@ function isMutation(method: string): boolean {
   return !['GET', 'HEAD', 'OPTIONS'].includes(method)
 }
 
+function persistentCsrfSecret(home: string, override?: Buffer): Buffer {
+  if (override) return override
+  const path = join(home, 'csrf-secret.bin')
+  try {
+    const secret = readFileSync(path)
+    if (secret.byteLength === 32) return secret
+    throw new Error('CSRF secret has an invalid length')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  mkdirSync(home, { recursive: true, mode: 0o700 })
+  const generated = randomBytes(32)
+  try {
+    writeFileSync(path, generated, { mode: 0o600, flag: 'wx' })
+    return generated
+  } catch (error) {
+    // Another 8800 process can finish first during launchd hand-off. Never
+    // rotate its secret; use the one it safely wrote instead.
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return readFileSync(path)
+    throw error
+  }
+}
+
 export function createApplication(options: ApplicationOptions = {}): ApplicationRuntime {
   const config = options.config ?? loadServerConfig()
   const app = new Koa()
   app.proxy = false
-  const csrf = new CsrfProtection(options.csrfSecret ?? randomBytes(32), Boolean(config.tlsCert))
+  const csrf = new CsrfProtection(persistentCsrfSecret(config.home, options.csrfSecret), Boolean(config.tlsCert))
   const leases = options.leases ?? new RealtimeLeaseStore()
   const upstream = new UpstreamClient(config.upstream, options.fetchImpl, Boolean(config.tlsCert))
   const uploads = options.uploads ?? new UploadStore(config.home)

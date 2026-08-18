@@ -97,6 +97,18 @@ function cookieHeader(response: request.Response): string {
 }
 
 describe('8800 BFF', () => {
+  it('keeps existing CSRF tokens valid across an 8800 restart', async () => {
+    const config = makeConfig()
+    const first = createApplication({ config, fetchImpl: fakeGateway([]) })
+    const bootstrap = await request(first.app.callback())
+      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const cookies = cookieHeader(bootstrap)
+    first.close()
+
+    const restarted = createApplication({ config, fetchImpl: fakeGateway([]) })
+    runtimes.push(restarted)
+    expect(restarted.csrf.verify(cookies, bootstrap.body.csrfToken)).toBe(true)
+  })
   it('serves authenticated historical media only from the configured root', async () => {
     const config = makeConfig()
     writeFileSync(join(config.mediaRoot, '报告.txt'), '历史文件内容')
