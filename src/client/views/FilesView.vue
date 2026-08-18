@@ -105,7 +105,7 @@ watch(() => auth.activeProfile?.name, profile => {
       />
     </section>
   </WorkspaceView>
-  <PreviewModal v-if="selected" :item="selected" @close="selected = null" @add-to-composer="addToComposer" @source="openSource" />
+  <PreviewModal v-if="selected" :item="selected" :items="items" @close="selected = null" @add-to-composer="addToComposer" @source="openSource" />
 </template>
 
 <style scoped>

@@ -35,9 +35,10 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   const previewDialog = page.getByRole('dialog', { name: /预览 demo-report.pdf/ })
   await expect(previewDialog.getByRole('link', { name: '下载' })).toBeVisible()
   await expect(previewDialog.getByRole('button', { name: '加入输入框' })).toBeVisible()
+  await expect(previewDialog.locator('.preview-close')).toBeVisible()
   const modalHeight = await page.locator('.preview-modal').evaluate(element => element.getBoundingClientRect().height)
   expect(modalHeight).toBeGreaterThan(600)
-  await page.getByRole('button', { name: '关闭预览' }).click()
+  await previewDialog.locator('.preview-close').click()
 
   await page.goto('/artifacts')
   await expect(page).toHaveURL(/\/chat$/)
@@ -78,7 +79,8 @@ test('renders historical assistant MEDIA as Markdown in chat and group chat', as
   await expect(image).toBeVisible()
   await image.click()
   await expect(page.getByRole('dialog', { name: /预览 AppIcon-1024.png/ })).toBeVisible()
-  await page.getByRole('button', { name: '关闭预览' }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog', { name: /预览 AppIcon-1024.png/ })).toBeHidden()
 
   await page.getByRole('button', { name: '群聊' }).click()
   await expect(page.locator('.markdown img[alt="AppIcon-1024.png"]')).toBeVisible()
