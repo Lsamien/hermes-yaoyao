@@ -100,6 +100,13 @@ test('keeps pins first and loads the next session page at the list bottom', asyn
   await expect(sidebar.getByRole('button', { name: '继续加载会话' })).toHaveCount(0)
 })
 
+test('switches the composer model to the selected historical session model', async ({ page }) => {
+  await page.goto('/chat/session-demo?profile=yaoyao')
+  await expect(page.locator('.composer-tool--model')).toContainText('gpt-5.6')
+  await page.getByRole('option', { name: /第二个会话/ }).click()
+  await expect(page.locator('.composer-tool--model')).toContainText('gpt-5.5')
+})
+
 test('restores a routed conversation even when unread-count refresh fails', async ({ page }) => {
   await page.route('**/api/app/sessions/unread*', async route => {
     await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'unread unavailable' }) })

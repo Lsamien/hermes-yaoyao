@@ -15,6 +15,7 @@ import { createId, routeKey } from '@/utils/id'
 import { applyChatEvent, mergeChatMessages } from '@/utils/messageReducer'
 import { bool, normalizeChatMessage, number, record, string, values } from '@/utils/normalize'
 import { appendSessionPage, pinnedSessionsFirst } from '@/utils/sessionOrder'
+import { modelForSession } from '@/utils/sessionModel'
 import { moveSessionFastMode, readSessionFastMode, writeSessionFastMode } from '@/utils/sessionPreferences'
 import { useAuthStore } from './auth'
 
@@ -100,6 +101,11 @@ export const useChatStore = defineStore('chat', () => {
 
   function persistFastMode(state: ChatRouteState): void {
     writeSessionFastMode(auth.user?.id ?? 'local', state.route.profile, state.route.sessionId, state.fastMode ?? false)
+  }
+
+  function syncSelectedModel(model?: string, provider?: string): void {
+    const resolved = modelForSession(models.value, model, provider)
+    if (resolved) selectedModel.value = resolved
   }
 
   function cacheScope(profile: string): string {
@@ -363,10 +369,13 @@ export const useChatStore = defineStore('chat', () => {
     activeSessionId.value = sessionId
     activeProfileName.value = selectedProfile
     const state = ensureRoute(selectedProfile, sessionId)
+    syncSelectedModel(session?.model, session?.provider)
     // Reading an old session must not rewrite the server's last_active field.
     // The runtime is attached lazily by send/interrupt/usage, or when a known
     // in-flight turn reconnects. REST history remains authoritative here.
     if (!state.historySynced) await loadHistory(state)
+    const refreshed = sessions.value.find(item => item.id === sessionId && item.profile === selectedProfile)
+    syncSelectedModel(refreshed?.model, refreshed?.provider)
   }
 
   async function loadOlder(): Promise<void> {
@@ -414,6 +423,9 @@ export const useChatStore = defineStore('chat', () => {
       if (!runtimeId || !storedId) throw new Error('Hermes 未返回新会话标识')
       const migrated = migrateRoute(initialKey, storedId, runtimeId)
       const info = record(result.info)
+      if (!desiredModelRoutes.has(routeKey(migrated.route.profile, migrated.route.sessionId))) {
+        syncSelectedModel(string(result.model ?? info.model), string(result.provider ?? info.provider))
+      }
       const liveFastMode = optionalBoolean(result.fast ?? info.fast)
       migrated.serverFastMode = liveFastMode ?? migrated.fastMode ?? false
       if (!migrated.fastModeDirty && liveFastMode !== undefined) migrated.fastMode = liveFastMode
@@ -432,6 +444,9 @@ export const useChatStore = defineStore('chat', () => {
     const storedId = string(result.stored_session_id ?? result.storedSessionId ?? result.session_key, initialState.route.sessionId)
     const migrated = migrateRoute(initialKey, storedId, runtimeId)
     const info = record(result.info)
+    if (!desiredModelRoutes.has(routeKey(migrated.route.profile, migrated.route.sessionId))) {
+      syncSelectedModel(string(result.model ?? info.model), string(result.provider ?? info.provider))
+    }
     const liveFastMode = optionalBoolean(result.fast ?? info.fast)
     migrated.serverFastMode = liveFastMode
     if (!migrated.fastModeDirty && liveFastMode !== undefined) migrated.fastMode = liveFastMode
@@ -706,7 +721,8 @@ export const useChatStore = defineStore('chat', () => {
     const loaded = await getModels(profile)
     if (loadGeneration !== modelLoadGeneration || (profile && auth.activeProfile?.name !== profile)) return
     models.value = loaded
-    selectedModel.value = models.value.find(model => model.isDefault) ?? models.value[0]
+    selectedModel.value = modelForSession(models.value, activeSession.value?.model, activeSession.value?.provider)
+      ?? models.value.find(model => model.isDefault) ?? models.value[0]
   }
 
   async function configureModel(state: ChatRouteState, model: ModelOption, confirmsExpensiveModel: boolean): Promise<boolean> {
