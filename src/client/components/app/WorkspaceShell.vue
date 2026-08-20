@@ -160,7 +160,7 @@ onBeforeUnmount(() => {
         <AppIcon name="menu" :size="20" />
       </button>
       <button class="mobile-brand" type="button" aria-label="返回对话" @click="navigate('/chat')">
-        <BrandMark :size="28" label compact />
+        <BrandMark :size="28" compact />
       </button>
       <button class="icon-button" type="button" :aria-label="theme === 'dark' ? '切换浅色主题' : '切换深色主题'" @click="emit('toggleTheme')">
         <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" />
@@ -287,7 +287,7 @@ onBeforeUnmount(() => {
     >
       <div class="mobile-drawer__header">
         <button class="sidebar-brand" type="button" aria-label="返回对话" @click="navigate('/chat')">
-          <BrandMark :size="32" label compact />
+          <BrandMark :size="32" compact />
         </button>
         <button class="icon-button" type="button" aria-label="关闭导航" @click="mobileDrawerOpen = false">
           <AppIcon name="close" />
