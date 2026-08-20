@@ -158,7 +158,7 @@ test('previews an octet-stream Markdown file from the file library', async ({ pa
   await expect(emptyDialog.locator('.preview-unavailable')).toHaveCount(0)
 })
 
-test('keeps the left edge reachable for a wide DOCX preview', async ({ page }) => {
+test('keeps DOCX text inset without horizontal clipping', async ({ page }) => {
   await page.setViewportSize({ width: 620, height: 760 })
   await page.route('**/api/app/files**', async route => {
     const url = new URL(route.request().url())
@@ -204,8 +204,10 @@ test('keeps the left edge reachable for a wide DOCX preview', async ({ page }) =
   const geometry = await office.evaluate(element => {
     const wrapper = element.querySelector<HTMLElement>('.docx-wrapper')!
     const pageElement = element.querySelector<HTMLElement>('section.docx')!
+    const article = pageElement.querySelector<HTMLElement>('article')!
     const officeRect = element.getBoundingClientRect()
     const pageRect = pageElement.getBoundingClientRect()
+    const articleStyle = getComputedStyle(article)
     return {
       officeLeft: officeRect.left,
       pageLeft: pageRect.left,
@@ -213,14 +215,20 @@ test('keeps the left edge reachable for a wide DOCX preview', async ({ page }) =
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
       wrapperWidth: wrapper.getBoundingClientRect().width,
+      articlePaddingLeft: Number.parseFloat(articleStyle.paddingLeft),
+      articlePaddingRight: Number.parseFloat(articleStyle.paddingRight),
+      articleMinWidth: articleStyle.minWidth,
     }
   })
-  expect(geometry.pageWidth).toBeGreaterThan(geometry.clientWidth)
+  expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.clientWidth)
   expect(geometry.pageLeft).toBeGreaterThanOrEqual(geometry.officeLeft)
-  expect(geometry.scrollWidth).toBeGreaterThanOrEqual(geometry.pageWidth)
+  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1)
   expect(Math.abs(geometry.wrapperWidth - geometry.clientWidth)).toBeLessThan(1)
+  expect(geometry.articlePaddingLeft).toBeGreaterThanOrEqual(24)
+  expect(geometry.articlePaddingRight).toBeGreaterThanOrEqual(24)
+  expect(geometry.articleMinWidth).toBe('0px')
 
-  await page.setViewportSize({ width: 1200, height: 760 })
+  await page.setViewportSize({ width: 930, height: 760 })
   const centered = await office.evaluate(element => {
     const pageElement = element.querySelector<HTMLElement>('section.docx')!
     const officeRect = element.getBoundingClientRect()
@@ -233,7 +241,9 @@ test('keeps the left edge reachable for a wide DOCX preview', async ({ page }) =
     }
   })
   expect(centered.pageWidth).toBeLessThan(centered.clientWidth)
-  expect(Math.abs(centered.leftGap - centered.rightGap)).toBeLessThan(1)
+  expect(centered.leftGap).toBeGreaterThanOrEqual(18)
+  expect(centered.rightGap).toBeGreaterThanOrEqual(18)
+  expect(Math.abs(centered.leftGap - centered.rightGap)).toBeLessThanOrEqual(12)
 })
 
 test('keeps pins first and loads the next session page at the list bottom', async ({ page }) => {
