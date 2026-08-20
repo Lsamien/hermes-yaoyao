@@ -240,6 +240,16 @@ export interface GroupLimits {
   maxAgentDisplayNameLength: number
 }
 
+export const MIN_SUPPORTED_GROUP_PROTOCOL_VERSION = 2
+export const MAX_SUPPORTED_GROUP_PROTOCOL_VERSION = 3
+export const SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL = `v${MIN_SUPPORTED_GROUP_PROTOCOL_VERSION}–v${MAX_SUPPORTED_GROUP_PROTOCOL_VERSION}`
+
+export function isSupportedGroupProtocolVersion(value: number): boolean {
+  return Number.isInteger(value)
+    && value >= MIN_SUPPORTED_GROUP_PROTOCOL_VERSION
+    && value <= MAX_SUPPORTED_GROUP_PROTOCOL_VERSION
+}
+
 export interface GroupCapabilities {
   protocolVersion: number
   journalEpoch: string

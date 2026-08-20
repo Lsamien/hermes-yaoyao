@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL } from '@shared/types'
 import AppIcon from '@/components/common/AppIcon.vue'
 import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -166,7 +167,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 </script>
 
 <template>
-  <WorkspaceView sidebar-title="群聊" :sidebar-subtitle="groups.availability === 'available' ? `${filteredRooms.length} 个活跃房间` : '9119 群聊 v2'" :inspector-open="managerOpen && !!room" @close-inspector="managerOpen = false">
+  <WorkspaceView sidebar-title="群聊" :sidebar-subtitle="groups.availability === 'available' ? `${filteredRooms.length} 个活跃房间` : `9119 群聊 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}`" :inspector-open="managerOpen && !!room" @close-inspector="managerOpen = false">
     <template #sidebar-action>
       <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" title="新建群聊" aria-label="新建群聊" @click="createOpen = true">
         <YaoYaoSidebarIcon name="add" />
@@ -189,7 +190,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
     </template>
 
     <div v-if="groups.availability === 'unsupported' || groups.availability === 'unavailable'" class="groups-unavailable">
-      <EmptyState icon="alert" :title="groups.availability === 'unsupported' ? '群聊协议版本不兼容' : '群聊服务暂不可用'" :description="groups.error || '请确认 9119 已安装 YaoYao 群聊 protocol v2 插件。'" action-label="重新检查" @action="groups.refresh" />
+      <EmptyState icon="alert" :title="groups.availability === 'unsupported' ? '群聊协议版本不兼容' : '群聊服务暂不可用'" :description="groups.error || `请确认 9119 已安装 YaoYao 群聊 protocol ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL} 插件。`" action-label="重新检查" @action="groups.refresh" />
     </div>
     <div v-else class="groups-workspace">
       <MessageTimeline

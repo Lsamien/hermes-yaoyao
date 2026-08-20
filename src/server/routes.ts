@@ -4,6 +4,7 @@ import { parse } from 'cookie'
 import { createReadStream, realpathSync, statSync } from 'node:fs'
 import { basename, resolve, sep } from 'node:path'
 import { lookup as mimeLookup } from 'mime-types'
+import { isSupportedGroupProtocolVersion, SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL } from '../shared/types.js'
 import type { ServerConfig } from './config.js'
 import { isLoopbackUpstream } from './config.js'
 import { HttpError } from './errors.js'
@@ -315,8 +316,8 @@ async function issueLease(
       jar,
     ))
     const protocolVersion = Number(capabilities.protocolVersion ?? capabilities.protocol_version)
-    if (protocolVersion !== 2) {
-      throw new HttpError(409, 'Hermes group chat protocol v2 is required', 'unsupported_group_protocol')
+    if (!isSupportedGroupProtocolVersion(protocolVersion)) {
+      throw new HttpError(409, `Hermes group chat protocol ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL} is required`, 'unsupported_group_protocol')
     }
   }
   let credential: { name: 'ticket' | 'token'; value: string }

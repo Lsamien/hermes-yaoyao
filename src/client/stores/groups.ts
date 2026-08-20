@@ -1,5 +1,6 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { defineStore } from 'pinia'
+import { isSupportedGroupProtocolVersion, SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL } from '@shared/types'
 import type {
   GroupAgent, GroupCapabilities, GroupMessage, GroupMessagePage, GroupRoomDetail, GroupRoomSummary, GroupSocketEnvelope, RealtimeConnectionState,
 } from '@shared/types'
@@ -134,9 +135,9 @@ export const useGroupsStore = defineStore('groups', () => {
       reconnectTimer = undefined
       try {
         const anchor = await getGroupCapabilities()
-        if (anchor.protocolVersion !== 2) {
+        if (!isSupportedGroupProtocolVersion(anchor.protocolVersion)) {
           availability.value = 'unsupported'
-          throw new Error(`群聊协议版本不兼容：需要 v2，服务器返回 v${anchor.protocolVersion || 'unknown'}`)
+          throw new Error(`群聊协议版本不兼容：支持 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}，服务器返回 v${anchor.protocolVersion || 'unknown'}`)
         }
         const loadedRooms = await loadRooms()
         if (expectedGeneration !== generation) return
