@@ -159,6 +159,26 @@ test('pins the named Agent typing status above the group composer', async ({ pag
   await expect(typing).toHaveCount(0, { timeout: 4_000 })
 })
 
+test('reconnects the group event stream after an unexpected close', async ({ page }) => {
+  await page.getByRole('button', { name: '群聊' }).click()
+  await expect(page.getByText('已同步', { exact: true })).toBeVisible()
+  const before = await (await page.request.get('http://127.0.0.1:19119/__test/group-connections')).json() as { count: number }
+  await page.request.post('http://127.0.0.1:19119/__test/groups/disconnect')
+  await expect.poll(async () => {
+    const value = await (await page.request.get('http://127.0.0.1:19119/__test/group-connections')).json() as { count: number }
+    return value.count
+  }, { timeout: 5_000 }).toBeGreaterThan(before.count)
+  await expect(page.getByText('已同步', { exact: true })).toBeVisible()
+})
+
+test('recovers the group page after its initial upstream connection fails', async ({ page }) => {
+  await page.request.post('http://127.0.0.1:19119/__test/groups/availability', { data: { available: false } })
+  await page.getByRole('button', { name: '群聊' }).click()
+  await expect(page.getByRole('heading', { name: '群聊服务暂不可用' })).toBeVisible()
+  await page.request.post('http://127.0.0.1:19119/__test/groups/availability', { data: { available: true } })
+  await expect(page.getByRole('heading', { name: '设计与工程协作' })).toBeVisible({ timeout: 5_000 })
+})
+
 test('previews an octet-stream Markdown file from the file library', async ({ page }) => {
   await page.route('**/api/app/files**', async route => {
     const url = new URL(route.request().url())

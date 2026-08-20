@@ -47,6 +47,8 @@ export const useGroupsStore = defineStore('groups', () => {
   let rebuildPromise: Promise<void> | undefined
   let reconnectTimer: number | undefined
   let reconnectAttempt = 0
+  let recoveryTimer: number | undefined
+  let recoveryAttempt = 0
   let selectionGeneration = 0
   const loadingRoomEvents = new Map<string, GroupSocketEnvelope[]>()
 
@@ -124,6 +126,18 @@ export const useGroupsStore = defineStore('groups', () => {
     }, delay)
   }
 
+  function scheduleSnapshotRecovery(expectedGeneration: number): void {
+    if (recoveryTimer !== undefined || expectedGeneration !== generation || !auth.isAuthenticated) return
+    connectionState.value = 'reconnecting'
+    const delay = Math.min(15_000, 500 * 2 ** Math.min(recoveryAttempt, 5))
+    recoveryAttempt += 1
+    recoveryTimer = window.setTimeout(() => {
+      recoveryTimer = undefined
+      if (expectedGeneration !== generation || !auth.isAuthenticated) return
+      void rebuildSnapshot().catch(() => undefined)
+    }, delay)
+  }
+
   async function rebuildSnapshot(): Promise<void> {
     if (rebuildPromise) return rebuildPromise
     const expectedGeneration = ++generation
@@ -133,6 +147,8 @@ export const useGroupsStore = defineStore('groups', () => {
       socket.close()
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
       reconnectTimer = undefined
+      if (recoveryTimer !== undefined) window.clearTimeout(recoveryTimer)
+      recoveryTimer = undefined
       try {
         const anchor = await getGroupCapabilities()
         if (!isSupportedGroupProtocolVersion(anchor.protocolVersion)) {
@@ -155,12 +171,14 @@ export const useGroupsStore = defineStore('groups', () => {
         if (restoreId) await loadRoomSnapshot(restoreId, expectedGeneration)
         if (expectedGeneration !== generation) return
         availability.value = 'available'
+        recoveryAttempt = 0
         await saveCache()
         await connectEvents(anchor, expectedGeneration)
       } catch (cause) {
         if (expectedGeneration !== generation) return
         if (availability.value !== 'unsupported') availability.value = 'unavailable'
         error.value = errorMessage(cause)
+        if (availability.value !== 'unsupported') scheduleSnapshotRecovery(expectedGeneration)
         throw cause
       } finally {
         if (expectedGeneration === generation) isLoading.value = false
@@ -191,6 +209,8 @@ export const useGroupsStore = defineStore('groups', () => {
     socket.close()
     if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
     reconnectTimer = undefined
+    if (recoveryTimer !== undefined) window.clearTimeout(recoveryTimer)
+    recoveryTimer = undefined
     connectionState.value = 'disconnected'
   }
 

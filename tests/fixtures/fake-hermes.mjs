@@ -8,6 +8,8 @@ const agentId = '33333333-3333-4333-8333-333333333333'
 const now = () => Date.now() / 1000
 let groupCursor = 0
 const groupClients = new Set()
+let groupConnectionCount = 0
+let groupAvailable = true
 
 function broadcastGroup(event, payload) {
   groupCursor += 1
@@ -74,6 +76,15 @@ const previewPdf = Buffer.from('JVBERi0xLjQKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFn
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url || '/', `http://${request.headers.host}`)
+  if (url.pathname === '/__test/group-connections' && request.method === 'GET') return json(response, 200, { count: groupConnectionCount })
+  if (url.pathname === '/__test/groups/availability' && request.method === 'POST') {
+    groupAvailable = (await body(request)).available !== false
+    return json(response, 200, { available: groupAvailable })
+  }
+  if (url.pathname === '/__test/groups/disconnect' && request.method === 'POST') {
+    for (const client of groupClients) client.terminate()
+    return json(response, 200, { ok: true })
+  }
   if (url.pathname === '/__test/rpc-requests' && request.method === 'GET') return json(response, 200, { requests: rpcRequests })
   if (url.pathname === '/__test/rpc-requests/reset' && request.method === 'POST') {
     rpcRequests.length = 0
@@ -88,6 +99,7 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === '/auth/logout' && request.method === 'POST') return json(response, 200, { ok: true }, { 'Set-Cookie': 'fake_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax' })
   if (!authenticated(request)) return json(response, 401, { detail: 'Unauthorized' })
+  if (url.pathname.startsWith('/api/plugins/yaoyao/v1/') && !groupAvailable) return json(response, 503, { detail: 'Group service temporarily unavailable' })
   if (url.pathname === '/api/auth/me') return json(response, 200, { user_id: 'demo-user', display_name: '验收用户', email: 'demo@example.invalid', provider: 'basic' })
   if (url.pathname === '/api/auth/ws-ticket' && request.method === 'POST') return json(response, 200, { ticket: 'fake-ticket' })
   if (url.pathname === '/api/profiles') return json(response, 200, { profiles })
@@ -155,6 +167,7 @@ server.on('upgrade', (request, socket, head) => {
   if (url.searchParams.get('ticket') !== 'fake-ticket') return socket.destroy()
   sockets.handleUpgrade(request, socket, head, client => {
     if (url.pathname.endsWith('/events')) {
+      groupConnectionCount += 1
       groupClients.add(client)
       client.once('close', () => groupClients.delete(client))
       client.send(JSON.stringify({ type: 'group.ready', epoch, cursor: groupCursor, heartbeatSeconds: 20 }))
