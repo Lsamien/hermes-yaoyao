@@ -158,7 +158,7 @@ test('previews an octet-stream Markdown file from the file library', async ({ pa
   await expect(emptyDialog.locator('.preview-unavailable')).toHaveCount(0)
 })
 
-test('keeps DOCX content at zero inset without horizontal clipping', async ({ page }) => {
+test('keeps DOCX body at 36px inset with zero canvas margin', async ({ page }) => {
   await page.setViewportSize({ width: 620, height: 760 })
   await page.route('**/api/app/files**', async route => {
     const url = new URL(route.request().url())
@@ -234,9 +234,9 @@ test('keeps DOCX content at zero inset without horizontal clipping', async ({ pa
   expect(geometry.pageLeft).toBeGreaterThanOrEqual(geometry.officeLeft)
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1)
   expect(Math.abs(geometry.wrapperWidth - geometry.clientWidth)).toBeLessThan(1)
-  expect(geometry.articlePaddingTop).toBe(0)
-  expect(geometry.articlePaddingLeft).toBe(0)
-  expect(geometry.articlePaddingRight).toBe(0)
+  expect(geometry.articlePaddingTop).toBe(36)
+  expect(geometry.articlePaddingLeft).toBe(36)
+  expect(geometry.articlePaddingRight).toBe(36)
   expect(geometry.tableLeft).toBeGreaterThanOrEqual(geometry.pageLeft - 1)
   expect(geometry.tableRight).toBeLessThanOrEqual(geometry.pageLeft + geometry.pageWidth + 1)
   expect(geometry.officeBackground).toBe('rgb(255, 255, 255)')
