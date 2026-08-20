@@ -104,9 +104,10 @@ watch(() => props.agents, agents => {
 }, { deep: true, immediate: true })
 
 function saveRoom() {
+  const replyRounds = Number(form.replyRounds)
   emit('updateRoom', {
     name: form.name.trim() || props.room.name,
-    replyRounds: Math.min(12, Math.max(1, Number(form.replyRounds) || 1)),
+    replyRounds: replyRounds === -1 ? -1 : Math.min(100, Math.max(1, replyRounds || 1)),
   })
 }
 
@@ -186,7 +187,7 @@ function statusLabel(status: GroupAgent['status']): string {
     <section>
       <h3>房间</h3>
       <label><span>名称</span><input v-model="form.name" maxlength="80" @change="saveRoom" /></label>
-      <label class="rounds"><span>最多回复轮数</span><input v-model.number="form.replyRounds" type="number" min="1" max="12" @change="saveRoom" /></label>
+      <label class="rounds"><span>最多回复轮数<small>-1 表示无限</small></span><input v-model.number="form.replyRounds" type="number" min="-1" max="100" aria-label="最多回复轮数" @change="saveRoom" /></label>
     </section>
 
     <section>
@@ -264,7 +265,7 @@ section { padding: 17px 0; border-top: 1px solid var(--line); } section:first-of
 h3 { margin: 0 0 13px; color: var(--text-secondary); font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; } h3 em { color: var(--text-muted); font-style: normal; font-weight: 500; }
 label { display: flex; flex-direction: column; gap: 5px; margin: 0 0 11px; color: var(--text-muted); font-size: 10px; }
 input, textarea, select { width: 100%; padding: 8px 9px; border: 1px solid var(--line); border-radius: 9px; outline: 0; resize: vertical; background: var(--surface-soft); color: var(--text-primary); font-size: 11px; } input:focus, textarea:focus, select:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }
-.rounds { flex-direction: row; align-items: center; justify-content: space-between; }.rounds input { width: 62px; text-align: center; }
+.rounds { flex-direction: row; align-items: center; justify-content: space-between; }.rounds > span { display: flex; flex-direction: column; gap: 2px; }.rounds small { color: var(--text-muted); font-size: 9px; }.rounds input { width: 62px; text-align: center; }
 .agent-list { display: flex; flex-direction: column; gap: 7px; }.agent-list article { display: grid; grid-template-columns: 32px minmax(0,1fr) repeat(3, 28px); align-items: center; gap: 7px; padding: 8px; border: 1px solid transparent; border-radius: 10px; background: var(--surface-soft); }.agent-list article.expanded { border-color: var(--line); background: var(--surface); }
 .agent-avatar { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--accent); color: var(--text-on-solid); font-size: 10px; font-weight: 700; }.agent-avatar i { position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; border: 2px solid var(--surface-soft); border-radius: 50%; background: var(--text-muted); }.agent-avatar .status-running, .agent-avatar .status-queued { background: var(--warning); }.agent-avatar .status-idle { background: var(--success); }.agent-avatar .status-awaiting_input { background: var(--warning); }
 .agent-copy { display: flex; min-width: 0; flex-direction: column; }.agent-copy strong, .agent-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.agent-copy strong { font-size: 11px; }.agent-copy small { margin-top: 2px; color: var(--text-muted); font-size: 9px; }

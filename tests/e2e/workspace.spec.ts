@@ -102,6 +102,7 @@ test('edits every protocol v3 Agent setting with one inspector close control', a
 
   await expect(page.getByRole('button', { name: '关闭群聊管理' })).toHaveCount(1)
   await expect(page.getByRole('button', { name: '关闭预览' })).toHaveCount(0)
+  await expect(page.getByLabel('最多回复轮数')).toHaveValue('-1')
   await page.getByRole('button', { name: '设置夭夭' }).click()
 
   const editor = page.getByRole('group', { name: '夭夭 Agent 设置' })
