@@ -34,15 +34,22 @@ describe('displayContentForMessage', () => {
   it('turns iOS relative attachment markers into attachment cards', () => {
     const message = normalizeChatMessage({
       id: 'ios-user-file', role: 'user', timestamp: 1,
-      content: '[用户附加文件：车位 四号车库-B2307 罗益民 33600元.pdf]\n@file:`attachments/车位 四号车库-B2307 罗益民 33600元.pdf`',
+      content: [
+        '[用户附加文件：车位 四号车库-B2307 罗益民 33600元.pdf]',
+        '@file:`attachments/车位 四号车库-B2307 罗益民 33600元-2.pdf`',
+        '',
+        '--- Attached Context ---',
+        '',
+        '📎 @file:`attachments/车位 四号车库-B2307 罗益民 33600元-2.pdf` (application/pdf, 139.2 KB) — binary file.',
+      ].join('\n'),
     }, 'session-1', 'default')
 
     expect(message.content).toBe('')
     expect(message.attachments).toEqual([
       expect.objectContaining({
         name: '车位 四号车库-B2307 罗益民 33600元.pdf',
-        path: 'attachments/车位 四号车库-B2307 罗益民 33600元.pdf',
-        url: '/attachments/%E8%BD%A6%E4%BD%8D%20%E5%9B%9B%E5%8F%B7%E8%BD%A6%E5%BA%93-B2307%20%E7%BD%97%E7%9B%8A%E6%B0%91%2033600%E5%85%83.pdf',
+        path: 'attachments/车位 四号车库-B2307 罗益民 33600元-2.pdf',
+        url: '/attachments/%E8%BD%A6%E4%BD%8D%20%E5%9B%9B%E5%8F%B7%E8%BD%A6%E5%BA%93-B2307%20%E7%BD%97%E7%9B%8A%E6%B0%91%2033600%E5%85%83-2.pdf',
         kind: 'pdf',
       }),
     ])

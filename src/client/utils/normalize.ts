@@ -172,26 +172,33 @@ function attachmentMime(name: string): { mimeType: string; kind: ChatAttachment[
   return { mimeType: 'application/octet-stream', kind: 'file' }
 }
 
-function persistedAttachmentUrl(path: string): string | undefined {
-  if (path.startsWith('/')) return path
+function persistedAttachmentUrl(path: string): { path: string; url: string } | undefined {
+  if (path.startsWith('/')) return { path, url: path }
   const segments = path.split('/')
-  if (segments[0] !== 'attachments' || segments.length < 2 || segments.some(segment => !segment || segment === '.' || segment === '..')) return undefined
-  return `/${segments.map(encodeURIComponent).join('/')}`
+  const normalizedSegments = segments.map(segment => {
+    try { return decodeURIComponent(segment) } catch { return '' }
+  })
+  if (segments[0] !== 'attachments' || segments.length < 2 || normalizedSegments.some(segment => !segment || segment === '.' || segment === '..')) return undefined
+  return { path, url: `/${segments.map(encodeURIComponent).join('/')}` }
 }
 
 function extractPersistedAttachments(content: string): { content: string; attachments: ChatAttachment[] } {
   const attachments: ChatAttachment[] = []
-  const cleaned = content.replace(
+  const extracted = content.replace(
     /\[用户附加\s*(文件|图片|PDF)\s*：\s*([^\]\r\n]+)\]\s*(?:\r?\n)?@file:\s*(`[^`\r\n]+`|'[^'\r\n]+'|"[^"\r\n]+"|(?:\\?\/)[^\r\n]+)/g,
     (_match, _type: string, rawName: string, rawPath: string) => {
       const name = rawName.trim()
       const path = rawPath.trim().replace(/\\\//g, '/').replace(/^[`'"]|[`'"]$/g, '')
-      const url = persistedAttachmentUrl(path)
-      if (!url) return _match
+      const reference = persistedAttachmentUrl(path)
+      if (!reference) return _match
       const media = attachmentMime(name)
-      attachments.push({ id: `persisted:${path}`, name, path, url, size: 0, ...media })
+      attachments.push({ id: `persisted:${reference.path}`, name, path: reference.path, url: reference.url, size: 0, ...media })
       return ''
     },
+  )
+  const cleaned = (attachments.length
+    ? extracted.replace(/(?:^|\n)--- Attached Context ---[\s\S]*$/, '')
+    : extracted
   ).replace(/\n{3,}/g, '\n\n').trim()
   return { content: cleaned, attachments }
 }

@@ -12,13 +12,14 @@ function sameMessage(left: ChatMessage, right: ChatMessage): boolean {
 }
 
 function mergeOne(previous: ChatMessage, incoming: ChatMessage): ChatMessage {
+  const replacesContent = Boolean(incoming.content) || Boolean(incoming.attachments?.length)
   return {
     ...previous,
     ...incoming,
     id: incoming.serverMessageId || incoming.stage === 'settled' ? incoming.id : previous.id,
     clientMessageId: incoming.clientMessageId ?? previous.clientMessageId,
     serverMessageId: incoming.serverMessageId ?? previous.serverMessageId,
-    content: incoming.content || previous.content,
+    content: replacesContent ? incoming.content : previous.content,
     reasoning: incoming.reasoning ?? previous.reasoning,
     attachments: incoming.attachments?.length ? incoming.attachments : previous.attachments,
     toolCalls: incoming.toolCalls?.length ? incoming.toolCalls : previous.toolCalls,

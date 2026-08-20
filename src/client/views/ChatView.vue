@@ -163,7 +163,7 @@ function openAttachment(attachment: NonNullable<UiMessage['attachments']>[number
   const item = previewItemFromUrl(attachment.name, attachment.url || '', attachment.id, attachment.kind)
   item.size = attachment.size
   if (item.kind === 'image' || item.kind === 'video') openMedia(item)
-  else { outlineOpen.value = false; preview.value = item }
+  else { outlineOpen.value = false; preview.value = null; filePreview.value = item }
 }
 
 function openMedia(item: UiLibraryItem) {

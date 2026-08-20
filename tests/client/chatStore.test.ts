@@ -37,6 +37,16 @@ describe('chat message reducer', () => {
     expect(merged[0].stage).toBe('settled')
   })
 
+  it('replaces a cached iOS marker with an attachment-only normalized message', () => {
+    const cached = message('ios-file', '[用户附加文件：车位.pdf]\n@file:`attachments/车位.pdf`')
+    const normalized = {
+      ...message('ios-file', ''),
+      attachments: [{ id: 'ios-file:0', name: '车位.pdf', mimeType: 'application/pdf', size: 0, kind: 'pdf' as const, url: '/attachments/车位.pdf' }],
+    }
+    const merged = mergeChatMessages([cached], [normalized])
+    expect(merged[0]).toMatchObject({ content: '', attachments: [expect.objectContaining({ name: '车位.pdf' })] })
+  })
+
   it('ignores events attributed to another route', () => {
     const original = state()
     const reduced = applyChatEvent(original, event('message.delta', { delta: 'wrong' }, 'session-2'))
