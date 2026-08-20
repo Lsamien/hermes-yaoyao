@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import type { FileKind } from '@shared/types'
 import AppIcon from '@/components/common/AppIcon.vue'
+import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 import LibraryGrid from '@/components/library/LibraryGrid.vue'
 import PreviewModal from '@/components/library/PreviewModal.vue'
 import ImagePreviewLightbox from '@/components/library/ImagePreviewLightbox.vue'
@@ -94,6 +95,14 @@ async function selectSession(id: string) {
   await router.push({ path: `/chat/${encodeURIComponent(id)}`, query: profile ? { profile } : {} })
 }
 
+async function createChat() {
+  selected.value = null
+  mediaIndex.value = null
+  const profile = auth.activeProfile?.name || 'default'
+  const id = chat.createSession(profile)
+  await router.push({ path: `/chat/${encodeURIComponent(id)}`, query: { profile } })
+}
+
 onMounted(() => {
   void files.load(true)
   void chat.loadSessions(auth.activeProfile?.name)
@@ -114,6 +123,12 @@ watch(() => auth.activeProfile?.name, profile => {
 
 <template>
   <WorkspaceView sidebar-title="历史记录" :sidebar-subtitle="`${chat.sessions.length} 个会话`">
+    <template #sidebar-action>
+      <button type="button" title="新建聊天" aria-label="新建聊天" @click="createChat">
+        <YaoYaoSidebarIcon name="add" />
+        <span>新建聊天</span>
+      </button>
+    </template>
     <template #sidebar>
       <ResourceSidebar
         :items="historyItems"

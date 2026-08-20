@@ -76,7 +76,7 @@ const contextHeading = computed(() => ({
   files: '历史记录',
 })[activeNav.value.key])
 
-const hasPrimaryAction = computed(() => activeNav.value.key === 'chat' || activeNav.value.key === 'groups')
+const hasPrimaryAction = computed(() => ['chat', 'groups', 'files'].includes(activeNav.value.key))
 
 async function navigate(path: string) {
   mobileDrawerOpen.value = false
@@ -449,7 +449,7 @@ onBeforeUnmount(() => {
 .sidebar-feature-nav button {
   display: flex;
   width: calc(100% - 20px);
-  min-height: 40px;
+  min-height: 36px;
   align-items: center;
   gap: 11px;
   margin-inline: 10px;
@@ -479,16 +479,16 @@ onBeforeUnmount(() => {
   top: var(--sidebar-search-top);
   left: 10px;
   width: calc(100% - 20px);
-  min-height: 40px;
+  min-height: 36px;
   margin: 0;
   background: var(--surface);
 }
 
-.sidebar-primary-action { margin: 5px 10px; }
+.sidebar-primary-action { margin: 3px 10px; }
 .sidebar-primary-action :deep(button) {
   display: flex;
   width: 100%;
-  min-height: 40px;
+  min-height: 36px;
   align-items: center;
   justify-content: flex-start;
   gap: 11px;

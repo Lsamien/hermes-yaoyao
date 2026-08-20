@@ -58,6 +58,13 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
 
   await page.goto('/files')
   await expect(page.getByRole('heading', { name: '文件库', exact: true }).last()).toBeVisible()
+  const fileSidebar = page.locator('.desktop-sidebar')
+  await expect(fileSidebar.getByRole('button', { name: '新建聊天' })).toBeVisible()
+  const compactControlHeights = await fileSidebar.locator('.sidebar-search-trigger, .sidebar-primary-action button, .sidebar-feature-nav button').evaluateAll(elements => (
+    elements.map(element => element.getBoundingClientRect().height)
+  ))
+  expect(compactControlHeights.length).toBeGreaterThanOrEqual(4)
+  expect(Math.max(...compactControlHeights)).toBeLessThanOrEqual(36)
   await expect(page.getByText('demo-report.pdf')).toBeVisible()
   const firstFileCard = page.locator('.library-grid article').first()
   const cardGeometry = await firstFileCard.evaluate(element => {
@@ -77,11 +84,57 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   const modalHeight = await page.locator('.preview-modal').evaluate(element => element.getBoundingClientRect().height)
   expect(modalHeight).toBeGreaterThan(600)
   await previewDialog.locator('.preview-close').click()
+  await fileSidebar.getByRole('button', { name: '新建聊天' }).click()
+  await expect(page).toHaveURL(/\/chat\/draft-[^?]+\?profile=yaoyao/)
 
   await page.goto('/artifacts')
   await expect(page).toHaveURL(/\/chat$/)
   await expect(page.getByRole('button', { name: '产物', exact: true })).toHaveCount(0)
   expect(consoleErrors).toEqual([])
+})
+
+test('previews an octet-stream Markdown file from the file library', async ({ page }) => {
+  await page.route('**/api/app/files**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/api/app/files') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          profile: 'yaoyao',
+          items: [{
+            id: 'markdown-file',
+            path: '/tmp/版本说明.md',
+            name: '版本说明.md',
+            extension: 'md',
+            mimeType: 'application/octet-stream',
+            size: 48,
+            modifiedAt: Date.now() / 1000,
+            exists: true,
+            origins: [{ profile: 'yaoyao', sessionId: 'session-demo', sessionTitle: '夭夭 Web 验收会话' }],
+          }],
+          nextCursor: null,
+          total: 1,
+        }),
+      })
+      return
+    }
+    if (url.pathname === '/api/app/files/markdown-file/preview') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/octet-stream',
+        body: '# 版本说明\n\n- Markdown 预览已恢复',
+      })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto('/files')
+  await page.getByText('版本说明.md', { exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '预览 版本说明.md' })
+  await expect(dialog.locator('.preview-text h1')).toHaveText('版本说明')
+  await expect(dialog.getByText('Markdown 预览已恢复', { exact: true })).toBeVisible()
 })
 
 test('keeps pins first and loads the next session page at the list bottom', async ({ page }) => {
@@ -273,12 +326,24 @@ test('renders model changes as a collapsed system event', async ({ page }) => {
 })
 
 test('opens a local message file link as a floating preview card', async ({ page }) => {
+  await page.route('**/Users/samien/Agents/%E6%96%B9%E6%A1%88%E8%8D%89%E7%A8%BF.md', route => route.fulfill({
+    status: 200,
+    contentType: 'text/markdown',
+    body: '# 会话文件\n\n这是会话中的文本文件。',
+  }))
   await page.goto('/chat/session-demo')
   const card = page.getByRole('link', { name: '预览文件 方案草稿.md' })
   await expect(card).toHaveClass(/file-link-card/)
   await card.click()
   const dialog = page.getByRole('dialog', { name: '预览 方案草稿.md' })
   await expect(dialog).toBeVisible()
+  await expect(dialog.locator('.preview-text')).toBeVisible()
+  const textPadding = await dialog.locator('.preview-text').evaluate(element => {
+    const style = getComputedStyle(element)
+    return { left: Number.parseFloat(style.paddingLeft), right: Number.parseFloat(style.paddingRight) }
+  })
+  expect(textPadding.left).toBeGreaterThanOrEqual(24)
+  expect(textPadding.right).toBeGreaterThanOrEqual(24)
   const stageHeight = await dialog.locator('.preview-stage').evaluate(stage => stage.getBoundingClientRect().height)
   expect(stageHeight).toBeGreaterThan(500)
 })

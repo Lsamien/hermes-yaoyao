@@ -245,9 +245,13 @@ export function roomToUi(room: GroupRoomDetail): UiRoom {
 }
 
 export function fileToUi(item: FileLibraryItem): UiLibraryItem {
-  const kind: UiLibraryItem['kind'] = item.kind === 'document'
-    ? item.mimeType === 'application/pdf' ? 'pdf' : /text|json|xml|javascript|typescript|css|html/.test(item.mimeType) ? 'text' : 'document'
-    : item.kind === 'other' ? 'file' : item.kind
+  const extension = (item.extension || item.name.split('.').at(-1) || '').toLocaleLowerCase()
+  const isTextFile = ['md', 'markdown', 'txt', 'json', 'yaml', 'yml', 'csv', 'js', 'ts', 'py', 'sh', 'css', 'html', 'xml'].includes(extension)
+  const kind: UiLibraryItem['kind'] = item.mimeType === 'application/pdf' || extension === 'pdf'
+    ? 'pdf'
+    : isTextFile || /text|json|xml|javascript|typescript|css|html/.test(item.mimeType)
+      ? 'text'
+      : item.kind === 'document' ? 'document' : item.kind === 'other' ? 'file' : item.kind
   const origin = item.origins.at(-1)
   return {
     id: item.id,
