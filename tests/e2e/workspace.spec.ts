@@ -112,9 +112,19 @@ test('previews an octet-stream Markdown file from the file library', async ({ pa
             modifiedAt: Date.now() / 1000,
             exists: true,
             origins: [{ profile: 'yaoyao', sessionId: 'session-demo', sessionTitle: '夭夭 Web 验收会话' }],
+          }, {
+            id: 'empty-markdown-file',
+            path: '/tmp/空白说明.md',
+            name: '空白说明.md',
+            extension: 'md',
+            mimeType: 'application/octet-stream',
+            size: 0,
+            modifiedAt: Date.now() / 1000,
+            exists: true,
+            origins: [{ profile: 'yaoyao', sessionId: 'session-demo', sessionTitle: '夭夭 Web 验收会话' }],
           }],
           nextCursor: null,
-          total: 1,
+          total: 2,
         }),
       })
       return
@@ -127,6 +137,10 @@ test('previews an octet-stream Markdown file from the file library', async ({ pa
       })
       return
     }
+    if (url.pathname === '/api/app/files/empty-markdown-file/preview') {
+      await route.fulfill({ status: 200, contentType: 'application/octet-stream', body: '' })
+      return
+    }
     await route.continue()
   })
 
@@ -135,6 +149,11 @@ test('previews an octet-stream Markdown file from the file library', async ({ pa
   const dialog = page.getByRole('dialog', { name: '预览 版本说明.md' })
   await expect(dialog.locator('.preview-text h1')).toHaveText('版本说明')
   await expect(dialog.getByText('Markdown 预览已恢复', { exact: true })).toBeVisible()
+  await dialog.locator('.preview-close').click()
+  await page.getByText('空白说明.md', { exact: true }).click()
+  const emptyDialog = page.getByRole('dialog', { name: '预览 空白说明.md' })
+  await expect(emptyDialog.locator('.preview-text')).toBeVisible()
+  await expect(emptyDialog.locator('.preview-unavailable')).toHaveCount(0)
 })
 
 test('keeps pins first and loads the next session page at the list bottom', async ({ page }) => {

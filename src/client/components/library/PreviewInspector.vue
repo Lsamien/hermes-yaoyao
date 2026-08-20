@@ -17,6 +17,7 @@ const officeRoot = ref<HTMLElement | null>(null)
 const pdfRoot = ref<HTMLElement | null>(null)
 const spreadsheetRows = ref<unknown[][]>([])
 const previewText = ref('')
+const previewTextLoaded = ref(false)
 const previewLoading = ref(false)
 const previewError = ref('')
 const extension = computed(() => props.item.name.split('.').at(-1)?.toLocaleLowerCase() || '')
@@ -31,6 +32,7 @@ async function loadRichPreview() {
   const generation = ++previewGeneration
   spreadsheetRows.value = []
   previewText.value = props.item.textContent || ''
+  previewTextLoaded.value = props.item.textContent !== undefined
   previewError.value = ''
   if (!sourceUrl.value) return
   if (!isWord.value && !isSpreadsheet.value && !isTextual.value && !isPdf.value) return
@@ -75,8 +77,9 @@ async function loadRichPreview() {
     } else if (isSpreadsheet.value) {
       const { default: readXlsxFile } = await import('read-excel-file/browser')
       spreadsheetRows.value = await readXlsxFile(blob) as unknown[][]
-    } else if (isTextual.value && !previewText.value) {
-      previewText.value = await blob.text()
+    } else if (isTextual.value) {
+      if (!previewTextLoaded.value) previewText.value = await blob.text()
+      previewTextLoaded.value = true
     }
   } catch (error) {
     previewError.value = error instanceof Error ? error.message : '无法生成预览'
@@ -108,7 +111,7 @@ watch(() => props.item.id, loadRichPreview, { immediate: true, flush: 'post' })
       <div v-else-if="isPdf && canInline" ref="pdfRoot" class="preview-pdf" />
       <div v-else-if="isWord" ref="officeRoot" class="preview-office" />
       <div v-else-if="isSpreadsheet && spreadsheetRows.length" class="preview-sheet"><table><tbody><tr v-for="(row, rowIndex) in spreadsheetRows.slice(0, 200)" :key="rowIndex"><td v-for="(cell, cellIndex) in row.slice(0, 50)" :key="cellIndex">{{ cell }}</td></tr></tbody></table></div>
-      <div v-else-if="isTextual && previewText" class="preview-text"><pre v-if="item.kind === 'code'">{{ previewText }}</pre><MarkdownContent v-else :content="previewText" /></div>
+      <div v-else-if="isTextual && previewTextLoaded" class="preview-text"><pre v-if="item.kind === 'code'">{{ previewText }}</pre><MarkdownContent v-else :content="previewText" /></div>
       <a v-else-if="item.kind === 'link' && (item.previewUrl || item.downloadUrl)" class="preview-link" :href="item.previewUrl || item.downloadUrl" target="_blank" rel="noopener noreferrer"><span><AppIcon name="link" :size="27" /></span><strong>{{ item.title || item.name }}</strong><small>在新窗口中打开</small></a>
       <div v-else class="preview-unavailable"><span><AppIcon :name="previewError ? 'alert' : 'file'" :size="28" /></span><strong>{{ previewLoading ? '正在生成预览…' : previewError || '此格式暂不支持内嵌预览' }}</strong><p>{{ previewError ? '仍可下载文件后使用系统应用查看。' : '可下载文件，使用系统应用查看。' }}</p></div>
     </div>
