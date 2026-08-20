@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
 import MarkdownContent from '@/components/messages/MarkdownContent.vue'
 import type { UiLibraryItem } from './types'
@@ -25,11 +25,34 @@ const isWord = computed(() => extension.value === 'docx' || /wordprocessingml/.t
 const isSpreadsheet = computed(() => ['xlsx', 'xls'].includes(extension.value) || /spreadsheetml|excel/.test(props.item.mimeType || ''))
 const isPdf = computed(() => props.item.kind === 'pdf' || extension.value === 'pdf' || props.item.mimeType === 'application/pdf')
 let previewGeneration = 0
+let officeResizeObserver: ResizeObserver | undefined
 
 const PDF_WORKER_URL = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).href
 
+function fitOfficePreview() {
+  const root = officeRoot.value
+  if (!root) return
+  root.style.setProperty('--docx-preview-scale', '1')
+  const pages = [...root.querySelectorAll<HTMLElement>('section.docx')]
+  const widestPage = Math.max(0, ...pages.map(page => page.getBoundingClientRect().width))
+  if (!widestPage) return
+  const availableWidth = Math.max(1, root.clientWidth)
+  const scale = Math.min(1, Math.max(0.1, availableWidth / widestPage))
+  root.style.setProperty('--docx-preview-scale', scale.toFixed(4))
+}
+
+function observeOfficePreview() {
+  officeResizeObserver?.disconnect()
+  if (!officeRoot.value || typeof ResizeObserver === 'undefined') return
+  officeResizeObserver = new ResizeObserver(fitOfficePreview)
+  officeResizeObserver.observe(officeRoot.value)
+}
+
 async function loadRichPreview() {
   const generation = ++previewGeneration
+  officeResizeObserver?.disconnect()
+  officeResizeObserver = undefined
+  officeRoot.value?.style.removeProperty('--docx-preview-scale')
   spreadsheetRows.value = []
   previewText.value = props.item.textContent || ''
   previewTextLoaded.value = props.item.textContent !== undefined
@@ -74,6 +97,8 @@ async function loadRichPreview() {
       if (!officeRoot.value) return
       officeRoot.value.replaceChildren()
       await renderAsync(blob, officeRoot.value, undefined, { inWrapper: true, breakPages: true, ignoreWidth: false, ignoreHeight: false })
+      fitOfficePreview()
+      observeOfficePreview()
     } else if (isSpreadsheet.value) {
       const { default: readXlsxFile } = await import('read-excel-file/browser')
       spreadsheetRows.value = await readXlsxFile(blob) as unknown[][]
@@ -89,6 +114,7 @@ async function loadRichPreview() {
 }
 
 watch(() => props.item.id, loadRichPreview, { immediate: true, flush: 'post' })
+onBeforeUnmount(() => officeResizeObserver?.disconnect())
 
 </script>
 
@@ -123,7 +149,7 @@ watch(() => props.item.id, loadRichPreview, { immediate: true, flush: 'post' })
 .preview-inspector { display: flex; height: 100%; min-height: 0; flex-direction: column; overflow: hidden; }
 header { display: flex; min-height: 56px; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); } header > strong { min-width: 0; flex: 1; overflow: hidden; font-size: 12px; font-weight: 630; text-overflow: ellipsis; white-space: nowrap; }.preview-header-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; }.preview-header-actions .icon-button { display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; text-decoration: none; }.preview-header-actions .icon-button:hover { background: var(--surface-soft); color: var(--text-primary); }
 .preview-stage { display: grid; min-height: 0; flex: 1 1 auto; place-items: center; overflow: hidden; background: var(--surface-soft); touch-action: pan-y; }.preview-stage img, .preview-stage video { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: contain; }.preview-stage audio { width: calc(100% - 34px); }.preview-stage object { width: 100%; height: 100%; border: 0; }.preview-text { width: 100%; height: 100%; box-sizing: border-box; padding: 20px 28px 28px; overflow: auto; background: var(--surface-raised); }.preview-text pre { margin: 0; color: var(--text-secondary); font: 10px/1.65 var(--font-code); white-space: pre-wrap; overflow-wrap: anywhere; }
-.preview-office { width: 100%; height: 100%; overflow: auto; background: #e6e6e4; color: #111; }.preview-office :deep(.docx-wrapper) { width: 100%; min-width: 0; box-sizing: border-box; align-items: flex-start; padding: 18px; background: #e6e6e4; }.preview-office :deep(.docx) { width: 100%; min-width: 0; max-width: 100%; margin-inline: auto; margin-bottom: 14px; box-shadow: 0 4px 18px rgba(0,0,0,.12); }.preview-office :deep(.docx > article) { width: 100%; min-width: 0; box-sizing: border-box; padding-inline: clamp(24px, 3vw, 36px); }
+.preview-office { width: 100%; height: 100%; overflow: auto; background: #fff; color: #111; }.preview-office :deep(.docx-wrapper) { width: 100%; min-width: 0; box-sizing: border-box; align-items: flex-start; padding: 0; background: #fff; }.preview-office :deep(.docx) { margin: 0 auto; zoom: var(--docx-preview-scale, 1); box-shadow: none; }.preview-office :deep(.docx > article) { padding: 0; }
 .preview-pdf { display: flex; width: 100%; height: 100%; box-sizing: border-box; align-items: center; flex-direction: column; gap: 12px; padding: 12px; overflow: auto; background: #dadad7; }.preview-pdf :deep(.pdf-page) { flex: 0 0 auto; overflow: hidden; background: #fff; box-shadow: 0 3px 14px rgba(0,0,0,.15); }.preview-pdf :deep(canvas) { display: block; }
 .preview-sheet { width: 100%; height: 100%; overflow: auto; background: var(--surface-raised); }.preview-sheet table { min-width: 100%; border-collapse: collapse; font-size: 9px; }.preview-sheet td { min-width: 72px; max-width: 240px; padding: 6px 8px; overflow: hidden; border: 1px solid var(--line); color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }.preview-sheet tr:first-child td { position: sticky; top: 0; background: var(--surface-soft); color: var(--text-primary); font-weight: 600; }
 .preview-link { display: flex; width: calc(100% - 34px); flex-direction: column; align-items: center; color: var(--text-secondary); text-decoration: none; text-align: center; }.preview-link > span, .preview-unavailable > span { display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); }.preview-link strong { max-width: 100%; overflow: hidden; color: var(--text-primary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }.preview-link small { margin-top: 5px; color: var(--text-muted); font-size: 9px; }

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-const WIDE_DOCX_BASE64 = 'UEsDBAoAAAAIAIAjFF15bjPX6AAAAK0BAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbH1QyU7DMBD9FWuuKHHggBCK0wPLETiUDxjZk8SqN3nc0v49Tlt6QIXjzFv1+tXeO7GjzDYGBbdtB4KCjsaGScHn+rV5AMEFg0EXAyk4EMNq6NeHRCyqNrCCuZT0KCXrmTxyGxOFiowxeyz1zJNMqDc4kbzrunupYygUSlMWDxj6Zxpx64p42df3qUcmxyCeTsQlSwGm5KzGUnG5C+ZXSnNOaKvyyOHZJr6pBJBXExbk74Cz7r0Ok60h8YG5vKGvLPkVs5Em6q2vyvZ/mys94zhaTRf94pZy1MRcF/euvSAebfjpL49zD99QSwMECgAAAAAAgCMUXQAAAAAAAAAAAAAAAAYAAABfcmVscy9QSwMECgAAAAgAgCMUXZv9N+qtAAAAKQEAAAsAAABfcmVscy8ucmVsc43POw7CMAwG4KtE3mlaBoRQ0y4IqSsqB7ASN61oHkrCo7cnAwNFDIy2f3+W6/ZpZnanECdnBVRFCYysdGqyWsClP232wGJCq3B2lgQsFKFt6jPNmPJKHCcfWTZsFDCm5A+cRzmSwVg4TzZPBhcMplwGzT3KK2ri27Lc8fBpwNpknRIQOlUB6xdP/9huGCZJRydvhmz6ceIrkWUMmpKAhwuKq3e7yCzwpuarF5sXUEsDBAoAAAAAAIAjFF0AAAAAAAAAAAAAAAAFAAAAd29yZC9QSwMECgAAAAgAgCMUXeKw1aL3AAAAgQEAABEAAAB3b3JkL2RvY3VtZW50LnhtbEWQTU8EIQyG/wrh7jI78WMzGWYPGm9GEzV6ZYfORzJQAt3F9dcL6I6Xlz7Qvm1p919mYSfwYUYr+XZTcQa2Rz3bUfL3t8erHWeBlNVqQQuSnyHwfdfGRmN/NGCJJQMbmij5ROQaIUI/gVFhgw5sehvQG0UJ/Sgieu089hBC8jeLqKvqVhg1W54tD6jP+XRZfBbqPmYN7OH5/pM5D6cZIltgIAZ6hFbkhKy+aCkL0NNLqXXj6zeLebBtXV+nvWIzpfhml2Lxm/CkfLoldJLf1SXDz+NEKx2QCM2KufMKEygNXvICAyKtMB7pD0SZ6zKSuGwo/n+v+wFQSwECFAAKAAAACACAIxRdeW4z1+gAAACtAQAAEwAAAAAAAAAAAAAAAAAAAAAAW0NvbnRlbnRfVHlwZXNdLnhtbFBLAQIUAAoAAAAAAIAjFF0AAAAAAAAAAAAAAAAGAAAAAAAAAAAAEAAAABkBAABfcmVscy9QSwECFAAKAAAACACAIxRdm/036q0AAAApAQAACwAAAAAAAAAAAAAAAAA9AQAAX3JlbHMvLnJlbHNQSwECFAAKAAAAAACAIxRdAAAAAAAAAAAAAAAABQAAAAAAAAAAABAAAAATAgAAd29yZC9QSwECFAAKAAAACACAIxRd4rDVovcAAACBAQAAEQAAAAAAAAAAAAAAAAA2AgAAd29yZC9kb2N1bWVudC54bWxQSwUGAAAAAAUABQAgAQAAXAMAAAAA'
+const WIDE_DOCX_BASE64 = 'UEsDBAoAAAAIAKwmFF15bjPX6AAAAK0BAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbH1QyU7DMBD9FWuuKHHggBCK0wPLETiUDxjZk8SqN3nc0v49Tlt6QIXjzFv1+tXeO7GjzDYGBbdtB4KCjsaGScHn+rV5AMEFg0EXAyk4EMNq6NeHRCyqNrCCuZT0KCXrmTxyGxOFiowxeyz1zJNMqDc4kbzrunupYygUSlMWDxj6Zxpx64p42df3qUcmxyCeTsQlSwGm5KzGUnG5C+ZXSnNOaKvyyOHZJr6pBJBXExbk74Cz7r0Ok60h8YG5vKGvLPkVs5Em6q2vyvZ/mys94zhaTRf94pZy1MRcF/euvSAebfjpL49zD99QSwMECgAAAAAArCYUXQAAAAAAAAAAAAAAAAYAAABfcmVscy9QSwMECgAAAAgArCYUXZv9N+qtAAAAKQEAAAsAAABfcmVscy8ucmVsc43POw7CMAwG4KtE3mlaBoRQ0y4IqSsqB7ASN61oHkrCo7cnAwNFDIy2f3+W6/ZpZnanECdnBVRFCYysdGqyWsClP232wGJCq3B2lgQsFKFt6jPNmPJKHCcfWTZsFDCm5A+cRzmSwVg4TzZPBhcMplwGzT3KK2ri27Lc8fBpwNpknRIQOlUB6xdP/9huGCZJRydvhmz6ceIrkWUMmpKAhwuKq3e7yCzwpuarF5sXUEsDBAoAAAAAAKwmFF0AAAAAAAAAAAAAAAAFAAAAd29yZC9QSwMECgAAAAgArCYUXalT+9hjAQAABwMAABEAAAB3b3JkL2RvY3VtZW50LnhtbKVSW0/CMBT+K03fpXMBJYRBFAaaYDSKwdeydluTrW3awsBfb7uVDYwmJr6cc75z+c6lHU8PZQH2VGkmeASvewEElCeCMJ5F8H29uBpCoA3mBBeC0wgeqYbTybgaEZHsSsoNsARcj6oI5sbIEUI6yWmJdU9Iym0sFarExkKVoUooIpVIqNaWvyxQGAQ3qMSMQ0e5FeTotHRCOWEmG0YomD/PPoBUdM9oNUbO7aSqZZ1stoVXL8obG1C5oa6DYWB3sq6jtOOTA4bIZ6zwUexMG0rZgRIXRJdES8WIMzOrZ6JoaAd9y4p+daOLStNQJY30xMnmrOT7fKhLPD/GKl6swfrufhWDeL6MfzgF6vr8u9vr4/Lhb+1QsyNqH0LTxHjC7O3Tv0QY9uveubUHw76/n8yesHITCRnB27DOUCzLTYu2whhRtrCgaRfLKSZURbAGqRCmBdnOeNBseBoJnf4Z6v7w5AtQSwECFAAKAAAACACsJhRdeW4z1+gAAACtAQAAEwAAAAAAAAAAAAAAAAAAAAAAW0NvbnRlbnRfVHlwZXNdLnhtbFBLAQIUAAoAAAAAAKwmFF0AAAAAAAAAAAAAAAAGAAAAAAAAAAAAEAAAABkBAABfcmVscy9QSwECFAAKAAAACACsJhRdm/036q0AAAApAQAACwAAAAAAAAAAAAAAAAA9AQAAX3JlbHMvLnJlbHNQSwECFAAKAAAAAACsJhRdAAAAAAAAAAAAAAAABQAAAAAAAAAAABAAAAATAgAAd29yZC9QSwECFAAKAAAACACsJhRdqVP72GMBAAAHAwAAEQAAAAAAAAAAAAAAAAA2AgAAd29yZC9kb2N1bWVudC54bWxQSwUGAAAAAAUABQAgAQAAyAMAAAAA'
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/chat')
@@ -158,7 +158,7 @@ test('previews an octet-stream Markdown file from the file library', async ({ pa
   await expect(emptyDialog.locator('.preview-unavailable')).toHaveCount(0)
 })
 
-test('keeps DOCX text inset without horizontal clipping', async ({ page }) => {
+test('keeps DOCX content at zero inset without horizontal clipping', async ({ page }) => {
   await page.setViewportSize({ width: 620, height: 760 })
   await page.route('**/api/app/files**', async route => {
     const url = new URL(route.request().url())
@@ -205,8 +205,11 @@ test('keeps DOCX text inset without horizontal clipping', async ({ page }) => {
     const wrapper = element.querySelector<HTMLElement>('.docx-wrapper')!
     const pageElement = element.querySelector<HTMLElement>('section.docx')!
     const article = pageElement.querySelector<HTMLElement>('article')!
+    const table = article.querySelector<HTMLElement>('table')!
     const officeRect = element.getBoundingClientRect()
     const pageRect = pageElement.getBoundingClientRect()
+    const officeStyle = getComputedStyle(element)
+    const wrapperStyle = getComputedStyle(wrapper)
     const articleStyle = getComputedStyle(article)
     return {
       officeLeft: officeRect.left,
@@ -215,18 +218,32 @@ test('keeps DOCX text inset without horizontal clipping', async ({ page }) => {
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
       wrapperWidth: wrapper.getBoundingClientRect().width,
+      articlePaddingTop: Number.parseFloat(articleStyle.paddingTop),
       articlePaddingLeft: Number.parseFloat(articleStyle.paddingLeft),
       articlePaddingRight: Number.parseFloat(articleStyle.paddingRight),
-      articleMinWidth: articleStyle.minWidth,
+      tableLeft: table.getBoundingClientRect().left,
+      tableRight: table.getBoundingClientRect().right,
+      officeBackground: officeStyle.backgroundColor,
+      wrapperBackground: wrapperStyle.backgroundColor,
+      wrapperPaddingTop: Number.parseFloat(wrapperStyle.paddingTop),
+      wrapperPaddingLeft: Number.parseFloat(wrapperStyle.paddingLeft),
+      wrapperPaddingRight: Number.parseFloat(wrapperStyle.paddingRight),
     }
   })
   expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.clientWidth)
   expect(geometry.pageLeft).toBeGreaterThanOrEqual(geometry.officeLeft)
   expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1)
   expect(Math.abs(geometry.wrapperWidth - geometry.clientWidth)).toBeLessThan(1)
-  expect(geometry.articlePaddingLeft).toBeGreaterThanOrEqual(24)
-  expect(geometry.articlePaddingRight).toBeGreaterThanOrEqual(24)
-  expect(geometry.articleMinWidth).toBe('0px')
+  expect(geometry.articlePaddingTop).toBe(0)
+  expect(geometry.articlePaddingLeft).toBe(0)
+  expect(geometry.articlePaddingRight).toBe(0)
+  expect(geometry.tableLeft).toBeGreaterThanOrEqual(geometry.pageLeft - 1)
+  expect(geometry.tableRight).toBeLessThanOrEqual(geometry.pageLeft + geometry.pageWidth + 1)
+  expect(geometry.officeBackground).toBe('rgb(255, 255, 255)')
+  expect(geometry.wrapperBackground).toBe('rgb(255, 255, 255)')
+  expect(geometry.wrapperPaddingTop).toBe(0)
+  expect(geometry.wrapperPaddingLeft).toBe(0)
+  expect(geometry.wrapperPaddingRight).toBe(0)
 
   await page.setViewportSize({ width: 930, height: 760 })
   const centered = await office.evaluate(element => {
