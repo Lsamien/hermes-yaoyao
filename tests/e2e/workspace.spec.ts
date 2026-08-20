@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+const WIDE_DOCX_BASE64 = 'UEsDBAoAAAAIAIAjFF15bjPX6AAAAK0BAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbH1QyU7DMBD9FWuuKHHggBCK0wPLETiUDxjZk8SqN3nc0v49Tlt6QIXjzFv1+tXeO7GjzDYGBbdtB4KCjsaGScHn+rV5AMEFg0EXAyk4EMNq6NeHRCyqNrCCuZT0KCXrmTxyGxOFiowxeyz1zJNMqDc4kbzrunupYygUSlMWDxj6Zxpx64p42df3qUcmxyCeTsQlSwGm5KzGUnG5C+ZXSnNOaKvyyOHZJr6pBJBXExbk74Cz7r0Ok60h8YG5vKGvLPkVs5Em6q2vyvZ/mys94zhaTRf94pZy1MRcF/euvSAebfjpL49zD99QSwMECgAAAAAAgCMUXQAAAAAAAAAAAAAAAAYAAABfcmVscy9QSwMECgAAAAgAgCMUXZv9N+qtAAAAKQEAAAsAAABfcmVscy8ucmVsc43POw7CMAwG4KtE3mlaBoRQ0y4IqSsqB7ASN61oHkrCo7cnAwNFDIy2f3+W6/ZpZnanECdnBVRFCYysdGqyWsClP232wGJCq3B2lgQsFKFt6jPNmPJKHCcfWTZsFDCm5A+cRzmSwVg4TzZPBhcMplwGzT3KK2ri27Lc8fBpwNpknRIQOlUB6xdP/9huGCZJRydvhmz6ceIrkWUMmpKAhwuKq3e7yCzwpuarF5sXUEsDBAoAAAAAAIAjFF0AAAAAAAAAAAAAAAAFAAAAd29yZC9QSwMECgAAAAgAgCMUXeKw1aL3AAAAgQEAABEAAAB3b3JkL2RvY3VtZW50LnhtbEWQTU8EIQyG/wrh7jI78WMzGWYPGm9GEzV6ZYfORzJQAt3F9dcL6I6Xlz7Qvm1p919mYSfwYUYr+XZTcQa2Rz3bUfL3t8erHWeBlNVqQQuSnyHwfdfGRmN/NGCJJQMbmij5ROQaIUI/gVFhgw5sehvQG0UJ/Sgieu089hBC8jeLqKvqVhg1W54tD6jP+XRZfBbqPmYN7OH5/pM5D6cZIltgIAZ6hFbkhKy+aCkL0NNLqXXj6zeLebBtXV+nvWIzpfhml2Lxm/CkfLoldJLf1SXDz+NEKx2QCM2KufMKEygNXvICAyKtMB7pD0SZ6zKSuGwo/n+v+wFQSwECFAAKAAAACACAIxRdeW4z1+gAAACtAQAAEwAAAAAAAAAAAAAAAAAAAAAAW0NvbnRlbnRfVHlwZXNdLnhtbFBLAQIUAAoAAAAAAIAjFF0AAAAAAAAAAAAAAAAGAAAAAAAAAAAAEAAAABkBAABfcmVscy9QSwECFAAKAAAACACAIxRdm/036q0AAAApAQAACwAAAAAAAAAAAAAAAAA9AQAAX3JlbHMvLnJlbHNQSwECFAAKAAAAAACAIxRdAAAAAAAAAAAAAAAABQAAAAAAAAAAABAAAAATAgAAd29yZC9QSwECFAAKAAAACACAIxRd4rDVovcAAACBAQAAEQAAAAAAAAAAAAAAAAA2AgAAd29yZC9kb2N1bWVudC54bWxQSwUGAAAAAAUABQAgAQAAXAMAAAAA'
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/chat')
   if (await page.getByRole('heading', { name: '登录 Hermes' }).isVisible()) {
@@ -154,6 +156,84 @@ test('previews an octet-stream Markdown file from the file library', async ({ pa
   const emptyDialog = page.getByRole('dialog', { name: '预览 空白说明.md' })
   await expect(emptyDialog.locator('.preview-text')).toBeVisible()
   await expect(emptyDialog.locator('.preview-unavailable')).toHaveCount(0)
+})
+
+test('keeps the left edge reachable for a wide DOCX preview', async ({ page }) => {
+  await page.setViewportSize({ width: 620, height: 760 })
+  await page.route('**/api/app/files**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/api/app/files') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          profile: 'yaoyao',
+          items: [{
+            id: 'wide-docx-file',
+            path: '/tmp/宽版文档.docx',
+            name: '宽版文档.docx',
+            extension: 'docx',
+            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            size: 1024,
+            modifiedAt: Date.now() / 1000,
+            exists: true,
+            origins: [{ profile: 'yaoyao', sessionId: 'session-demo', sessionTitle: '夭夭 Web 验收会话' }],
+          }],
+          nextCursor: null,
+          total: 1,
+        }),
+      })
+      return
+    }
+    if (url.pathname === '/api/app/files/wide-docx-file/preview') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        body: Buffer.from(WIDE_DOCX_BASE64, 'base64'),
+      })
+      return
+    }
+    await route.continue()
+  })
+
+  await page.goto('/files')
+  await page.getByText('宽版文档.docx', { exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '预览 宽版文档.docx' })
+  const office = dialog.locator('.preview-office')
+  await expect(office.locator('section.docx')).toBeVisible()
+  const geometry = await office.evaluate(element => {
+    const wrapper = element.querySelector<HTMLElement>('.docx-wrapper')!
+    const pageElement = element.querySelector<HTMLElement>('section.docx')!
+    const officeRect = element.getBoundingClientRect()
+    const pageRect = pageElement.getBoundingClientRect()
+    return {
+      officeLeft: officeRect.left,
+      pageLeft: pageRect.left,
+      pageWidth: pageRect.width,
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      wrapperWidth: wrapper.getBoundingClientRect().width,
+    }
+  })
+  expect(geometry.pageWidth).toBeGreaterThan(geometry.clientWidth)
+  expect(geometry.pageLeft).toBeGreaterThanOrEqual(geometry.officeLeft)
+  expect(geometry.scrollWidth).toBeGreaterThanOrEqual(geometry.pageWidth)
+  expect(Math.abs(geometry.wrapperWidth - geometry.clientWidth)).toBeLessThan(1)
+
+  await page.setViewportSize({ width: 1200, height: 760 })
+  const centered = await office.evaluate(element => {
+    const pageElement = element.querySelector<HTMLElement>('section.docx')!
+    const officeRect = element.getBoundingClientRect()
+    const pageRect = pageElement.getBoundingClientRect()
+    return {
+      pageWidth: pageRect.width,
+      clientWidth: element.clientWidth,
+      leftGap: pageRect.left - officeRect.left,
+      rightGap: officeRect.right - pageRect.right,
+    }
+  })
+  expect(centered.pageWidth).toBeLessThan(centered.clientWidth)
+  expect(Math.abs(centered.leftGap - centered.rightGap)).toBeLessThan(1)
 })
 
 test('keeps pins first and loads the next session page at the list bottom', async ({ page }) => {
