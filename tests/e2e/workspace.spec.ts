@@ -410,6 +410,20 @@ test('renders persisted user file markers as attachment cards', async ({ page })
   await expect(userMessage).not.toContainText('用户附加文件')
 })
 
+test('renders persisted user image markers as direct images instead of file cards', async ({ page }) => {
+  await page.goto('/chat/session-demo?profile=yaoyao')
+  const userMessage = page.locator('[data-message-id="message-user-image"]')
+  const imageAttachment = userMessage.locator('.message__attachment--image')
+  await expect(imageAttachment).toBeVisible()
+  await expect(imageAttachment.locator('img[alt="测试图片.png"]')).toBeVisible()
+  await expect(imageAttachment.locator('strong')).toHaveCount(0)
+  await expect(imageAttachment).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(userMessage).not.toContainText('@image:')
+  await expect(userMessage).not.toContainText('[screenshot]')
+  await imageAttachment.click()
+  await expect(page.getByRole('dialog', { name: '预览 测试图片.png' })).toBeVisible()
+})
+
 test('folds tool result rows into their expandable tool call', async ({ page }) => {
   await page.goto('/chat/session-demo')
   const trace = page.locator('.turn-trace').first()
