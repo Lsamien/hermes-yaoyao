@@ -48,7 +48,7 @@ function environment() {
 function plist() {
   const node = process.execPath
   const envEntries = {
-    PATH: `${dirname(node)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
+    PATH: `${dirname(node)}:${join(homedir(), '.local', 'bin')}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
     NODE_ENV: 'production',
     HERMES_YAOYAO_HOME: dataHome,
     HERMES_YAOYAO_HOST: '127.0.0.1',
