@@ -40,6 +40,7 @@ function environment() {
     'HERMES_YAOYAO_TLS_CERT',
     'HERMES_YAOYAO_TLS_KEY',
     'HERMES_YAOYAO_ALLOW_INSECURE_LAN',
+    'HERMES_YAOYAO_SUPERVISE_DASHBOARD',
   ]
   return Object.fromEntries(allowed.flatMap(key => process.env[key] ? [[key, process.env[key]]] : []))
 }
@@ -53,6 +54,7 @@ function plist() {
     HERMES_YAOYAO_HOST: '127.0.0.1',
     HERMES_YAOYAO_PORT: '8800',
     HERMES_YAOYAO_UPSTREAM: 'http://127.0.0.1:9119',
+    HERMES_YAOYAO_SUPERVISE_DASHBOARD: '1',
     ...environment(),
   }
   const envXml = Object.entries(envEntries).map(([key, value]) => (

@@ -3,9 +3,14 @@ import { resolve } from 'node:path'
 import send from 'koa-send'
 import serve from 'koa-static'
 import { createApplication, createNodeServer } from './app.js'
+import { isLoopbackHost } from './config.js'
+import { DashboardSupervisor } from './dashboardSupervisor.js'
 
 const runtime = createApplication()
 const nodeRuntime = createNodeServer(runtime)
+const dashboardSupervisor = runtime.config.superviseDashboard
+  ? new DashboardSupervisor({ allowLan: !isLoopbackHost(runtime.config.host) })
+  : undefined
 let closeFrontend = async (): Promise<void> => undefined
 
 if (runtime.config.production) {
@@ -65,6 +70,7 @@ nodeRuntime.server.listen(runtime.config.port, runtime.config.host, () => {
   if (runtime.config.insecureLan) {
     console.warn('Warning: trusted-LAN HTTP mode is enabled; credentials are not encrypted in transit.')
   }
+  dashboardSupervisor?.start()
 })
 
 let closing = false
@@ -72,6 +78,7 @@ async function shutdown(): Promise<void> {
   if (closing) return
   closing = true
   try {
+    dashboardSupervisor?.stop()
     await closeFrontend()
     await nodeRuntime.close()
   } finally {

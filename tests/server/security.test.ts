@@ -102,4 +102,10 @@ describe('server security boundary', () => {
       HERMES_YAOYAO_ALLOW_INSECURE_LAN: '1',
     }).insecureLan).toBe(true)
   })
+
+  it('defaults the YaoYao Web listener to loopback', () => {
+    const value = loadServerConfig({})
+    expect(value.host).toBe('127.0.0.1')
+    expect(value.insecureLan).toBe(false)
+  })
 })

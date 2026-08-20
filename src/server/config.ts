@@ -17,6 +17,7 @@ export interface ServerConfig {
   allowInsecureLan: boolean
   insecureLan: boolean
   production: boolean
+  superviseDashboard?: boolean
 }
 
 function flag(value: string | undefined): boolean {
@@ -83,7 +84,7 @@ export function isLoopbackUpstream(upstream: URL): boolean {
 export function loadServerConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): ServerConfig {
-  const host = env.HERMES_YAOYAO_HOST?.trim() || '0.0.0.0'
+  const host = env.HERMES_YAOYAO_HOST?.trim() || '127.0.0.1'
   const port = parsePort(env.HERMES_YAOYAO_PORT)
   const upstream = parseUpstream(env.HERMES_YAOYAO_UPSTREAM)
   const home = resolve(env.HERMES_YAOYAO_HOME?.trim() || `${homedir()}/.hermes-yaoyao`)
@@ -97,6 +98,7 @@ export function loadServerConfig(
   }
   const allowInsecureLan = flag(env.HERMES_YAOYAO_ALLOW_INSECURE_LAN)
   const production = env.NODE_ENV === 'production'
+  const superviseDashboard = flag(env.HERMES_YAOYAO_SUPERVISE_DASHBOARD)
   const insecureLan = !tlsCert && !isLoopbackHost(host)
   if (production && insecureLan && !allowInsecureLan) {
     throw new Error(
@@ -124,5 +126,6 @@ export function loadServerConfig(
     allowInsecureLan,
     insecureLan,
     production,
+    superviseDashboard,
   }
 }

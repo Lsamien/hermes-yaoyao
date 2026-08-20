@@ -36,6 +36,7 @@ const child = spawn(process.execPath, [entry.pathname], {
     HERMES_YAOYAO_HOST: '127.0.0.1',
     HERMES_YAOYAO_PORT: String(port),
     HERMES_YAOYAO_UPSTREAM: process.env.HERMES_YAOYAO_UPSTREAM || 'http://127.0.0.1:9119',
+    HERMES_YAOYAO_SUPERVISE_DASHBOARD: '0',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 })
