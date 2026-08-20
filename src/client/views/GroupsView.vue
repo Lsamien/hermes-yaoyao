@@ -18,6 +18,7 @@ import { mediaItemsFromMessages, mediaUrlIdentity, previewItemFromUrl } from '@/
 import MessageTimeline from '@/components/messages/MessageTimeline.vue'
 import type { UiMessage } from '@/components/messages/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
+import FloatingResourceSearch from '@/components/app/FloatingResourceSearch.vue'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
 import { loadComposerFile } from '@/components/workspace/pendingComposer'
 import { readAgentShowThinking, writeAgentShowThinking } from '@/utils/sessionPreferences'
@@ -30,7 +31,6 @@ const auth = useAuthStore()
 const groups = useGroupsStore()
 const route = useRoute()
 const router = useRouter()
-const search = ref('')
 const createOpen = ref(false)
 const managerOpen = ref(false)
 const showThinking = ref(true)
@@ -44,10 +44,8 @@ const modelOptionsError = ref<Record<string, string>>({})
 const agentUpdateBusy = ref<Record<string, boolean>>({})
 const agentUpdateError = ref<Record<string, string>>({})
 
-const filteredRooms = computed(() => groups.rooms
-  .filter(room => !room.archived)
-  .filter(room => !search.value.trim() || `${room.name} ${room.lastMessage?.content || ''}`.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())))
-const sidebarItems = computed(() => filteredRooms.value.map(roomSidebarItem))
+const activeRooms = computed(() => groups.rooms.filter(room => !room.archived))
+const sidebarItems = computed(() => activeRooms.value.map(roomSidebarItem))
 const messages = computed(() => groups.messages.map(groupMessageToUi))
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
 const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
@@ -210,7 +208,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 </script>
 
 <template>
-  <WorkspaceView sidebar-title="群聊" :sidebar-subtitle="groups.availability === 'available' ? `${filteredRooms.length} 个活跃房间` : `9119 群聊 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}`" :inspector-open="managerOpen && !!room" inspector-close-label="关闭群聊管理" @close-inspector="managerOpen = false">
+  <WorkspaceView sidebar-title="群聊" :sidebar-subtitle="groups.availability === 'available' ? `${activeRooms.length} 个活跃房间` : `9119 群聊 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}`" :inspector-open="managerOpen && !!room" inspector-close-label="关闭群聊管理" @close-inspector="managerOpen = false">
     <template #sidebar-action>
       <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" title="新建群聊" aria-label="新建群聊" @click="createOpen = true">
         <YaoYaoSidebarIcon name="add" />
@@ -222,12 +220,10 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :items="sidebarItems"
         :active-id="groups.selectedRoomId"
         :loading="groups.isLoading"
-        :search="search"
         external-search
         search-placeholder="搜索群聊"
         empty-title="还没有群聊"
         empty-description="新建群聊，邀请 1–8 个 Agent 一起协作。"
-        @search="search = $event"
         @select="selectRoom"
         @more="id => { selectRoom(id); managerOpen = true }"
       />
@@ -308,6 +304,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
     </template>
   </WorkspaceView>
 
+  <FloatingResourceSearch section="groups" label="搜索群聊" :items="sidebarItems" @select="selectRoom" />
   <CreateGroupDialog :open="createOpen" :profiles="profiles" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
   <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="addPreviewToComposer" @source="preview = null" />
   <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" :can-add="uploadsEnabled" @add="addMediaToComposer" />

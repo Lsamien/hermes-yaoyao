@@ -17,6 +17,7 @@ import MessageTimeline from '@/components/messages/MessageTimeline.vue'
 import SessionOutline from '@/components/messages/SessionOutline.vue'
 import type { UiMessage } from '@/components/messages/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
+import FloatingResourceSearch from '@/components/app/FloatingResourceSearch.vue'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
 import { chatInteraction, chatMessagesToUi, sessionSidebarItem } from '@/components/workspace/viewModels'
 import { consumeLibraryItemForComposer, loadComposerFile } from '@/components/workspace/pendingComposer'
@@ -29,7 +30,6 @@ const auth = useAuthStore()
 const chat = useChatStore()
 const route = useRoute()
 const router = useRouter()
-const search = ref('')
 const quoted = ref<UiMessage | null>(null)
 const preview = ref<UiLibraryItem | null>(null)
 const filePreview = ref<UiLibraryItem | null>(null)
@@ -49,8 +49,7 @@ const headerSessionMenuButton = ref<HTMLButtonElement | null>(null)
 const restoringRouteProfile = ref('')
 
 const sessions = computed(() => [...chat.sessions]
-  .filter(session => !['cron', 'ios_group'].includes(session.source))
-  .filter(session => !search.value.trim() || `${session.title} ${session.preview || ''}`.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())))
+  .filter(session => !['cron', 'ios_group'].includes(session.source)))
 const agentNames = computed(() => new Map(auth.profiles.map(profile => [
   profile.name,
   profile.agentName || profile.displayName || profile.name,
@@ -375,7 +374,6 @@ watch(() => chat.activeSessionId, async id => {
         :items="sidebarItems"
         :active-id="chat.activeSessionId"
         :loading="chat.isLoading"
-        :search="search"
         external-search
         single-line
         :has-more="chat.hasMoreSessions"
@@ -383,7 +381,6 @@ watch(() => chat.activeSessionId, async id => {
         search-placeholder="搜索会话"
         empty-title="还没有会话"
         empty-description="新建会话后，从输入框开始聊天。"
-        @search="search = $event"
         @load-more="chat.loadMoreSessions(auth.activeProfile?.name)"
         @select="chooseSession"
         @more="openSessionActions"
@@ -462,6 +459,7 @@ watch(() => chat.activeSessionId, async id => {
     </template>
   </WorkspaceView>
 
+  <FloatingResourceSearch section="chat" label="搜索会话" :items="sidebarItems" @select="chooseSession" />
   <PreviewModal v-if="filePreview" :item="filePreview" :items="conversationMediaItems" @close="filePreview = null" @add-to-composer="addPreviewToComposer" @source="filePreview = null" />
   <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" @add="addMediaToComposer" />
 
