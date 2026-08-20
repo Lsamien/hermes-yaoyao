@@ -140,6 +140,12 @@ describe('8800 BFF', () => {
       .set('Host', '127.0.0.1:8800').set('Cookie', cookieHeader(bootstrap)).expect(200)
     expect(response.headers['content-length']).toBe(String(Buffer.byteLength('document bytes')))
     expect(response.headers['content-disposition']).toContain('inline')
+    await request(runtime.app.callback())
+      .get('/attachments/报告.docx')
+      .set('Host', '127.0.0.1:8800').set('Cookie', cookieHeader(bootstrap)).expect(200)
+    await request(runtime.app.callback())
+      .get('/attachments/../state.db')
+      .set('Host', '127.0.0.1:8800').set('Cookie', cookieHeader(bootstrap)).expect(404)
   })
   it('bootstraps sequentially without exposing the upstream address', async () => {
     const records: RecordedRequest[] = []

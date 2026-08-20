@@ -172,6 +172,13 @@ function attachmentMime(name: string): { mimeType: string; kind: ChatAttachment[
   return { mimeType: 'application/octet-stream', kind: 'file' }
 }
 
+function persistedAttachmentUrl(path: string): string | undefined {
+  if (path.startsWith('/')) return path
+  const segments = path.split('/')
+  if (segments[0] !== 'attachments' || segments.length < 2 || segments.some(segment => !segment || segment === '.' || segment === '..')) return undefined
+  return `/${segments.map(encodeURIComponent).join('/')}`
+}
+
 function extractPersistedAttachments(content: string): { content: string; attachments: ChatAttachment[] } {
   const attachments: ChatAttachment[] = []
   const cleaned = content.replace(
@@ -179,9 +186,10 @@ function extractPersistedAttachments(content: string): { content: string; attach
     (_match, _type: string, rawName: string, rawPath: string) => {
       const name = rawName.trim()
       const path = rawPath.trim().replace(/\\\//g, '/').replace(/^[`'"]|[`'"]$/g, '')
-      if (!path.startsWith('/')) return _match
+      const url = persistedAttachmentUrl(path)
+      if (!url) return _match
       const media = attachmentMime(name)
-      attachments.push({ id: `persisted:${path}`, name, path, url: path, size: 0, ...media })
+      attachments.push({ id: `persisted:${path}`, name, path, url, size: 0, ...media })
       return ''
     },
   ).replace(/\n{3,}/g, '\n\n').trim()

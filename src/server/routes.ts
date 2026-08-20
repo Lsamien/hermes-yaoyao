@@ -484,6 +484,16 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       sendLocalMedia(ctx, localMediaPath(dependencies.config.attachmentsRoot, filePath))
     })
   })
+  router.get('/attachments/*filePath', async (ctx) => {
+    if (!isLoopbackUpstream(dependencies.config.upstream)) {
+      throw new HttpError(409, '本地附件只支持回环 Hermes 上游', 'remote_local_media_disabled')
+    }
+    await withJar(ctx, async (jar) => {
+      await requireGatewayAuthentication(ctx, dependencies, jar)
+      const filePath = Array.isArray(ctx.params.filePath) ? ctx.params.filePath.join('/') : ctx.params.filePath
+      sendLocalMedia(ctx, localMediaPath(dependencies.config.attachmentsRoot, filePath))
+    })
+  })
   router.get('/readyz', async (ctx) => {
     ctx.set('Cache-Control', 'no-store')
     try {
