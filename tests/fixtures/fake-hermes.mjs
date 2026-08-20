@@ -1,11 +1,19 @@
 import { createServer } from 'node:http'
-import { WebSocketServer } from 'ws'
+import WebSocket, { WebSocketServer } from 'ws'
 
 const port = Number(process.env.FAKE_HERMES_PORT || 19119)
 const epoch = '11111111-1111-4111-8111-111111111111'
 const roomId = '22222222-2222-4222-8222-222222222222'
 const agentId = '33333333-3333-4333-8333-333333333333'
 const now = () => Date.now() / 1000
+let groupCursor = 0
+const groupClients = new Set()
+
+function broadcastGroup(event, payload) {
+  groupCursor += 1
+  const frame = JSON.stringify({ type: 'group.event', epoch, cursor: groupCursor, roomId, event, payload })
+  for (const client of groupClients) if (client.readyState === WebSocket.OPEN) client.send(frame)
+}
 
 function authenticated(request) {
   return String(request.headers.cookie || '').includes('fake_session=authenticated')
@@ -111,9 +119,9 @@ const server = createServer(async (request, response) => {
     return session ? json(response, 200, session) : json(response, 404, { detail: 'Not found' })
   }
   if (url.pathname === '/api/session-unread') return json(response, 200, { items: { 'session-demo': 0 } })
-  if (url.pathname === '/api/plugins/yaoyao/v1/capabilities') return json(response, 200, { protocolVersion: 3, journalEpoch: epoch, latestCursor: 0, limits: { maxAgentsPerRoom: 8, maxMessageBytes: 65536, maxMessagePageSize: 100, defaultMaxReplyRounds: 3, unlimitedReplyRoundsValue: -1, maxAgentDisplayNameLength: 100 }, eventTypes: ['message.upsert', 'agent.status'] })
+  if (url.pathname === '/api/plugins/yaoyao/v1/capabilities') return json(response, 200, { protocolVersion: 3, journalEpoch: epoch, latestCursor: groupCursor, limits: { maxAgentsPerRoom: 8, maxMessageBytes: 65536, maxMessagePageSize: 100, defaultMaxReplyRounds: 3, unlimitedReplyRoundsValue: -1, maxAgentDisplayNameLength: 100 }, eventTypes: ['message.upsert', 'agent.status'] })
   if (url.pathname === '/api/plugins/yaoyao/v1/rooms') return json(response, 200, { items: [room], nextCursor: null })
-  if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}`) return json(response, 200, { ...room, agents: [groupAgent], runs: [], pendingInteractions: [], latestCursor: 0 })
+  if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}`) return json(response, 200, { ...room, agents: [groupAgent], runs: [], pendingInteractions: [], latestCursor: groupCursor })
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/agents/${agentId}` && request.method === 'PATCH') {
     const input = await body(request)
     if (input.displayName === '所有人') return json(response, 409, { detail: '成员名称不能使用“所有人”' })
@@ -122,6 +130,14 @@ const server = createServer(async (request, response) => {
     }
     groupAgent.updatedAt = now()
     return json(response, 200, groupAgent)
+  }
+  if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/messages` && request.method === 'POST') {
+    const input = await body(request)
+    const sent = { ...groupMessage, seq: 3, id: input.clientMessageId, clientMessageId: input.clientMessageId, content: input.content, createdAt: now(), updatedAt: now() }
+    json(response, 200, { message: sent, runs: [{ id: '66666666-6666-4666-8666-666666666666', roomId, agentId, status: 'queued' }] })
+    setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'running', runId: '66666666-6666-4666-8666-666666666666' }), 80)
+    setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'idle', runId: null }), 1500)
+    return
   }
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/messages`) return json(response, 200, { items: groupMessages })
   if (url.pathname === '/api/plugins/yaoyao/files') return json(response, 200, { items: [{ id: 1, path: '/tmp/demo-report.pdf', name: 'demo-report.pdf', extension: 'pdf', mimeType: 'application/pdf', size: 204800, modifiedAt: now(), exists: true, origins: [{ profile: 'yaoyao', sessionId: 'session-demo', sessionTitle: '夭夭 Web 验收会话', messageId: 'message-assistant', authorKind: 'assistant', authorName: '夭夭', observedAt: now() }] }], nextCursor: null, total: 1 })
@@ -138,7 +154,9 @@ server.on('upgrade', (request, socket, head) => {
   if (url.searchParams.get('ticket') !== 'fake-ticket') return socket.destroy()
   sockets.handleUpgrade(request, socket, head, client => {
     if (url.pathname.endsWith('/events')) {
-      client.send(JSON.stringify({ type: 'group.ready', epoch, cursor: 0, heartbeatSeconds: 20 }))
+      groupClients.add(client)
+      client.once('close', () => groupClients.delete(client))
+      client.send(JSON.stringify({ type: 'group.ready', epoch, cursor: groupCursor, heartbeatSeconds: 20 }))
       return
     }
     client.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'gateway.ready', payload: { capabilities: ['safe_interrupt', 'session_reasoning_config'] } } }))

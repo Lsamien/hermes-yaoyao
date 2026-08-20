@@ -65,6 +65,15 @@ const mentionOptions = computed<ComposerOption[]>(() => [
   { id: 'all', label: '所有人', detail: '通知房间内全部 Agent' },
   ...groups.agents.map(agent => ({ id: agent.id, label: agent.displayName || agent.profile, detail: agent.profile, disabled: !agent.enabled })),
 ])
+const typingAgentNames = computed(() => [...new Set(groups.agents
+  .filter(agent => ['queued', 'running'].includes(agent.status))
+  .map(agent => agent.displayName || agent.profile))])
+const typingActivity = computed(() => {
+  const names = typingAgentNames.value
+  if (!names.length) return ''
+  if (names.length <= 3) return `${names.join('、')}正在输入…`
+  return `${names.slice(0, 2).join('、')}等 ${names.length} 个 Agent 正在输入…`
+})
 
 function restoreShowThinking(profile = auth.activeProfile?.name || 'default') {
   showThinking.value = readAgentShowThinking(auth.user?.id ?? 'local', profile)
@@ -235,7 +244,6 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :connected="connected"
         :synced="!!groups.selectedRoom"
         :show-tools="showThinking"
-        :thinking="groups.isSending || groups.agents.some(agent => ['queued', 'running'].includes(agent.status))"
         :interaction="activeInteraction"
         :mention-names="mentionNames"
         empty-title="让多个 Agent 一起工作"
@@ -262,6 +270,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :disabled="!groups.selectedRoom || groups.availability !== 'available'"
         :streaming="groups.agents.some(agent => ['queued', 'running'].includes(agent.status))"
         :sending="groups.isSending"
+        :activity-text="typingActivity"
         :tool-trace-visible="showThinking"
         :reference="reference"
         :mention-options="mentionOptions"

@@ -142,6 +142,21 @@ test('edits every protocol v3 Agent setting with one inspector close control', a
   expect((await restoreResponse).status()).toBe(200)
 })
 
+test('pins the named Agent typing status above the group composer', async ({ page }) => {
+  await page.getByRole('button', { name: '群聊' }).click()
+  const composer = page.locator('.composer-area')
+  await page.getByRole('textbox', { name: '发消息给群聊，输入 @ 提及 Agent' }).fill('@夭夭 检查输入状态')
+  await page.getByRole('button', { name: '发送消息' }).click()
+
+  const typing = composer.getByRole('status', { name: 'Agent 输入状态' })
+  await expect(typing).toHaveText('夭夭正在输入…')
+  await expect(page.locator('.message-stack .thinking-indicator')).toHaveCount(0)
+  const typingBox = await typing.boundingBox()
+  const shellBox = await composer.locator('.composer-shell').boundingBox()
+  expect(typingBox?.y).toBeLessThan(shellBox?.y ?? 0)
+  await expect(typing).toHaveCount(0, { timeout: 3_000 })
+})
+
 test('previews an octet-stream Markdown file from the file library', async ({ page }) => {
   await page.route('**/api/app/files**', async route => {
     const url = new URL(route.request().url())

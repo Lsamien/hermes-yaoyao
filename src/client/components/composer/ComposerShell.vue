@@ -24,6 +24,7 @@ const props = withDefaults(defineProps<{
   mentionOptions?: ComposerOption[]
   slashCommands?: ComposerOption[]
   attachmentsEnabled?: boolean
+  activityText?: string
 }>(), {
   mode: 'chat',
   draftKey: '',
@@ -45,6 +46,7 @@ const props = withDefaults(defineProps<{
   mentionOptions: () => [],
   slashCommands: () => [],
   attachmentsEnabled: true,
+  activityText: '',
 })
 
 const emit = defineEmits<{
@@ -392,6 +394,15 @@ defineExpose({
 
 <template>
   <div class="composer-area">
+    <div v-if="mode === 'group'" class="composer-activity-slot">
+      <Transition name="composer-activity">
+        <div v-if="activityText" class="composer-activity" role="status" aria-label="Agent 输入状态" aria-live="polite" aria-atomic="true">
+          <span class="composer-typing-dots" aria-hidden="true"><i /><i /><i /></span>
+          <strong>{{ activityText }}</strong>
+        </div>
+      </Transition>
+    </div>
+
     <div v-if="attachments.length" class="composer-attachments" aria-label="附件">
       <div v-for="attachment in attachments" :key="attachment.id" class="composer-attachment" :class="{ image: isImage(attachment.type) }">
         <img v-if="attachment.previewUrl" :src="attachment.previewUrl" :alt="attachment.name" />
@@ -543,6 +554,12 @@ defineExpose({
 
 <style scoped>
 .composer-area { position: relative; z-index: 12; flex: 0 0 auto; padding: 12px max(24px, calc((100% - 760px) / 2)) max(18px, env(safe-area-inset-bottom)); background: var(--conversation-canvas); }
+.composer-activity-slot { display: flex; width: 100%; max-width: 760px; min-height: 20px; margin: 0 auto 3px; align-items: center; }
+.composer-activity { display: inline-flex; min-width: 0; align-items: center; gap: 7px; color: var(--text-muted); font-size: 10px; }
+.composer-activity strong { overflow: hidden; color: var(--text-secondary); font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
+.composer-typing-dots { display: inline-flex; align-items: center; gap: 2px; }.composer-typing-dots i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; animation: composer-typing 1.05s ease-in-out infinite; }.composer-typing-dots i:nth-child(2) { animation-delay: 140ms; }.composer-typing-dots i:nth-child(3) { animation-delay: 280ms; }
+@keyframes composer-typing { 0%, 65%, 100% { opacity: .3; transform: translateY(0); } 32% { opacity: 1; transform: translateY(-2px); } }
+.composer-activity-enter-active, .composer-activity-leave-active { transition: opacity 120ms ease, transform 120ms var(--ease-out); }.composer-activity-enter-from, .composer-activity-leave-to { opacity: 0; transform: translateY(3px); }
 .composer-shell { position: relative; display: flex; width: 100%; min-height: 72px; max-width: 760px; margin-inline: auto; flex-direction: column; align-items: stretch; gap: 8px; padding: 13px 14px 9px; border: 1px solid var(--input-border-color); border-radius: 18px; background: var(--chat-composer-bg); box-shadow: 0 8px 24px rgba(41,36,39,.06); cursor: text; transition: border-color 140ms ease, box-shadow 150ms ease, background-color 140ms ease; }
 .dark .composer-shell { box-shadow: 0 8px 28px rgba(0,0,0,.32); }
 .composer-shell:hover:not(:focus-within) { border-color: var(--input-border-hover-color); }
