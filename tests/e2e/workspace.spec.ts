@@ -113,7 +113,8 @@ test('edits every protocol v3 Agent setting with one inspector close control', a
   await expect(page.getByLabel('最多回复轮数')).toHaveValue('-1')
   await page.getByRole('button', { name: '设置夭夭' }).click()
 
-  const editor = page.getByRole('group', { name: '夭夭 Agent 设置' })
+  const editor = page.getByRole('dialog', { name: '夭夭 Agent 设置' })
+  await expect(page.locator('.group-manager .agent-editor')).toHaveCount(0)
   await expect(editor.getByLabel('显示名称')).toHaveValue('夭夭')
   await expect(editor.getByLabel('职责说明')).toHaveValue('主 Agent')
   await expect(editor.getByLabel('模型')).toHaveValue(JSON.stringify(['openai', 'gpt-5.6']))
@@ -125,7 +126,7 @@ test('edits every protocol v3 Agent setting with one inspector close control', a
   await editor.getByRole('button', { name: '保存 Agent 设置' }).click()
   expect((await rejectedResponse).status()).toBe(409)
   await expect(editor.getByRole('alert')).toContainText('成员名称不能使用“所有人”')
-  await page.getByRole('button', { name: '设置夭夭' }).click()
+  await editor.getByRole('button', { name: '关闭 Agent 设置' }).click()
   await page.getByRole('button', { name: '设置夭夭' }).click()
   await expect(editor.getByLabel('显示名称')).toHaveValue('所有人')
   await editor.getByLabel('显示名称').fill('夭夭')

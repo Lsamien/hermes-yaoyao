@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import type { GroupAgent, ModelOption } from '@shared/types'
 import AppIcon from '@/components/common/AppIcon.vue'
 import type { UiRoom } from './types'
@@ -57,6 +57,7 @@ const form = reactive({ name: props.room.name, replyRounds: props.room.replyRoun
 const expandedAgentId = ref('')
 const agentDrafts = reactive<Record<string, AgentDraft>>({})
 const dirtyAgents = reactive(new Set<string>())
+const selectedAgent = computed(() => props.agents.find(agent => agent.id === expandedAgentId.value))
 
 function modelKey(provider?: string | null, model?: string | null): string {
   return provider && model ? JSON.stringify([provider, model]) : ''
@@ -92,6 +93,7 @@ watch(() => props.room, room => {
 
 watch(() => props.agents, agents => {
   const ids = new Set(agents.map(agent => agent.id))
+  if (expandedAgentId.value && !ids.has(expandedAgentId.value)) expandedAgentId.value = ''
   for (const id of Object.keys(agentDrafts)) if (!ids.has(id)) delete agentDrafts[id]
   for (const agent of agents) {
     if (!agentDrafts[agent.id] || !dirtyAgents.has(agent.id)) {
@@ -111,15 +113,13 @@ function saveRoom() {
   })
 }
 
-function toggleAgent(agent: GroupAgent) {
-  if (expandedAgentId.value === agent.id) {
-    expandedAgentId.value = ''
-    return
-  }
+function openAgentSettings(agent: GroupAgent) {
   expandedAgentId.value = agent.id
   if (!dirtyAgents.has(agent.id)) agentDrafts[agent.id] = draftFrom(agent)
   emit('loadModels', agent.profile)
 }
+
+function closeAgentSettings() { expandedAgentId.value = '' }
 
 function markDirty(agentId: string) {
   dirtyAgents.add(agentId)
@@ -193,52 +193,12 @@ function statusLabel(status: GroupAgent['status']): string {
     <section>
       <div class="section-heading"><h3>成员 <em>{{ agents.length }}/8</em></h3></div>
       <div class="agent-list">
-        <article v-for="agent in agents" :key="agent.id" :class="{ expanded: expandedAgentId === agent.id }">
+        <article v-for="agent in agents" :key="agent.id">
           <span class="agent-avatar">{{ agent.displayName.slice(0, 1).toUpperCase() }}<i :class="`status-${agent.status}`" /></span>
           <span class="agent-copy"><strong>{{ agent.displayName }}</strong><small>{{ agent.profile }} · {{ statusLabel(agent.status) }}</small></span>
-          <button class="agent-action" type="button" :title="`设置 ${agent.displayName}`" :aria-label="`设置${agent.displayName}`" @click="toggleAgent(agent)"><AppIcon name="settings" :size="14" /></button>
+          <button class="agent-action" type="button" :title="`设置 ${agent.displayName}`" :aria-label="`设置${agent.displayName}`" @click="openAgentSettings(agent)"><AppIcon name="settings" :size="14" /></button>
           <button v-if="agent.status === 'running' || agent.status === 'queued'" class="agent-action" type="button" title="中断" @click="emit('interruptAgent', agent.id)"><AppIcon name="stop" :size="13" /></button>
           <button class="agent-action danger" type="button" title="移除" :disabled="agents.length <= 1" @click="emit('removeAgent', agent.id)"><AppIcon name="trash" :size="14" /></button>
-
-          <fieldset v-if="expandedAgentId === agent.id && agentDrafts[agent.id]" class="agent-editor" :aria-label="`${agent.displayName} Agent 设置`">
-            <legend>Agent 设置</legend>
-            <div class="editor-grid">
-              <label><span>显示名称</span><input v-model="agentDrafts[agent.id].displayName" maxlength="100" aria-label="显示名称" @input="markDirty(agent.id)" /></label>
-              <label><span>职责说明</span><textarea v-model="agentDrafts[agent.id].description" rows="2" maxlength="500" aria-label="职责说明" @input="markDirty(agent.id)" /></label>
-              <label>
-                <span>模型</span>
-                <select v-model="agentDrafts[agent.id].modelKey" aria-label="模型" @focus="emit('loadModels', agent.profile)" @change="markDirty(agent.id)">
-                  <option value="">跟随 Profile 默认</option>
-                  <option v-for="option in modelOptionsFor(agent)" :key="modelKey(option.provider, option.id)" :value="modelKey(option.provider, option.id)">{{ option.name }} · {{ option.provider }}</option>
-                </select>
-                <small v-if="modelOptionsLoading?.[agent.profile]" class="editor-note">正在加载模型选项…</small>
-                <small v-else-if="modelOptionsError?.[agent.profile]" class="editor-note error">{{ modelOptionsError[agent.profile] }}</small>
-              </label>
-              <label>
-                <span>推理强度</span>
-                <select v-model="agentDrafts[agent.id].reasoningEffort" aria-label="推理强度" @change="markDirty(agent.id)">
-                  <option v-for="option in REASONING_OPTIONS" :key="option.value || 'default'" :value="option.value">{{ option.label }}</option>
-                </select>
-              </label>
-              <label>
-                <span>快速模式</span>
-                <select v-model="agentDrafts[agent.id].fastMode" aria-label="快速模式" @change="markDirty(agent.id)">
-                  <option value="">跟随 Profile 默认</option>
-                  <option value="true">开启</option>
-                  <option value="false">关闭</option>
-                </select>
-              </label>
-            </div>
-            <div class="editor-toggles">
-              <label><input v-model="agentDrafts[agent.id].enabled" type="checkbox" aria-label="启用" @change="markDirty(agent.id)" />启用</label>
-              <label><input v-model="agentDrafts[agent.id].replyWithoutMention" type="checkbox" aria-label="自动回复" @change="markDirty(agent.id)" />自动回复</label>
-            </div>
-            <p v-if="agentUpdateError?.[agent.id]" class="agent-save-error" role="alert">{{ agentUpdateError[agent.id] }}</p>
-            <div class="editor-actions">
-              <button class="quiet-button" type="button" :disabled="busy || !hasAgentChanges(agent)" @click="resetAgent(agent)">取消更改</button>
-              <button class="save-agent" type="button" :disabled="busy || !hasAgentChanges(agent)" @click="saveAgent(agent)">保存 Agent 设置</button>
-            </div>
-          </fieldset>
         </article>
       </div>
 
@@ -255,6 +215,59 @@ function statusLabel(status: GroupAgent['status']): string {
       <button class="quiet-button" type="button" :disabled="busy" @click="emit('archiveRoom')"><AppIcon name="archive" :size="14" />归档</button>
     </section>
   </div>
+
+  <Teleport to="body">
+    <div v-if="selectedAgent && agentDrafts[selectedAgent.id]" class="agent-settings-backdrop" @click.self="closeAgentSettings">
+      <section class="agent-settings-dialog" role="dialog" aria-modal="true" :aria-label="`${selectedAgent.displayName} Agent 设置`" @keydown.esc="closeAgentSettings">
+        <header>
+          <span>
+            <small>Agent 设置</small>
+            <strong>{{ selectedAgent.displayName }}</strong>
+          </span>
+          <button class="agent-settings-close" type="button" aria-label="关闭 Agent 设置" title="关闭 Agent 设置" @click="closeAgentSettings"><AppIcon name="close" :size="17" /></button>
+        </header>
+        <fieldset class="agent-editor">
+          <legend class="sr-only">{{ selectedAgent.displayName }} Agent 设置</legend>
+          <div class="editor-grid">
+            <label><span>显示名称</span><input v-model="agentDrafts[selectedAgent.id].displayName" maxlength="100" aria-label="显示名称" @input="markDirty(selectedAgent.id)" /></label>
+            <label><span>职责说明</span><textarea v-model="agentDrafts[selectedAgent.id].description" rows="3" maxlength="500" aria-label="职责说明" @input="markDirty(selectedAgent.id)" /></label>
+            <label>
+              <span>模型</span>
+              <select v-model="agentDrafts[selectedAgent.id].modelKey" aria-label="模型" @focus="emit('loadModels', selectedAgent.profile)" @change="markDirty(selectedAgent.id)">
+                <option value="">跟随 Profile 默认</option>
+                <option v-for="option in modelOptionsFor(selectedAgent)" :key="modelKey(option.provider, option.id)" :value="modelKey(option.provider, option.id)">{{ option.name }} · {{ option.provider }}</option>
+              </select>
+              <small v-if="modelOptionsLoading?.[selectedAgent.profile]" class="editor-note">正在加载模型选项…</small>
+              <small v-else-if="modelOptionsError?.[selectedAgent.profile]" class="editor-note error">{{ modelOptionsError[selectedAgent.profile] }}</small>
+            </label>
+            <label>
+              <span>推理强度</span>
+              <select v-model="agentDrafts[selectedAgent.id].reasoningEffort" aria-label="推理强度" @change="markDirty(selectedAgent.id)">
+                <option v-for="option in REASONING_OPTIONS" :key="option.value || 'default'" :value="option.value">{{ option.label }}</option>
+              </select>
+            </label>
+            <label>
+              <span>快速模式</span>
+              <select v-model="agentDrafts[selectedAgent.id].fastMode" aria-label="快速模式" @change="markDirty(selectedAgent.id)">
+                <option value="">跟随 Profile 默认</option>
+                <option value="true">开启</option>
+                <option value="false">关闭</option>
+              </select>
+            </label>
+          </div>
+          <div class="editor-toggles">
+            <label><input v-model="agentDrafts[selectedAgent.id].enabled" type="checkbox" aria-label="启用" @change="markDirty(selectedAgent.id)" />启用</label>
+            <label><input v-model="agentDrafts[selectedAgent.id].replyWithoutMention" type="checkbox" aria-label="自动回复" @change="markDirty(selectedAgent.id)" />自动回复</label>
+          </div>
+          <p v-if="agentUpdateError?.[selectedAgent.id]" class="agent-save-error" role="alert">{{ agentUpdateError[selectedAgent.id] }}</p>
+          <div class="editor-actions">
+            <button class="quiet-button" type="button" :disabled="busy || !hasAgentChanges(selectedAgent)" @click="resetAgent(selectedAgent)">取消更改</button>
+            <button class="save-agent" type="button" :disabled="busy || !hasAgentChanges(selectedAgent)" @click="saveAgent(selectedAgent)">保存 Agent 设置</button>
+          </div>
+        </fieldset>
+      </section>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -266,14 +279,15 @@ h3 { margin: 0 0 13px; color: var(--text-secondary); font-size: 10px; font-weigh
 label { display: flex; flex-direction: column; gap: 5px; margin: 0 0 11px; color: var(--text-muted); font-size: 10px; }
 input, textarea, select { width: 100%; padding: 8px 9px; border: 1px solid var(--line); border-radius: 9px; outline: 0; resize: vertical; background: var(--surface-soft); color: var(--text-primary); font-size: 11px; } input:focus, textarea:focus, select:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }
 .rounds { flex-direction: row; align-items: center; justify-content: space-between; }.rounds > span { display: flex; flex-direction: column; gap: 2px; }.rounds small { color: var(--text-muted); font-size: 9px; }.rounds input { width: 62px; text-align: center; }
-.agent-list { display: flex; flex-direction: column; gap: 7px; }.agent-list article { display: grid; grid-template-columns: 32px minmax(0,1fr) repeat(3, 28px); align-items: center; gap: 7px; padding: 8px; border: 1px solid transparent; border-radius: 10px; background: var(--surface-soft); }.agent-list article.expanded { border-color: var(--line); background: var(--surface); }
+.agent-list { display: flex; flex-direction: column; gap: 7px; }.agent-list article { display: grid; grid-template-columns: 32px minmax(0,1fr) repeat(3, 28px); align-items: center; gap: 7px; padding: 8px; border: 1px solid transparent; border-radius: 10px; background: var(--surface-soft); }
 .agent-avatar { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--accent); color: var(--text-on-solid); font-size: 10px; font-weight: 700; }.agent-avatar i { position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; border: 2px solid var(--surface-soft); border-radius: 50%; background: var(--text-muted); }.agent-avatar .status-running, .agent-avatar .status-queued { background: var(--warning); }.agent-avatar .status-idle { background: var(--success); }.agent-avatar .status-awaiting_input { background: var(--warning); }
 .agent-copy { display: flex; min-width: 0; flex-direction: column; }.agent-copy strong, .agent-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.agent-copy strong { font-size: 11px; }.agent-copy small { margin-top: 2px; color: var(--text-muted); font-size: 9px; }
 .agent-action { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; }.agent-action:hover { background: var(--surface-hover); color: var(--text-primary); }.agent-action.danger:hover { color: var(--danger); }.agent-action:disabled { cursor: not-allowed; opacity: .25; }
-.agent-editor { display: block; grid-column: 1 / -1; min-width: 0; margin: 4px 0 0; padding: 12px 0 2px; border: 0; border-top: 1px solid var(--line); }.agent-editor legend { padding: 0 0 10px; color: var(--text-secondary); font-size: 10px; font-weight: 650; }.editor-grid { display: grid; gap: 0; }.editor-grid label:last-child { margin-bottom: 7px; }.editor-note { margin: -1px 2px 0; color: var(--text-muted); font-size: 9px; }.editor-note.error { color: var(--danger); }
+.agent-settings-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--text-primary) 24%, transparent); }.agent-settings-dialog { width: min(100%, 520px); max-height: min(720px, calc(100vh - 48px)); overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: 0 24px 72px color-mix(in srgb, var(--text-primary) 24%, transparent); }.agent-settings-dialog header { min-height: 68px; padding: 0 20px; border-bottom: 1px solid var(--line); border-radius: 16px 16px 0 0; }.agent-settings-close { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }.agent-settings-close:hover { background: var(--surface-hover); color: var(--text-primary); }.agent-editor { display: block; min-width: 0; margin: 0; padding: 20px; border: 0; }.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }.editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }.editor-grid > label:nth-child(1), .editor-grid > label:nth-child(2) { grid-column: 1 / -1; }.editor-grid label:last-child { margin-bottom: 7px; }.editor-note { margin: -1px 2px 0; color: var(--text-muted); font-size: 9px; }.editor-note.error { color: var(--danger); }
 .editor-toggles { display: flex; align-items: center; gap: 16px; padding: 3px 0 12px; }.editor-toggles label { display: flex; flex-direction: row; align-items: center; gap: 5px; margin: 0; color: var(--text-secondary); }.editor-toggles input { width: auto; margin: 0; accent-color: var(--accent); }
 .agent-save-error { margin: 0 0 10px; color: var(--danger); font-size: 9px; line-height: 1.45; }
 .editor-actions { display: flex; justify-content: flex-end; gap: 7px; }.editor-actions button { min-height: 30px; padding: 0 10px; border-radius: 8px; cursor: pointer; font-size: 10px; }.editor-actions button:disabled { cursor: not-allowed; opacity: .35; }.save-agent { border: 1px solid var(--accent); background: var(--accent); color: var(--text-on-solid); }
 .add-agent { margin-top: 8px; }.add-agent select { cursor: pointer; }
 .danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.danger-zone strong { font-size: 11px; }.danger-zone p { margin: 3px 0 0; color: var(--text-muted); font-size: 9px; line-height: 1.5; }.danger-zone .quiet-button { display: flex; flex: 0 0 auto; gap: 6px; color: var(--danger); font-size: 10px; }
+@media (max-width: 600px) { .agent-settings-backdrop { place-items: end center; padding: 0; }.agent-settings-dialog { width: 100%; max-height: min(760px, calc(100vh - 16px)); border-radius: 18px 18px 0 0; }.agent-settings-dialog header { border-radius: 18px 18px 0 0; }.editor-grid { grid-template-columns: 1fr; }.editor-grid > label { grid-column: 1 / -1; } }
 </style>
