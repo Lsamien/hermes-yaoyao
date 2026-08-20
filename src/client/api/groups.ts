@@ -29,7 +29,16 @@ export async function getGroupRoom(roomId: string): Promise<GroupRoomDetail> {
   return normalizeGroupRoomDetail(unwrapData(await apiRequest<unknown>(`${BASE}/rooms/${encodeURIComponent(roomId)}`)))
 }
 
-export interface AgentSeed { profile: string; displayName: string; description?: string; replyWithoutMention?: boolean }
+export interface AgentSeed {
+  profile: string
+  displayName: string
+  description?: string
+  replyWithoutMention?: boolean
+  model?: string | null
+  provider?: string | null
+  reasoningEffort?: string | null
+  fastMode?: boolean | null
+}
 
 export async function createGroupRoom(input: { name: string; cwd?: string; agents: AgentSeed[]; maxReplyRounds?: number }): Promise<GroupRoomDetail> {
   return normalizeGroupRoomDetail(unwrapData(await apiRequest<unknown>(`${BASE}/rooms`, {

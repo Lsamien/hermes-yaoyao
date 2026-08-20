@@ -95,6 +95,42 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   expect(consoleErrors).toEqual([])
 })
 
+test('edits every protocol v3 Agent setting with one inspector close control', async ({ page }) => {
+  await page.getByRole('button', { name: '群聊' }).click()
+  await expect(page.getByRole('heading', { name: '设计与工程协作' })).toBeVisible()
+  await page.getByRole('button', { name: '管理群聊' }).click()
+
+  await expect(page.getByRole('button', { name: '关闭群聊管理' })).toHaveCount(1)
+  await expect(page.getByRole('button', { name: '关闭预览' })).toHaveCount(0)
+  await page.getByRole('button', { name: '设置夭夭' }).click()
+
+  const editor = page.getByRole('group', { name: '夭夭 Agent 设置' })
+  await expect(editor.getByLabel('显示名称')).toHaveValue('夭夭')
+  await expect(editor.getByLabel('职责说明')).toHaveValue('主 Agent')
+  await expect(editor.getByLabel('模型')).toHaveValue(JSON.stringify(['openai', 'gpt-5.6']))
+  await expect(editor.getByLabel('推理强度')).toHaveValue('high')
+  await expect(editor.getByLabel('快速模式')).toHaveValue('true')
+
+  await editor.getByLabel('模型').selectOption(JSON.stringify(['openai', 'gpt-5.5']))
+  await editor.getByLabel('推理强度').selectOption('xhigh')
+  await editor.getByLabel('快速模式').selectOption('false')
+  await editor.getByLabel('自动回复').uncheck()
+  const updateRequest = page.waitForRequest(request => request.method() === 'PATCH' && /\/api\/app\/groups\/rooms\/[^/]+\/agents\/[^/]+$/.test(new URL(request.url()).pathname))
+  await editor.getByRole('button', { name: '保存 Agent 设置' }).click()
+  expect((await updateRequest).postDataJSON()).toMatchObject({
+    model: 'gpt-5.5', provider: 'openai', reasoningEffort: 'xhigh', fastMode: false, replyWithoutMention: false,
+  })
+  await expect(editor.getByLabel('模型')).toHaveValue(JSON.stringify(['openai', 'gpt-5.5']))
+
+  await editor.getByLabel('模型').selectOption(JSON.stringify(['openai', 'gpt-5.6']))
+  await editor.getByLabel('推理强度').selectOption('high')
+  await editor.getByLabel('快速模式').selectOption('true')
+  await editor.getByLabel('自动回复').check()
+  const restoreResponse = page.waitForResponse(response => response.request().method() === 'PATCH' && /\/api\/app\/groups\/rooms\/[^/]+\/agents\/[^/]+$/.test(new URL(response.url()).pathname))
+  await editor.getByRole('button', { name: '保存 Agent 设置' }).click()
+  expect((await restoreResponse).status()).toBe(200)
+})
+
 test('previews an octet-stream Markdown file from the file library', async ({ page }) => {
   await page.route('**/api/app/files**', async route => {
     const url = new URL(route.request().url())

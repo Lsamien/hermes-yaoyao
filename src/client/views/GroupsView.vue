@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL } from '@shared/types'
+import type { GroupAgent, ModelOption } from '@shared/types'
 import AppIcon from '@/components/common/AppIcon.vue'
 import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -21,6 +22,7 @@ import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
 import { loadComposerFile } from '@/components/workspace/pendingComposer'
 import { readAgentShowThinking, writeAgentShowThinking } from '@/utils/sessionPreferences'
 import { agentToUi, groupInteraction, groupMessageToUi, roomSidebarItem, roomToUi } from '@/components/workspace/viewModels'
+import { getModels } from '@/api/profiles'
 import { useAuthStore } from '@/stores/auth'
 import { useGroupsStore } from '@/stores/groups'
 
@@ -36,6 +38,10 @@ const quoted = ref<UiMessage | null>(null)
 const preview = ref<UiLibraryItem | null>(null)
 const mediaPreviewIndex = ref<number | null>(null)
 const composer = ref<InstanceType<typeof ComposerShell> | null>(null)
+const modelOptionsByProfile = ref<Record<string, ModelOption[]>>({})
+const modelOptionsLoading = ref<Record<string, boolean>>({})
+const modelOptionsError = ref<Record<string, string>>({})
+const agentUpdateBusy = ref<Record<string, boolean>>({})
 
 const filteredRooms = computed(() => groups.rooms
   .filter(room => !room.archived)
@@ -51,6 +57,7 @@ const room = computed(() => groups.selectedRoom ? roomToUi(groups.selectedRoom) 
 const profiles = computed(() => auth.profiles.map(profile => profile.name))
 const availableProfiles = computed(() => profiles.value.filter(profile => !groups.agents.some(agent => agent.profile === profile)))
 const uploadsEnabled = computed(() => auth.groupUploadsEnabled)
+const managerBusy = computed(() => groups.isLoading || Object.values(agentUpdateBusy.value).some(Boolean))
 const reference = computed<ComposerReference | null>(() => quoted.value ? { id: quoted.value.id, author: quoted.value.author, content: quoted.value.content } : null)
 const mentionNames = computed(() => ['所有人', ...groups.agents.map(agent => agent.displayName || agent.profile)])
 const mentionOptions = computed<ComposerOption[]>(() => [
@@ -102,9 +109,27 @@ async function addAgent(profile: string) {
   await groups.addAgent(groups.selectedRoom.id, { profile, displayName: auth.profiles.find(item => item.name === profile)?.agentName || auth.profiles.find(item => item.name === profile)?.displayName || profile, replyWithoutMention: true })
 }
 
-async function updateAgent(id: string, patch: { enabled?: boolean; autoReply?: boolean }) {
+type AgentSettingsPatch = Partial<Pick<GroupAgent,
+  'displayName' | 'description' | 'enabled' | 'replyWithoutMention' | 'model' | 'provider' | 'reasoningEffort' | 'fastMode'>>
+
+async function loadAgentModels(profile: string) {
+  if (modelOptionsLoading.value[profile] || Object.prototype.hasOwnProperty.call(modelOptionsByProfile.value, profile)) return
+  modelOptionsLoading.value = { ...modelOptionsLoading.value, [profile]: true }
+  modelOptionsError.value = { ...modelOptionsError.value, [profile]: '' }
+  try {
+    modelOptionsByProfile.value = { ...modelOptionsByProfile.value, [profile]: await getModels(profile) }
+  } catch (cause) {
+    modelOptionsError.value = { ...modelOptionsError.value, [profile]: cause instanceof Error ? cause.message : '模型选项加载失败' }
+  } finally {
+    modelOptionsLoading.value = { ...modelOptionsLoading.value, [profile]: false }
+  }
+}
+
+async function updateAgent(id: string, patch: AgentSettingsPatch) {
   if (!groups.selectedRoom) return
-  await groups.updateAgent(groups.selectedRoom.id, id, { enabled: patch.enabled, replyWithoutMention: patch.autoReply })
+  agentUpdateBusy.value = { ...agentUpdateBusy.value, [id]: true }
+  try { await groups.updateAgent(groups.selectedRoom.id, id, patch) }
+  finally { agentUpdateBusy.value = { ...agentUpdateBusy.value, [id]: false } }
 }
 
 async function archiveRoom() {
@@ -167,7 +192,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 </script>
 
 <template>
-  <WorkspaceView sidebar-title="群聊" :sidebar-subtitle="groups.availability === 'available' ? `${filteredRooms.length} 个活跃房间` : `9119 群聊 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}`" :inspector-open="managerOpen && !!room" @close-inspector="managerOpen = false">
+  <WorkspaceView sidebar-title="群聊" :sidebar-subtitle="groups.availability === 'available' ? `${filteredRooms.length} 个活跃房间` : `9119 群聊 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}`" :inspector-open="managerOpen && !!room" inspector-close-label="关闭群聊管理" @close-inspector="managerOpen = false">
     <template #sidebar-action>
       <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" title="新建群聊" aria-label="新建群聊" @click="createOpen = true">
         <YaoYaoSidebarIcon name="add" />
@@ -245,12 +270,15 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
       <GroupManager
         v-if="room && groups.selectedRoom"
         :room="room"
-        :agents="agents"
+        :agents="groups.agents"
         :available-profiles="availableProfiles"
-        :busy="groups.isLoading"
-        @close="managerOpen = false"
+        :busy="managerBusy"
+        :model-options-by-profile="modelOptionsByProfile"
+        :model-options-loading="modelOptionsLoading"
+        :model-options-error="modelOptionsError"
         @update-room="updateRoom"
         @add-agent="addAgent"
+        @load-models="loadAgentModels"
         @update-agent="updateAgent"
         @remove-agent="groups.removeAgent(groups.selectedRoom.id, $event)"
         @interrupt-agent="groups.interruptAgent($event, groups.selectedRoom.id)"

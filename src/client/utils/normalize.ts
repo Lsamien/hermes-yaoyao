@@ -343,12 +343,16 @@ export function normalizeGroupCapabilities(value: unknown): GroupCapabilities {
 export function normalizeGroupAgent(value: unknown): GroupAgent {
   const source = record(value)
   const status = string(source.status, 'unknown') as GroupAgent['status']
+  const rawFastMode = pick(source, 'fastMode', 'fast_mode')
   return {
     id: string(source.id), roomId: string(pick(source, 'roomId', 'room_id')),
     profile: string(source.profile), displayName: string(pick(source, 'displayName', 'display_name'), string(source.profile)),
     description: string(source.description), storedSessionId: string(pick(source, 'storedSessionId', 'stored_session_id')) || null,
     lastContextMessageSeq: number(pick(source, 'lastContextMessageSeq', 'last_context_message_seq')),
     enabled: bool(source.enabled, true), replyWithoutMention: bool(pick(source, 'replyWithoutMention', 'reply_without_mention')),
+    model: string(source.model) || null, provider: string(source.provider) || null,
+    reasoningEffort: string(pick(source, 'reasoningEffort', 'reasoning_effort')) || null,
+    fastMode: rawFastMode == null ? null : bool(rawFastMode),
     createdAt: number(pick(source, 'createdAt', 'created_at')), updatedAt: number(pick(source, 'updatedAt', 'updated_at')),
     status: ['idle', 'queued', 'running', 'awaiting_input'].includes(status) ? status : 'unknown',
   }

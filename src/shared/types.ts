@@ -271,6 +271,10 @@ export interface GroupAgent {
   lastContextMessageSeq: number
   enabled: boolean
   replyWithoutMention: boolean
+  model?: string | null
+  provider?: string | null
+  reasoningEffort?: string | null
+  fastMode?: boolean | null
   createdAt: number
   updatedAt: number
   status: GroupAgentStatus
