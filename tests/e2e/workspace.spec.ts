@@ -106,7 +106,7 @@ test('previews an octet-stream Markdown file from the file library', async ({ pa
             id: 'markdown-file',
             path: '/tmp/版本说明.md',
             name: '版本说明.md',
-            extension: 'md',
+            extension: '.md',
             mimeType: 'application/octet-stream',
             size: 48,
             modifiedAt: Date.now() / 1000,
