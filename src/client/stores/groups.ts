@@ -194,6 +194,7 @@ export const useGroupsStore = defineStore('groups', () => {
 
   async function start(): Promise<void> {
     availability.value = 'checking'
+    recoveryAttempt = 0
     protocol.value = initialProtocol()
     const cached = await cache.get(scope(), 'snapshot')
     if (cached?.state.epoch) {
@@ -211,6 +212,8 @@ export const useGroupsStore = defineStore('groups', () => {
     reconnectTimer = undefined
     if (recoveryTimer !== undefined) window.clearTimeout(recoveryTimer)
     recoveryTimer = undefined
+    reconnectAttempt = 0
+    recoveryAttempt = 0
     connectionState.value = 'disconnected'
   }
 
