@@ -5,12 +5,14 @@ import type { SidebarItem } from './types'
 
 const SIDEBAR_SEARCH_EVENT = 'hermes-yaoyao:sidebar-search'
 const SIDEBAR_SEARCH_CLOSE_EVENT = 'hermes-yaoyao:sidebar-search-close'
+const SIDEBAR_SEARCH_INPUT_EVENT = 'hermes-yaoyao:sidebar-search-input'
 
 const props = withDefaults(defineProps<{
   items: SidebarItem[]
   activeId?: string
   loading?: boolean
   searchable?: boolean
+  externalSearch?: boolean
   search?: string
   searchPlaceholder?: string
   emptyTitle?: string
@@ -22,6 +24,7 @@ const props = withDefaults(defineProps<{
   activeId: '',
   loading: false,
   searchable: true,
+  externalSearch: false,
   search: '',
   searchPlaceholder: '搜索',
   emptyTitle: '暂无内容',
@@ -73,8 +76,13 @@ function closeSearch(clear = false) {
   document.dispatchEvent(new CustomEvent(SIDEBAR_SEARCH_CLOSE_EVENT))
 }
 
-function handleSearchRequest() { void focusSearch() }
+function handleSearchRequest() { if (!props.externalSearch) void focusSearch() }
 function handleSearchCloseRequest() { searchOpen.value = false }
+function handleExternalSearch(event: Event) {
+  if (!props.externalSearch) return
+  const detail = (event as CustomEvent<{ value?: unknown }>).detail
+  if (typeof detail?.value === 'string') emit('search', detail.value)
+}
 function handleListScroll(event: Event) {
   const element = event.currentTarget as HTMLElement
   if (props.hasMore && !props.loadingMore && element.scrollHeight - element.scrollTop - element.clientHeight < 96) {
@@ -89,10 +97,12 @@ watch(() => props.search, value => {
 onMounted(() => {
   document.addEventListener(SIDEBAR_SEARCH_EVENT, handleSearchRequest)
   document.addEventListener(SIDEBAR_SEARCH_CLOSE_EVENT, handleSearchCloseRequest)
+  document.addEventListener(SIDEBAR_SEARCH_INPUT_EVENT, handleExternalSearch)
 })
 onBeforeUnmount(() => {
   document.removeEventListener(SIDEBAR_SEARCH_EVENT, handleSearchRequest)
   document.removeEventListener(SIDEBAR_SEARCH_CLOSE_EVENT, handleSearchCloseRequest)
+  document.removeEventListener(SIDEBAR_SEARCH_INPUT_EVENT, handleExternalSearch)
 })
 
 defineExpose({ focusSearch })
@@ -101,7 +111,7 @@ defineExpose({ focusSearch })
 <template>
   <div class="resource-sidebar">
     <Transition name="search-reveal">
-      <label v-if="searchable && searchOpen" class="sidebar-search">
+      <label v-if="searchable && !externalSearch && searchOpen" class="sidebar-search">
         <AppIcon name="search" :size="15" />
         <input
           ref="searchInput"

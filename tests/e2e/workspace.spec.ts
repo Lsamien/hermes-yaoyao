@@ -103,6 +103,19 @@ test('uses the active session or group title in the browser title', async ({ pag
   await expect(page).toHaveTitle('设计与工程协作 · 夭夭')
 })
 
+test('uses a floating search dialog for group rooms', async ({ page }) => {
+  await page.getByRole('button', { name: '群聊' }).click()
+  await expect(page.getByRole('heading', { name: '设计与工程协作' })).toBeVisible()
+
+  await page.locator('.desktop-sidebar').getByRole('button', { name: '搜索', exact: true }).click()
+  const searchDialog = page.getByRole('dialog', { name: '搜索群聊' })
+  await expect(searchDialog).toBeVisible()
+  await searchDialog.getByPlaceholder('搜索群聊').fill('设计')
+  await expect(page.getByRole('option', { name: /设计与工程协作/ })).toBeVisible()
+  await searchDialog.getByPlaceholder('搜索群聊').press('Escape')
+  await expect(searchDialog).toBeHidden()
+})
+
 test('edits every protocol v3 Agent setting with one inspector close control', async ({ page }) => {
   await page.getByRole('button', { name: '群聊' }).click()
   await expect(page.getByRole('heading', { name: '设计与工程协作' })).toBeVisible()
@@ -693,21 +706,16 @@ test('uses the unified Grok-style sidebar, search trigger, and persistent collap
   await expect(sidebar.getByText('历史记录', { exact: true })).toBeVisible()
 
   const searchTrigger = page.getByRole('button', { name: '搜索', exact: true })
-  const triggerBox = await searchTrigger.boundingBox()
   await searchTrigger.click()
-  const search = page.getByPlaceholder('搜索会话').filter({ visible: true })
+  const searchDialog = page.getByRole('dialog', { name: '搜索会话' })
+  await expect(searchDialog).toBeVisible()
+  const search = searchDialog.getByPlaceholder('搜索会话')
   await expect(search).toBeVisible()
-  await page.waitForTimeout(150)
-  const inputBox = await search.evaluate(element => {
-    const rect = element.closest('label')?.getBoundingClientRect()
-    return rect ? { y: rect.y, height: rect.height } : null
-  })
-  expect(inputBox?.y).toBe(triggerBox?.y)
-  expect(inputBox?.height).toBe(triggerBox?.height)
+  await expect(sidebar.locator('.sidebar-search')).toHaveCount(0)
   await search.fill('验收')
   await expect(page.getByRole('option', { name: /夭夭 Web 验收会话/ })).toBeVisible()
   await search.press('Escape')
-  await expect(search).toBeHidden()
+  await expect(searchDialog).toBeHidden()
   await expect(searchTrigger).toBeVisible()
   await expect(searchTrigger).toHaveAttribute('aria-expanded', 'false')
 
@@ -723,7 +731,7 @@ test('uses the unified Grok-style sidebar, search trigger, and persistent collap
   await expect(sidebar).toHaveCSS('width', '68px')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await expect(sidebar).toHaveCSS('width', '264px')
-  await expect(page.getByPlaceholder('搜索会话').filter({ visible: true })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '搜索会话' })).toBeVisible()
 })
 
 test('uses the mobile composer and keeps the closed drawer inert', async ({ page }) => {

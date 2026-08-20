@@ -15,6 +15,7 @@ type NavItem = {
 const SIDEBAR_COLLAPSED_KEY = 'hermes-yaoyao:sidebar-collapsed'
 const SIDEBAR_SEARCH_EVENT = 'hermes-yaoyao:sidebar-search'
 const SIDEBAR_SEARCH_CLOSE_EVENT = 'hermes-yaoyao:sidebar-search-close'
+const SIDEBAR_SEARCH_INPUT_EVENT = 'hermes-yaoyao:sidebar-search-input'
 
 const props = withDefaults(defineProps<{
   userName?: string
@@ -51,8 +52,10 @@ const mobileDrawerOpen = ref(false)
 const profileMenuOpen = ref(false)
 const sidebarCollapsed = ref(false)
 const sidebarSearchOpen = ref(false)
+const sidebarSearchQuery = ref('')
 const desktopSidebarContext = ref<HTMLElement | null>(null)
 const mobileSidebarContext = ref<HTMLElement | null>(null)
+const floatingSearchInput = ref<HTMLInputElement | null>(null)
 
 const navItems: NavItem[] = [
   { key: 'chat', label: '对话', path: '/chat', icon: 'chat' },
@@ -75,6 +78,9 @@ const contextHeading = computed(() => ({
   groups: '群聊记录',
   files: '历史记录',
 })[activeNav.value.key])
+
+const searchUsesFloatingDialog = computed(() => ['chat', 'groups'].includes(activeNav.value.key))
+const floatingSearchLabel = computed(() => activeNav.value.key === 'groups' ? '搜索群聊' : '搜索会话')
 
 const hasPrimaryAction = computed(() => ['chat', 'groups', 'files'].includes(activeNav.value.key))
 
@@ -103,6 +109,14 @@ async function openSidebarSearch(host: HTMLElement | null) {
     try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, '0') } catch { /* optional persistence */ }
     await nextTick()
   }
+  if (searchUsesFloatingDialog.value) {
+    if (host === mobileSidebarContext.value) mobileDrawerOpen.value = false
+    sidebarSearchQuery.value = ''
+    sidebarSearchOpen.value = true
+    await nextTick()
+    floatingSearchInput.value?.focus()
+    return
+  }
   sidebarSearchOpen.value = true
   document.dispatchEvent(new CustomEvent(SIDEBAR_SEARCH_EVENT, { detail: { section: activeNav.value.key } }))
   await nextTick()
@@ -110,6 +124,14 @@ async function openSidebarSearch(host: HTMLElement | null) {
 }
 
 async function closeSidebarSearch(host: HTMLElement | null, clear = false, restoreFocus = false) {
+  if (searchUsesFloatingDialog.value) {
+    if (clear) {
+      sidebarSearchQuery.value = ''
+      document.dispatchEvent(new CustomEvent(SIDEBAR_SEARCH_INPUT_EVENT, { detail: { section: activeNav.value.key, value: '' } }))
+    }
+    sidebarSearchOpen.value = false
+    return
+  }
   const input = host?.querySelector<HTMLInputElement>('input[type="search"]')
   if (clear && input?.value) {
     input.value = ''
@@ -122,6 +144,12 @@ async function closeSidebarSearch(host: HTMLElement | null, clear = false, resto
     await nextTick()
     host?.closest('aside')?.querySelector<HTMLButtonElement>('.sidebar-search-trigger')?.focus()
   }
+}
+
+function updateFloatingSearch(event: Event) {
+  const value = (event.target as HTMLInputElement).value
+  sidebarSearchQuery.value = value
+  document.dispatchEvent(new CustomEvent(SIDEBAR_SEARCH_INPUT_EVENT, { detail: { section: activeNav.value.key, value } }))
 }
 
 function handleSidebarInput(event: Event) {
@@ -139,6 +167,7 @@ function handleSidebarSearchClosed() { sidebarSearchOpen.value = false }
 watch(() => route.fullPath, () => { mobileDrawerOpen.value = false })
 watch(() => activeNav.value.key, () => {
   sidebarSearchOpen.value = false
+  sidebarSearchQuery.value = ''
   profileMenuOpen.value = false
 })
 
@@ -226,7 +255,7 @@ onBeforeUnmount(() => {
       <section
         ref="desktopSidebarContext"
         class="sidebar-context"
-        :class="{ 'sidebar-context--searching': sidebarSearchOpen }"
+        :class="{ 'sidebar-context--searching': sidebarSearchOpen && !searchUsesFloatingDialog }"
         @keydown.esc.capture="closeSidebarSearch(desktopSidebarContext, true, true)"
         @input.capture="handleSidebarInput"
         @focusout.capture="handleSidebarFocusout"
@@ -330,7 +359,7 @@ onBeforeUnmount(() => {
       <section
         ref="mobileSidebarContext"
         class="sidebar-context mobile-drawer__context"
-        :class="{ 'sidebar-context--searching': sidebarSearchOpen }"
+        :class="{ 'sidebar-context--searching': sidebarSearchOpen && !searchUsesFloatingDialog }"
         @keydown.esc.capture="closeSidebarSearch(mobileSidebarContext, true, true)"
         @input.capture="handleSidebarInput"
         @focusout.capture="handleSidebarFocusout"
@@ -378,6 +407,26 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </aside>
+
+    <Teleport to="body">
+      <div v-if="sidebarSearchOpen && searchUsesFloatingDialog" class="sidebar-search-modal-backdrop" @click.self="closeSidebarSearch(null, true)">
+        <section class="sidebar-search-modal" role="dialog" aria-modal="true" :aria-label="floatingSearchLabel">
+          <label>
+            <AppIcon name="search" :size="18" />
+            <input
+              ref="floatingSearchInput"
+              :value="sidebarSearchQuery"
+              type="search"
+              :placeholder="floatingSearchLabel"
+              :aria-label="floatingSearchLabel"
+              @input="updateFloatingSearch"
+              @keydown.esc.prevent="closeSidebarSearch(null, true)"
+            />
+          </label>
+          <button type="button" aria-label="关闭搜索" title="关闭搜索" @click="closeSidebarSearch(null, true)"><AppIcon name="close" :size="17" /></button>
+        </section>
+      </div>
+    </Teleport>
 
     <main class="workspace-main" :inert="mobileDrawerOpen">
       <slot />
@@ -484,6 +533,9 @@ onBeforeUnmount(() => {
   background: var(--surface);
 }
 
+.sidebar-search-modal-backdrop { position: fixed; z-index: 70; inset: 0; display: grid; place-items: start center; padding: min(18vh, 150px) 20px 20px; background: color-mix(in srgb, var(--text-primary) 20%, transparent); backdrop-filter: blur(3px); }
+.sidebar-search-modal { display: flex; width: min(100%, 580px); align-items: center; gap: 9px; padding: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: 0 20px 60px color-mix(in srgb, var(--text-primary) 22%, transparent); }.sidebar-search-modal label { display: flex; min-width: 0; flex: 1; align-items: center; gap: 9px; min-height: 37px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--text-muted); background: var(--surface-soft); }.sidebar-search-modal label:focus-within { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }.sidebar-search-modal input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: 13px var(--font-ui); }.sidebar-search-modal button { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 9px; background: transparent; color: var(--text-muted); cursor: pointer; }.sidebar-search-modal button:hover { background: var(--surface-hover); color: var(--text-primary); }
+
 .sidebar-primary-action { margin: 3px 10px; }
 .sidebar-primary-action :deep(button) {
   display: flex;
@@ -582,6 +634,7 @@ onBeforeUnmount(() => {
   .workspace-main { grid-row: 2; }
   .drawer-scrim { display: block; position: fixed; z-index: 50; inset: 0; padding: 0; border: 0; background: var(--scrim); backdrop-filter: blur(2px); }
   .mobile-drawer { --sidebar-search-top: calc(max(9px, env(safe-area-inset-top)) + 49px); display: flex; position: fixed; z-index: 51; inset: 0 auto 0 0; width: min(304px, 88vw); min-height: 0; flex-direction: column; overflow: hidden; padding: max(9px, env(safe-area-inset-top)) 0 max(9px, env(safe-area-inset-bottom)); background: var(--surface); box-shadow: var(--shadow-float); transform: translateX(-102%); transition: transform 190ms var(--ease-out); }
+  .sidebar-search-modal-backdrop { place-items: end center; padding: 0; }.sidebar-search-modal { width: 100%; padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); border-radius: 18px 18px 0 0; }.sidebar-search-modal label { min-height: 42px; }
   .mobile-drawer--open { transform: translateX(0); }
   .mobile-drawer__header { display: flex; min-height: 49px; align-items: center; justify-content: space-between; padding: 0 14px 5px 12px; }
   .mobile-drawer__context { margin-top: 2px; }

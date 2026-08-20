@@ -223,6 +223,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :active-id="groups.selectedRoomId"
         :loading="groups.isLoading"
         :search="search"
+        external-search
         search-placeholder="搜索群聊"
         empty-title="还没有群聊"
         empty-description="新建群聊，邀请 1–8 个 Agent 一起协作。"

@@ -376,6 +376,7 @@ watch(() => chat.activeSessionId, async id => {
         :active-id="chat.activeSessionId"
         :loading="chat.isLoading"
         :search="search"
+        external-search
         single-line
         :has-more="chat.hasMoreSessions"
         :loading-more="chat.isLoadingMoreSessions"
