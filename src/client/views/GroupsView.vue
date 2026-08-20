@@ -42,6 +42,7 @@ const modelOptionsByProfile = ref<Record<string, ModelOption[]>>({})
 const modelOptionsLoading = ref<Record<string, boolean>>({})
 const modelOptionsError = ref<Record<string, string>>({})
 const agentUpdateBusy = ref<Record<string, boolean>>({})
+const agentUpdateError = ref<Record<string, string>>({})
 
 const filteredRooms = computed(() => groups.rooms
   .filter(room => !room.archived)
@@ -128,8 +129,15 @@ async function loadAgentModels(profile: string) {
 async function updateAgent(id: string, patch: AgentSettingsPatch) {
   if (!groups.selectedRoom) return
   agentUpdateBusy.value = { ...agentUpdateBusy.value, [id]: true }
+  agentUpdateError.value = { ...agentUpdateError.value, [id]: '' }
   try { await groups.updateAgent(groups.selectedRoom.id, id, patch) }
+  catch (cause) { agentUpdateError.value = { ...agentUpdateError.value, [id]: cause instanceof Error ? cause.message : 'Agent 设置保存失败' } }
   finally { agentUpdateBusy.value = { ...agentUpdateBusy.value, [id]: false } }
+}
+
+function clearAgentError(id: string) {
+  if (!agentUpdateError.value[id]) return
+  agentUpdateError.value = { ...agentUpdateError.value, [id]: '' }
 }
 
 async function archiveRoom() {
@@ -276,9 +284,11 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :model-options-by-profile="modelOptionsByProfile"
         :model-options-loading="modelOptionsLoading"
         :model-options-error="modelOptionsError"
+        :agent-update-error="agentUpdateError"
         @update-room="updateRoom"
         @add-agent="addAgent"
         @load-models="loadAgentModels"
+        @clear-agent-error="clearAgentError"
         @update-agent="updateAgent"
         @remove-agent="groups.removeAgent(groups.selectedRoom.id, $event)"
         @interrupt-agent="groups.interruptAgent($event, groups.selectedRoom.id)"

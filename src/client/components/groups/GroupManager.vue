@@ -38,6 +38,7 @@ const props = defineProps<{
   modelOptionsByProfile?: Record<string, ModelOption[]>
   modelOptionsLoading?: Record<string, boolean>
   modelOptionsError?: Record<string, string>
+  agentUpdateError?: Record<string, string>
   busy?: boolean
 }>()
 
@@ -45,6 +46,7 @@ const emit = defineEmits<{
   updateRoom: [patch: Partial<UiRoom>]
   addAgent: [profile: string]
   loadModels: [profile: string]
+  clearAgentError: [id: string]
   updateAgent: [id: string, patch: AgentSettingsPatch]
   removeAgent: [id: string]
   interruptAgent: [id: string]
@@ -92,7 +94,12 @@ watch(() => props.agents, agents => {
   const ids = new Set(agents.map(agent => agent.id))
   for (const id of Object.keys(agentDrafts)) if (!ids.has(id)) delete agentDrafts[id]
   for (const agent of agents) {
-    if (!agentDrafts[agent.id] || !dirtyAgents.has(agent.id)) agentDrafts[agent.id] = draftFrom(agent)
+    if (!agentDrafts[agent.id] || !dirtyAgents.has(agent.id)) {
+      agentDrafts[agent.id] = draftFrom(agent)
+    } else if (!Object.keys(agentPatch(agent)).length) {
+      dirtyAgents.delete(agent.id)
+      agentDrafts[agent.id] = draftFrom(agent)
+    }
   }
 }, { deep: true, immediate: true })
 
@@ -115,11 +122,13 @@ function toggleAgent(agent: GroupAgent) {
 
 function markDirty(agentId: string) {
   dirtyAgents.add(agentId)
+  emit('clearAgentError', agentId)
 }
 
 function resetAgent(agent: GroupAgent) {
   agentDrafts[agent.id] = draftFrom(agent)
   dirtyAgents.delete(agent.id)
+  emit('clearAgentError', agent.id)
 }
 
 function modelOptionsFor(agent: GroupAgent): ModelOption[] {
@@ -160,7 +169,6 @@ function hasAgentChanges(agent: GroupAgent): boolean {
 function saveAgent(agent: GroupAgent) {
   const patch = agentPatch(agent)
   if (!Object.keys(patch).length) return
-  dirtyAgents.delete(agent.id)
   emit('updateAgent', agent.id, patch)
 }
 
@@ -224,6 +232,7 @@ function statusLabel(status: GroupAgent['status']): string {
               <label><input v-model="agentDrafts[agent.id].enabled" type="checkbox" aria-label="启用" @change="markDirty(agent.id)" />启用</label>
               <label><input v-model="agentDrafts[agent.id].replyWithoutMention" type="checkbox" aria-label="自动回复" @change="markDirty(agent.id)" />自动回复</label>
             </div>
+            <p v-if="agentUpdateError?.[agent.id]" class="agent-save-error" role="alert">{{ agentUpdateError[agent.id] }}</p>
             <div class="editor-actions">
               <button class="quiet-button" type="button" :disabled="busy || !hasAgentChanges(agent)" @click="resetAgent(agent)">取消更改</button>
               <button class="save-agent" type="button" :disabled="busy || !hasAgentChanges(agent)" @click="saveAgent(agent)">保存 Agent 设置</button>
@@ -262,6 +271,7 @@ input, textarea, select { width: 100%; padding: 8px 9px; border: 1px solid var(-
 .agent-action { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; }.agent-action:hover { background: var(--surface-hover); color: var(--text-primary); }.agent-action.danger:hover { color: var(--danger); }.agent-action:disabled { cursor: not-allowed; opacity: .25; }
 .agent-editor { display: block; grid-column: 1 / -1; min-width: 0; margin: 4px 0 0; padding: 12px 0 2px; border: 0; border-top: 1px solid var(--line); }.agent-editor legend { padding: 0 0 10px; color: var(--text-secondary); font-size: 10px; font-weight: 650; }.editor-grid { display: grid; gap: 0; }.editor-grid label:last-child { margin-bottom: 7px; }.editor-note { margin: -1px 2px 0; color: var(--text-muted); font-size: 9px; }.editor-note.error { color: var(--danger); }
 .editor-toggles { display: flex; align-items: center; gap: 16px; padding: 3px 0 12px; }.editor-toggles label { display: flex; flex-direction: row; align-items: center; gap: 5px; margin: 0; color: var(--text-secondary); }.editor-toggles input { width: auto; margin: 0; accent-color: var(--accent); }
+.agent-save-error { margin: 0 0 10px; color: var(--danger); font-size: 9px; line-height: 1.45; }
 .editor-actions { display: flex; justify-content: flex-end; gap: 7px; }.editor-actions button { min-height: 30px; padding: 0 10px; border-radius: 8px; cursor: pointer; font-size: 10px; }.editor-actions button:disabled { cursor: not-allowed; opacity: .35; }.save-agent { border: 1px solid var(--accent); background: var(--accent); color: var(--text-on-solid); }
 .add-agent { margin-top: 8px; }.add-agent select { cursor: pointer; }
 .danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 12px; }.danger-zone strong { font-size: 11px; }.danger-zone p { margin: 3px 0 0; color: var(--text-muted); font-size: 9px; line-height: 1.5; }.danger-zone .quiet-button { display: flex; flex: 0 0 auto; gap: 6px; color: var(--danger); font-size: 10px; }

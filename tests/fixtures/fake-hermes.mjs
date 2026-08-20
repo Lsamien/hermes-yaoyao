@@ -116,6 +116,7 @@ const server = createServer(async (request, response) => {
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}`) return json(response, 200, { ...room, agents: [groupAgent], runs: [], pendingInteractions: [], latestCursor: 0 })
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/agents/${agentId}` && request.method === 'PATCH') {
     const input = await body(request)
+    if (input.displayName === '所有人') return json(response, 409, { detail: '成员名称不能使用“所有人”' })
     for (const key of ['displayName', 'description', 'enabled', 'replyWithoutMention', 'model', 'provider', 'reasoningEffort', 'fastMode']) {
       if (Object.prototype.hasOwnProperty.call(input, key)) groupAgent[key] = input[key]
     }

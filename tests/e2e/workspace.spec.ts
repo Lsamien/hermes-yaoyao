@@ -111,6 +111,16 @@ test('edits every protocol v3 Agent setting with one inspector close control', a
   await expect(editor.getByLabel('推理强度')).toHaveValue('high')
   await expect(editor.getByLabel('快速模式')).toHaveValue('true')
 
+  await editor.getByLabel('显示名称').fill('所有人')
+  const rejectedResponse = page.waitForResponse(response => response.request().method() === 'PATCH' && /\/api\/app\/groups\/rooms\/[^/]+\/agents\/[^/]+$/.test(new URL(response.url()).pathname))
+  await editor.getByRole('button', { name: '保存 Agent 设置' }).click()
+  expect((await rejectedResponse).status()).toBe(409)
+  await expect(editor.getByRole('alert')).toContainText('成员名称不能使用“所有人”')
+  await page.getByRole('button', { name: '设置夭夭' }).click()
+  await page.getByRole('button', { name: '设置夭夭' }).click()
+  await expect(editor.getByLabel('显示名称')).toHaveValue('所有人')
+  await editor.getByLabel('显示名称').fill('夭夭')
+
   await editor.getByLabel('模型').selectOption(JSON.stringify(['openai', 'gpt-5.5']))
   await editor.getByLabel('推理强度').selectOption('xhigh')
   await editor.getByLabel('快速模式').selectOption('false')
