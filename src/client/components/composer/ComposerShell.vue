@@ -394,15 +394,6 @@ defineExpose({
 
 <template>
   <div class="composer-area">
-    <div v-if="mode === 'group'" class="composer-activity-slot">
-      <Transition name="composer-activity">
-        <div v-if="activityText" class="composer-activity" role="status" aria-label="Agent 输入状态" aria-live="polite" aria-atomic="true">
-          <span class="composer-typing-dots" aria-hidden="true"><i /><i /><i /></span>
-          <strong>{{ activityText }}</strong>
-        </div>
-      </Transition>
-    </div>
-
     <div v-if="attachments.length" class="composer-attachments" aria-label="附件">
       <div v-for="attachment in attachments" :key="attachment.id" class="composer-attachment" :class="{ image: isImage(attachment.type) }">
         <img v-if="attachment.previewUrl" :src="attachment.previewUrl" :alt="attachment.name" />
@@ -416,6 +407,15 @@ defineExpose({
       <AppIcon name="quote" :size="14" />
       <span><small>{{ reference.author ? `回复 ${reference.author}` : '回复消息' }}</small><strong>{{ reference.content.replace(/\s+/g, ' ').trim() }}</strong></span>
       <button type="button" aria-label="取消引用" @click="emit('clearReference')"><AppIcon name="close" :size="13" /></button>
+    </div>
+
+    <div v-if="mode === 'group'" class="composer-activity-slot">
+      <Transition name="composer-activity">
+        <div v-if="activityText" class="composer-activity" role="status" aria-label="Agent 输入状态" aria-live="polite" aria-atomic="true">
+          <span class="composer-typing-dots" aria-hidden="true"><i /><i /><i /></span>
+          <strong>{{ activityText }}</strong>
+        </div>
+      </Transition>
     </div>
 
     <div

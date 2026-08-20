@@ -149,12 +149,14 @@ test('pins the named Agent typing status above the group composer', async ({ pag
   await page.getByRole('button', { name: '发送消息' }).click()
 
   const typing = composer.getByRole('status', { name: 'Agent 输入状态' })
+  await page.waitForTimeout(250)
+  await expect(typing).toHaveCount(0)
   await expect(typing).toHaveText('夭夭正在输入…')
   await expect(page.locator('.message-stack .thinking-indicator')).toHaveCount(0)
   const typingBox = await typing.boundingBox()
   const shellBox = await composer.locator('.composer-shell').boundingBox()
   expect(typingBox?.y).toBeLessThan(shellBox?.y ?? 0)
-  await expect(typing).toHaveCount(0, { timeout: 3_000 })
+  await expect(typing).toHaveCount(0, { timeout: 4_000 })
 })
 
 test('previews an octet-stream Markdown file from the file library', async ({ page }) => {

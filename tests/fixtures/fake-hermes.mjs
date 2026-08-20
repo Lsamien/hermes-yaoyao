@@ -135,8 +135,9 @@ const server = createServer(async (request, response) => {
     const input = await body(request)
     const sent = { ...groupMessage, seq: 3, id: input.clientMessageId, clientMessageId: input.clientMessageId, content: input.content, createdAt: now(), updatedAt: now() }
     json(response, 200, { message: sent, runs: [{ id: '66666666-6666-4666-8666-666666666666', roomId, agentId, status: 'queued' }] })
-    setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'running', runId: '66666666-6666-4666-8666-666666666666' }), 80)
-    setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'idle', runId: null }), 1500)
+    setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'queued', runId: '66666666-6666-4666-8666-666666666666' }), 40)
+    setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'running', runId: '66666666-6666-4666-8666-666666666666' }), 650)
+    setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'idle', runId: null }), 1800)
     return
   }
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/messages`) return json(response, 200, { items: groupMessages })

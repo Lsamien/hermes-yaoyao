@@ -66,9 +66,10 @@ const mentionOptions = computed<ComposerOption[]>(() => [
   ...groups.agents.map(agent => ({ id: agent.id, label: agent.displayName || agent.profile, detail: agent.profile, disabled: !agent.enabled })),
 ])
 const typingAgentNames = computed(() => [...new Set(groups.agents
-  .filter(agent => ['queued', 'running'].includes(agent.status))
+  .filter(agent => agent.status === 'running')
   .map(agent => agent.displayName || agent.profile))])
 const typingActivity = computed(() => {
+  if (!connected.value) return ''
   const names = typingAgentNames.value
   if (!names.length) return ''
   if (names.length <= 3) return `${names.join('、')}正在输入…`

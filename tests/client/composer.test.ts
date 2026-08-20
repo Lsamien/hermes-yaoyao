@@ -25,4 +25,20 @@ describe('composer availability', () => {
     fast.trigger('click')
     expect(wrapper.emitted('fastModeToggle')?.[0]).toEqual([false])
   })
+
+  it('keeps named group activity directly above the input after a reference', () => {
+    const wrapper = mount(ComposerShell, {
+      props: {
+        mode: 'group',
+        activityText: '夭夭正在输入…',
+        reference: { id: 'message-1', author: '夭夭', content: '上一条消息' },
+      },
+    })
+    const reference = wrapper.get('.composer-reference')
+    const activity = wrapper.get('.composer-activity-slot')
+    const shell = wrapper.get('.composer-shell')
+    expect(reference.element.nextElementSibling).toBe(activity.element)
+    expect(activity.element.nextElementSibling).toBe(shell.element)
+    expect(activity.get('[role="status"]').text()).toBe('夭夭正在输入…')
+  })
 })
