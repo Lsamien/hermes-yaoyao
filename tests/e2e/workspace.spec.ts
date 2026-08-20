@@ -95,6 +95,14 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   expect(consoleErrors).toEqual([])
 })
 
+test('uses the active session or group title in the browser title', async ({ page }) => {
+  await page.goto('/chat/session-demo?profile=yaoyao')
+  await expect(page).toHaveTitle('夭夭 Web 验收会话 · 夭夭')
+
+  await page.goto('/groups/group-demo')
+  await expect(page).toHaveTitle('设计与工程协作 · 夭夭')
+})
+
 test('edits every protocol v3 Agent setting with one inspector close control', async ({ page }) => {
   await page.getByRole('button', { name: '群聊' }).click()
   await expect(page.getByRole('heading', { name: '设计与工程协作' })).toBeVisible()
