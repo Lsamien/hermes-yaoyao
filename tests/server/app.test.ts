@@ -26,8 +26,10 @@ function makeConfig(upstream = 'http://127.0.0.1:9119'): ServerConfig {
   const home = mkdtempSync(join(tmpdir(), 'hermes-yaoyao-server-'))
   const mediaRoot = join(home, 'media')
   const attachmentsRoot = join(home, 'attachments')
+  const imagesRoot = join(home, 'images')
   mkdirSync(mediaRoot)
   mkdirSync(attachmentsRoot)
+  mkdirSync(imagesRoot)
   homes.push(home)
   return {
     host: '127.0.0.1',
@@ -37,6 +39,7 @@ function makeConfig(upstream = 'http://127.0.0.1:9119'): ServerConfig {
     home,
     mediaRoot,
     attachmentsRoot,
+    imagesRoot,
     mediaOwner: 'samien',
     allowInsecureLan: false,
     insecureLan: false,
@@ -145,6 +148,21 @@ describe('8800 BFF', () => {
       .set('Host', '127.0.0.1:8800').set('Cookie', cookieHeader(bootstrap)).expect(200)
     await request(runtime.app.callback())
       .get('/attachments/../state.db')
+      .set('Host', '127.0.0.1:8800').set('Cookie', cookieHeader(bootstrap)).expect(404)
+  })
+  it('serves persisted Hermes image references from the restricted images root', async () => {
+    const config = makeConfig()
+    writeFileSync(join(config.imagesRoot, '照片.png'), 'image bytes')
+    const runtime = createApplication({ config, fetchImpl: fakeGateway([]) })
+    runtimes.push(runtime)
+    const bootstrap = await request(runtime.app.callback())
+      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const response = await request(runtime.app.callback())
+      .get('/Users/samien/.hermes/images/照片.png')
+      .set('Host', '127.0.0.1:8800').set('Cookie', cookieHeader(bootstrap)).expect(200)
+    expect(response.body.toString()).toBe('image bytes')
+    await request(runtime.app.callback())
+      .get('/Users/samien/.hermes/images/../state.db')
       .set('Host', '127.0.0.1:8800').set('Cookie', cookieHeader(bootstrap)).expect(404)
   })
   it('bootstraps sequentially without exposing the upstream address', async () => {

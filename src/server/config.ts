@@ -10,6 +10,7 @@ export interface ServerConfig {
   home: string
   mediaRoot: string
   attachmentsRoot: string
+  imagesRoot: string
   mediaOwner: string
   tlsCert?: string
   tlsKey?: string
@@ -88,6 +89,7 @@ export function loadServerConfig(
   const home = resolve(env.HERMES_YAOYAO_HOME?.trim() || `${homedir()}/.hermes-yaoyao`)
   const mediaRoot = resolve(env.HERMES_YAOYAO_MEDIA_ROOT?.trim() || `${homedir()}/Agents`)
   const attachmentsRoot = resolve(`${homedir()}/.hermes/attachments`)
+  const imagesRoot = resolve(`${homedir()}/.hermes/images`)
   const tlsCert = env.HERMES_YAOYAO_TLS_CERT?.trim() || undefined
   const tlsKey = env.HERMES_YAOYAO_TLS_KEY?.trim() || undefined
   if (Boolean(tlsCert) !== Boolean(tlsKey)) {
@@ -115,6 +117,7 @@ export function loadServerConfig(
     home,
     mediaRoot,
     attachmentsRoot,
+    imagesRoot,
     mediaOwner: basename(homedir()),
     tlsCert,
     tlsKey,

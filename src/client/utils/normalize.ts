@@ -182,6 +182,17 @@ function persistedAttachmentUrl(path: string): { path: string; url: string } | u
   return { path, url: `/${segments.map(encodeURIComponent).join('/')}` }
 }
 
+function persistedImageUrl(path: string): { path: string; url: string } | undefined {
+  if (!path.startsWith('/')) return undefined
+  const segments = path.slice(1).split('/')
+  const normalizedSegments = segments.map(segment => {
+    try { return decodeURIComponent(segment) } catch { return '' }
+  })
+  if (segments.length < 5 || segments[0] !== 'Users' || normalizedSegments[2] !== '.hermes' || normalizedSegments[3] !== 'images'
+    || normalizedSegments.some(segment => !segment || segment === '.' || segment === '..')) return undefined
+  return { path, url: `/${segments.map(encodeURIComponent).join('/')}` }
+}
+
 function extractPersistedAttachments(content: string): { content: string; attachments: ChatAttachment[] } {
   const attachments: ChatAttachment[] = []
   const extracted = content.replace(
@@ -203,6 +214,53 @@ function extractPersistedAttachments(content: string): { content: string; attach
   return { content: cleaned, attachments }
 }
 
+function extractPersistedImages(content: string): { content: string; attachments: ChatAttachment[] } {
+  const lines = content.split(/\r?\n/)
+  const attachments: ChatAttachment[] = []
+  const imageMarker = /^\[用户附加图片\s*：\s*([^\]\r\n]+)\]\s*$/
+  const imageReference = /^@image:\s*(.+?)\s*$/
+  const screenshot = /^\[screenshot\]\s*$/
+
+  for (let index = 0; index < lines.length;) {
+    const firstMarker = lines[index]?.match(imageMarker)
+    if (!firstMarker) {
+      index += 1
+      continue
+    }
+    const start = index
+    const names: string[] = []
+    let cursor = index
+    while (true) {
+      const marker = lines[cursor]?.match(imageMarker)
+      if (!marker) break
+      names.push(marker[1]!.trim())
+      cursor += 1
+      while (lines[cursor]?.trim() === '') cursor += 1
+    }
+    const paths: string[] = []
+    while (true) {
+      const reference = lines[cursor]?.match(imageReference)
+      if (!reference) break
+      paths.push(reference[1]!.trim().replace(/^[`'"]|[`'"]$/g, ''))
+      cursor += 1
+    }
+    const references = paths.map(persistedImageUrl)
+    if (!paths.length || names.length !== paths.length || references.some(reference => !reference)) {
+      index = start + 1
+      continue
+    }
+    for (let position = 0; position < names.length; position += 1) {
+      const reference = references[position]!
+      const name = names[position]!
+      attachments.push({ id: `persisted:${reference.path}`, name, path: reference.path, url: reference.url, size: 0, ...attachmentMime(name) })
+    }
+    while (screenshot.test(lines[cursor] || '')) cursor += 1
+    lines.splice(start, cursor - start, ...Array(cursor - start).fill(''))
+    index = cursor
+  }
+  return { content: lines.join('\n').replace(/\n{3,}/g, '\n\n').trim(), attachments }
+}
+
 export function normalizeChatMessage(value: unknown, sessionId: string, fallbackProfile?: string): ChatMessage {
   const source = record(value)
   const contentValue = pick(source, 'content', 'text', 'output')
@@ -222,11 +280,13 @@ export function normalizeChatMessage(value: unknown, sessionId: string, fallback
   }
   const roleValue = string(source.role, 'assistant')
   const role = ['user', 'assistant', 'tool', 'system'].includes(roleValue) ? roleValue as ChatMessage['role'] : 'system'
-  if (role === 'user' && content.includes('@file:')) {
-    const persisted = extractPersistedAttachments(content)
-    content = persisted.content
+  if (role === 'user' && (content.includes('@file:') || content.includes('@image:'))) {
+    const persistedFiles = extractPersistedAttachments(content)
+    const persistedImages = extractPersistedImages(persistedFiles.content)
+    content = persistedImages.content
     const known = new Set(attachments.map(item => item.path || item.url || item.name))
-    attachments.push(...persisted.attachments.filter(item => !known.has(item.path || item.url || item.name)))
+    attachments.push(...[...persistedFiles.attachments, ...persistedImages.attachments]
+      .filter(item => !known.has(item.path || item.url || item.name)))
   }
   const id = string(pick(source, 'id', 'message_id', 'messageId')) || `history-${sessionId}-${number(source.timestamp)}-${Math.random()}`
   const status = string(pick(source, 'status', 'finish_reason', 'finishReason'))

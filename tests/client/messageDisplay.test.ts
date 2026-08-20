@@ -54,6 +54,50 @@ describe('displayContentForMessage', () => {
       }),
     ])
   })
+
+  it('turns iOS image markers into image attachments without keeping model screenshots', () => {
+    const message = normalizeChatMessage({
+      id: 'ios-user-image', role: 'user', timestamp: 1,
+      content: [
+        '测试',
+        '',
+        '[用户附加图片：照片-9270F5CF-2FE2-487F-8948-FA583F4C83B1.png]',
+        '@image:/Users/samien/.hermes/images/upload_20260820_130901_1.png',
+        '[screenshot]',
+      ].join('\n'),
+    }, 'session-1', 'default')
+
+    expect(message.content).toBe('测试')
+    expect(message.attachments).toEqual([
+      expect.objectContaining({
+        name: '照片-9270F5CF-2FE2-487F-8948-FA583F4C83B1.png',
+        path: '/Users/samien/.hermes/images/upload_20260820_130901_1.png',
+        url: '/Users/samien/.hermes/images/upload_20260820_130901_1.png',
+        kind: 'image',
+      }),
+    ])
+  })
+
+  it('keeps multiple iOS image uploads together as image attachments', () => {
+    const message = normalizeChatMessage({
+      id: 'ios-user-images', role: 'user', timestamp: 1,
+      content: [
+        '[用户附加图片：照片-1.jpeg]',
+        '',
+        '[用户附加图片：照片-2.jpeg]',
+        '@image:/Users/samien/.hermes/images/upload_1.jpeg',
+        '@image:/Users/samien/.hermes/images/upload_2.jpeg',
+        '[screenshot]',
+        '[screenshot]',
+      ].join('\n'),
+    }, 'session-1', 'default')
+
+    expect(message.content).toBe('')
+    expect(message.attachments?.map(attachment => attachment.url)).toEqual([
+      '/Users/samien/.hermes/images/upload_1.jpeg',
+      '/Users/samien/.hermes/images/upload_2.jpeg',
+    ])
+  })
   it('hides expanded attached context while restoring a missing reference', () => {
     const content = [
       '帮我看看这个文件',
