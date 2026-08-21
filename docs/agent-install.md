@@ -132,7 +132,40 @@ test "$(node -e \"console.log(require(process.argv[1]).version)\" "$PLUGIN_DIR/m
 | 需要让新插件生效 | 执行 `hermes dashboard --stop`，等待 8800 监督器在 5 秒内自动启动 | 另起常驻 `hermes dashboard` 进程 |
 | 9119 未监听 | 等待 8800 监督器自动启动；检查其日志 | 手动重复启动多个 Dashboard |
 
-## 4. 验证插件和 Dashboard
+## 4. 显式启用夭夭 Dashboard 插件
+
+夭夭位于用户插件目录，Dashboard 会先发现其 `manifest.json`，但不会自动执行用户提供的 JavaScript 或 Python 代码。只有插件名同时满足 `plugins.enabled` 包含 `yaoyao` 且未出现在 `plugins.disabled` 中时，Dashboard 才会展示夭夭标签、提供静态资源并挂载 `/api/plugins/yaoyao/`。
+
+先读取当前列表：
+
+```bash
+hermes config get plugins.enabled
+```
+
+当列表为空时，设置唯一的启用项：
+
+```bash
+hermes config set plugins.enabled '["yaoyao"]'
+```
+
+如果列表已有其他插件名，必须保留它们并在同一 JSON 列表中加入 `yaoyao`；不要以该示例覆盖已有启用项。随后执行：
+
+```bash
+hermes dashboard --stop
+```
+
+8800 监督器会在下一轮检查中自动重新启动 9119。不要补充 `hermes dashboard --no-open`，否则可能与监督器竞争端口。
+
+验证时使用 Dashboard 专用清单，而不是通用 `hermes plugins list`：
+
+```bash
+curl --noproxy '*' --fail --silent http://127.0.0.1:9119/api/dashboard/plugins
+tail -n 100 ~/.hermes/logs/gui.log
+```
+
+验收条件：清单包含 `"name":"yaoyao"`，日志包含 `Mounted plugin API routes: /api/plugins/yaoyao/`。匿名请求 `/api/plugins/yaoyao/...` 返回 `401` 是认证生效的信号，不表示插件加载失败。
+
+## 5. 验证插件和 Dashboard
 
 ```bash
 hermes dashboard --status
@@ -141,7 +174,7 @@ lsof -nP -iTCP:9119 -sTCP:LISTEN
 
 验收条件：Dashboard 状态正常，且只有一个 `9119` TCP 监听器。插件路由位于 `/api/plugins/yaoyao/`，该 API 需要现有 Hermes 登录会话；不要为了探测路由而关闭认证。除非用户明确授权且已配置对应生命周期所有者，否则保持 `9119` 仅本机监听。
 
-## 5. 可选：部署夭夭 Web
+## 6. 可选：部署夭夭 Web
 
 夭夭 Web 默认监听 `8800` 并连接 Dashboard `9119`。通过 LaunchAgent 安装后，它持续监督 Dashboard `9119`，但在自身停止或卸载时不会主动停止正在运行的 Dashboard。
 
@@ -154,10 +187,27 @@ node bin/hermes-yaoyao.mjs service status
 
 若需要显式指定 Dashboard 上游，只在安装服务前设置 `HERMES_YAOYAO_UPSTREAM`。默认值为 `http://127.0.0.1:9119`。只有用户明确要求时才允许局域网：设置 `HERMES_YAOYAO_HOST=0.0.0.0` 和 `HERMES_YAOYAO_ALLOW_INSECURE_LAN=1`；受管服务会同时将 9119 绑定至 `0.0.0.0`。
 
-## 6. 失败处理
+受管服务的配置被写入 `~/Library/LaunchAgents/com.samien.hermes-yaoyao.plist`。任何监听、TLS、上游或监督配置变更后，都要再次执行 `service install`，随后确认状态、两个监听器和日志：
+
+```bash
+node bin/hermes-yaoyao.mjs service status
+lsof -nP -iTCP:8800 -sTCP:LISTEN
+lsof -nP -iTCP:9119 -sTCP:LISTEN
+tail -n 100 ~/Library/Logs/hermes-yaoyao.log
+```
+
+若 `launchctl bootstrap` 报 `Bootstrap failed: 5: Input/output error`，先验证 plist，再使用已验证的兼容回退加载同一份文件：
+
+```bash
+plutil -lint ~/Library/LaunchAgents/com.samien.hermes-yaoyao.plist
+launchctl load -w ~/Library/LaunchAgents/com.samien.hermes-yaoyao.plist
+```
+
+## 7. 失败处理
 
 1. 记录失败的命令、退出码、Dashboard 状态和 `9119` 监听信息。
 2. 若插件重载失败，使用第 2 步生成的 `$BACKUP_DIR` 恢复到 `$PLUGIN_DIR`，执行 `hermes dashboard --stop`，再由 8800 监督器重启 Dashboard。
-3. 不要通过多次执行 `hermes dashboard --no-open`、重复安装 LaunchAgent 或停止无关 Gateway 来“尝试修复”。这些操作会掩盖真正错误，或产生重复监听进程。
+3. 若插件文件存在但未显示，先检查 `plugins.enabled` 是否包含 `yaoyao`，再检查 `/api/dashboard/plugins` 和 `gui.log`；不要通过重复复制目录或禁用认证来“尝试修复”。
+4. 不要通过多次执行 `hermes dashboard --no-open`、重复安装 LaunchAgent 或停止无关 Gateway 来“尝试修复”。这些操作会掩盖真正错误，或产生重复监听进程。
 
 版本不匹配、没有可用备份或无法确认 Dashboard 所有者时，停止自动化流程并报告，而不是猜测或覆盖现有安装。
