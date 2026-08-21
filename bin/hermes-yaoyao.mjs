@@ -45,7 +45,7 @@ function environment() {
   return Object.fromEntries(allowed.flatMap(key => process.env[key] ? [[key, process.env[key]]] : []))
 }
 
-function plist() {
+export function launchAgentPlist() {
   const node = process.execPath
   const envEntries = {
     PATH: `${dirname(node)}:${join(homedir(), '.local', 'bin')}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
@@ -102,7 +102,7 @@ async function install() {
   await mkdir(dataHome, { recursive: true, mode: 0o700 })
   await mkdir(logDir, { recursive: true })
   if (loaded()) run('launchctl', ['bootout', `${domain}/${label}`])
-  await writeFile(plistPath, plist(), { mode: 0o600 })
+  await writeFile(plistPath, launchAgentPlist(), { mode: 0o600 })
   await chmod(plistPath, 0o600)
   run('plutil', ['-lint', plistPath], { inherit: true })
   run('launchctl', ['bootstrap', domain, plistPath])
@@ -171,7 +171,9 @@ async function main() {
   process.stdout.write(`夭夭 Web\n\n用法：\n  hermes-yaoyao service install|start|stop|status|uninstall\n  hermes-yaoyao uploads prune --older-than 30 --yes\n`)
 }
 
-main().catch(error => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
-  process.exitCode = 1
-})
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+    process.exitCode = 1
+  })
+}
