@@ -160,6 +160,7 @@ class _Store(Protocol):
         client_message_id: str,
         content: str,
         mention_agent_ids: list[str],
+        topic_id: str | None = None,
     ) -> dict[str, object]: ...
 
     def create_gateway_interaction(
@@ -351,6 +352,9 @@ def build_run_prompt(
         },
         "run": {
             "id": _required_string(run.get("id"), "projection.run.id"),
+            "topicId": _required_string(
+                run.get("topicId"), "projection.run.topicId"
+            ),
             "rootMessageId": _required_string(
                 run.get("rootMessageId"), "projection.run.rootMessageId"
             ),
@@ -862,6 +866,7 @@ class GroupOrchestrator:
         client_message_id: str,
         content: str,
         mention_agent_ids: list[str],
+        topic_id: str | None = None,
     ) -> dict[str, object]:
         _required_string(room_id, "roomId")
         _required_string(request_id, "requestId")
@@ -870,6 +875,8 @@ class GroupOrchestrator:
             raise GroupOrchestratorError("content must be a string")
         if not isinstance(mention_agent_ids, list):
             raise GroupOrchestratorError("mentionAgentIds must be a list")
+        if topic_id is not None:
+            _required_string(topic_id, "topicId")
         safe_mentions = [
             _required_string(item, "mentionAgentIds") for item in mention_agent_ids
         ]
@@ -880,6 +887,7 @@ class GroupOrchestrator:
                 client_message_id=client_message_id,
                 content=content,
                 mention_agent_ids=safe_mentions,
+                topic_id=topic_id,
             ),
             task_name=f"yaoyao-group-send-{request_id}",
             failure_message="YaoYao group message submission failed",
@@ -893,6 +901,7 @@ class GroupOrchestrator:
         client_message_id: str,
         content: str,
         mention_agent_ids: list[str],
+        topic_id: str | None,
     ) -> dict[str, object]:
         async with self._room_serial(room_id):
             async with AsyncExitStack() as stack:
@@ -905,6 +914,7 @@ class GroupOrchestrator:
                     client_message_id=client_message_id,
                     content=content,
                     mention_agent_ids=mention_agent_ids,
+                    topic_id=topic_id,
                 )
                 if not isinstance(result, Mapping):
                     raise GroupOrchestratorError("Created message is invalid")

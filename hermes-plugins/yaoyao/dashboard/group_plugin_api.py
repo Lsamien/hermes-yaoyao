@@ -933,6 +933,17 @@ async def list_rooms(
     return {"items": page.items, "nextCursor": page.next_cursor}
 
 
+async def list_topics(
+    room_id: UUID,
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str | None = Query(default=None, min_length=1, max_length=4096),
+) -> dict[str, object]:
+    page = await _store_call(
+        "list_topics", str(room_id), limit=limit, cursor=cursor
+    )
+    return {"items": page.items, "nextCursor": page.next_cursor}
+
+
 async def create_room(request: CreateRoomRequest) -> dict[str, object]:
     return await _runtime_call("create_room", command=_create_room_command(request))
 
@@ -1004,6 +1015,7 @@ async def interrupt_agent(
 
 async def list_messages(
     room_id: UUID,
+    topic_id: UUID | None = Query(default=None, alias="topicId"),
     before_seq: int | None = Query(default=None, alias="beforeSeq", ge=1),
     after_seq: int | None = Query(default=None, alias="afterSeq", ge=1),
     limit: int = Query(default=MAX_MESSAGE_PAGE_SIZE, ge=1, le=MAX_MESSAGE_PAGE_SIZE),
@@ -1011,6 +1023,7 @@ async def list_messages(
     items = await _store_call(
         "list_messages",
         str(room_id),
+        topic_id=None if topic_id is None else str(topic_id),
         before_seq=before_seq,
         after_seq=after_seq,
         limit=limit,
@@ -1024,6 +1037,7 @@ async def send_message(room_id: UUID, request: SendMessageRequest) -> dict[str, 
         room_id=str(room_id),
         request_id=str(request.request_id),
         client_message_id=str(request.client_message_id),
+        topic_id=None if request.topic_id is None else str(request.topic_id),
         content=request.content,
         mention_agent_ids=[str(agent_id) for agent_id in request.mention_agent_ids],
     )
@@ -1112,6 +1126,7 @@ def _build_router() -> APIRouter:
         interrupt_agent,
         methods=["POST"],
     )
+    built.add_api_route("/rooms/{room_id}/topics", list_topics, methods=["GET"])
     built.add_api_route("/rooms/{room_id}/messages", list_messages, methods=["GET"])
     built.add_api_route("/rooms/{room_id}/messages", send_message, methods=["POST"])
     built.add_api_route(

@@ -41,7 +41,7 @@ from .group_protocol import (
 )
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _WAL_RETRY_DELAYS = (0.01, 0.02, 0.04, 0.08)
 EVENT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MIN_RETAINED_EVENTS = 100_000
@@ -96,6 +96,11 @@ _CASCADE_OPERATIONS = frozenset(
 _CASCADE_PARSE_VERSION = 2
 _MAX_CASCADE_PAGE_SIZE = 32
 _MAX_CASCADE_PLAN_BYTES = 16 * 1024
+_TOPIC_TITLE_LENGTH = 120
+_TOPIC_PREVIEW_LENGTH = 240
+_DEFAULT_SESSION_CONFIGURATION_JSON = (
+    '{"fast":null,"model":null,"provider":null,"reasoning_effort":null}'
+)
 
 _SCHEMA_STATEMENTS = (
     """CREATE TABLE IF NOT EXISTS group_meta (
@@ -110,6 +115,14 @@ _SCHEMA_STATEMENTS = (
         created_at REAL NOT NULL,
         updated_at REAL NOT NULL,
         archived INTEGER NOT NULL DEFAULT 0
+    )""",
+    """CREATE TABLE IF NOT EXISTS group_topics (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL REFERENCES group_rooms(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        UNIQUE(room_id, id)
     )""",
     """CREATE TABLE IF NOT EXISTS group_agents (
         id TEXT PRIMARY KEY,
@@ -132,10 +145,19 @@ _SCHEMA_STATEMENTS = (
         UNIQUE(room_id, profile),
         UNIQUE(room_id, display_name_key)
     )""",
+    """CREATE TABLE IF NOT EXISTS group_agent_topic_state (
+        agent_id TEXT NOT NULL REFERENCES group_agents(id) ON DELETE CASCADE,
+        topic_id TEXT NOT NULL REFERENCES group_topics(id) ON DELETE CASCADE,
+        last_context_message_seq INTEGER NOT NULL DEFAULT 0,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        PRIMARY KEY(agent_id, topic_id)
+    )""",
     """CREATE TABLE IF NOT EXISTS group_messages (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
         id TEXT NOT NULL UNIQUE,
         room_id TEXT NOT NULL REFERENCES group_rooms(id) ON DELETE CASCADE,
+        topic_id TEXT NOT NULL,
         sender_kind TEXT NOT NULL,
         sender_id TEXT NOT NULL,
         sender_name TEXT NOT NULL,
@@ -149,11 +171,14 @@ _SCHEMA_STATEMENTS = (
         error TEXT NOT NULL DEFAULT '',
         visible INTEGER NOT NULL DEFAULT 1,
         created_at REAL NOT NULL,
-        updated_at REAL NOT NULL
+        updated_at REAL NOT NULL,
+        FOREIGN KEY(room_id, topic_id)
+            REFERENCES group_topics(room_id, id) ON DELETE CASCADE
     )""",
     """CREATE TABLE IF NOT EXISTS group_agent_runs (
         id TEXT PRIMARY KEY,
         room_id TEXT NOT NULL,
+        topic_id TEXT NOT NULL,
         agent_id TEXT NOT NULL,
         trigger_message_id TEXT NOT NULL,
         response_message_id TEXT NOT NULL,
@@ -164,18 +189,23 @@ _SCHEMA_STATEMENTS = (
         runtime_session_id TEXT,
         error TEXT NOT NULL DEFAULT '',
         created_at REAL NOT NULL,
-        updated_at REAL NOT NULL
+        updated_at REAL NOT NULL,
+        FOREIGN KEY(room_id, topic_id)
+            REFERENCES group_topics(room_id, id) ON DELETE CASCADE
     )""",
     """CREATE TABLE IF NOT EXISTS group_interactions (
         id TEXT PRIMARY KEY,
         room_id TEXT NOT NULL,
+        topic_id TEXT NOT NULL,
         agent_id TEXT NOT NULL,
         run_id TEXT NOT NULL,
         kind TEXT NOT NULL,
         payload_json TEXT NOT NULL,
         status TEXT NOT NULL,
         created_at REAL NOT NULL,
-        resolved_at REAL
+        resolved_at REAL,
+        FOREIGN KEY(room_id, topic_id)
+            REFERENCES group_topics(room_id, id) ON DELETE CASCADE
     )""",
     """CREATE TABLE IF NOT EXISTS group_events (
         cursor INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,8 +223,11 @@ _SCHEMA_STATEMENTS = (
         created_at REAL NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_group_rooms_ordering ON group_rooms(archived, updated_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_group_topics_room_ordering ON group_topics(room_id, updated_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_group_messages_room_seq ON group_messages(room_id, seq)",
+    "CREATE INDEX IF NOT EXISTS idx_group_messages_topic_seq ON group_messages(topic_id, seq)",
     "CREATE INDEX IF NOT EXISTS idx_group_agent_runs_room ON group_agent_runs(room_id)",
+    "CREATE INDEX IF NOT EXISTS idx_group_agent_runs_topic ON group_agent_runs(topic_id)",
     "CREATE INDEX IF NOT EXISTS idx_group_agent_runs_agent_status ON group_agent_runs(agent_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_group_agent_runs_room_status ON group_agent_runs(room_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_group_agent_runs_status_order ON group_agent_runs(status, created_at, id)",
@@ -203,6 +236,7 @@ _SCHEMA_STATEMENTS = (
     WHERE runtime_session_id IS NOT NULL
       AND status IN ('running', 'awaiting_input')""",
     "CREATE INDEX IF NOT EXISTS idx_group_interactions_room_agent ON group_interactions(room_id, agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_group_interactions_topic ON group_interactions(topic_id)",
     "CREATE INDEX IF NOT EXISTS idx_group_interactions_run_status_kind ON group_interactions(run_id, status, kind)",
     "CREATE INDEX IF NOT EXISTS idx_group_events_room_created_at ON group_events(room_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_group_events_created_at ON group_events(created_at)",
@@ -213,7 +247,9 @@ _EXPECTED_TABLES = frozenset(
     {
         "group_meta",
         "group_rooms",
+        "group_topics",
         "group_agents",
+        "group_agent_topic_state",
         "group_messages",
         "group_agent_runs",
         "group_interactions",
@@ -221,6 +257,8 @@ _EXPECTED_TABLES = frozenset(
         "group_idempotency",
     }
 )
+
+_LEGACY_TABLES = _EXPECTED_TABLES - {"group_topics", "group_agent_topic_state"}
 
 
 class GroupStoreError(RuntimeError):
@@ -404,7 +442,7 @@ class GroupStore:
     def _validate_existing_schema(
         self, connection: sqlite3.Connection, table_names: set[str]
     ) -> None:
-        if table_names != _EXPECTED_TABLES:
+        if table_names not in {_EXPECTED_TABLES, _LEGACY_TABLES}:
             raise GroupStoreError("GroupStore schema is partial or corrupt")
         raw_version = self._metadata_value_from_connection(connection, "schema_version")
         if raw_version == "1":
@@ -412,14 +450,19 @@ class GroupStore:
             raw_version = "2"
         if raw_version == "2":
             self._migrate_v2_to_v3(connection)
+            raw_version = "3"
+        if raw_version == "3":
+            self._migrate_v3_to_v4(connection)
+        elif raw_version == "4":
+            self._repair_early_v4(connection)
         self._validated_schema_version(
             self._metadata_value_from_connection(connection, "schema_version")
         )
         self._validated_epoch(
             self._metadata_value_from_connection(connection, "journal_epoch")
         )
-        self._validate_v3_columns(connection)
-        self._validate_v3_values(connection)
+        self._validate_v4_columns(connection)
+        self._validate_v4_values(connection)
 
     @staticmethod
     def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
@@ -453,18 +496,514 @@ class GroupStore:
             "ALTER TABLE group_agents ADD COLUMN session_config_json TEXT"
         )
         connection.execute(
+            """UPDATE group_agents SET session_config_json = ?
+            WHERE stored_session_id IS NOT NULL""",
+            (_DEFAULT_SESSION_CONFIGURATION_JSON,),
+        )
+        connection.execute(
             "UPDATE group_meta SET value = '3' WHERE key = 'schema_version'"
         )
 
     @staticmethod
-    def _validate_v3_columns(connection: sqlite3.Connection) -> None:
+    def _migrate_v3_to_v4(connection: sqlite3.Connection) -> None:
+        """Split legacy root chains into writable topics without touching rooms/Agents."""
+        orphan_run = connection.execute(
+            """SELECT run.id FROM group_agent_runs AS run
+            LEFT JOIN group_messages AS trigger ON trigger.id = run.trigger_message_id
+            LEFT JOIN group_messages AS response ON response.id = run.response_message_id
+            WHERE trigger.id IS NULL OR response.id IS NULL LIMIT 1"""
+        ).fetchone()
+        if orphan_run is not None:
+            raise GroupStoreError("GroupStore run messages are orphaned")
+        orphan_interaction = connection.execute(
+            """SELECT interaction.id FROM group_interactions AS interaction
+            LEFT JOIN group_agent_runs AS run ON run.id = interaction.run_id
+            WHERE run.id IS NULL LIMIT 1"""
+        ).fetchone()
+        if orphan_interaction is not None:
+            raise GroupStoreError("GroupStore interaction run is orphaned")
+        connection.execute(
+            """CREATE TABLE group_topics (
+                id TEXT PRIMARY KEY,
+                room_id TEXT NOT NULL REFERENCES group_rooms(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                UNIQUE(room_id, id)
+            )"""
+        )
+        roots = connection.execute(
+            """SELECT messages.room_id, messages.root_message_id,
+                      MIN(messages.created_at) AS created_at,
+                      COALESCE(
+                        MAX(CASE WHEN messages.visible = 1
+                                 THEN messages.updated_at END),
+                        MAX(messages.updated_at)
+                      ) AS updated_at,
+                      COALESCE(
+                        (SELECT human.content FROM group_messages AS human
+                         WHERE human.room_id = messages.room_id
+                           AND human.root_message_id = messages.root_message_id
+                           AND human.sender_kind = 'human'
+                         ORDER BY human.seq ASC LIMIT 1),
+                        (SELECT visible.content FROM group_messages AS visible
+                         WHERE visible.room_id = messages.room_id
+                           AND visible.root_message_id = messages.root_message_id
+                           AND visible.visible = 1
+                         ORDER BY visible.seq ASC LIMIT 1),
+                        '话题'
+                      ) AS title
+               FROM group_messages AS messages
+               GROUP BY messages.room_id, messages.root_message_id
+               ORDER BY MIN(messages.seq) ASC"""
+        ).fetchall()
+        for root in roots:
+            title = " ".join(str(root["title"]).split()).strip()
+            if not title:
+                title = "话题"
+            connection.execute(
+                """INSERT INTO group_topics
+                (id, room_id, title, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)""",
+                (
+                    root["root_message_id"],
+                    root["room_id"],
+                    title[:_TOPIC_TITLE_LENGTH],
+                    root["created_at"],
+                    root["updated_at"],
+                ),
+            )
+
+        connection.execute(
+            """CREATE TABLE group_messages_v4 (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT NOT NULL UNIQUE,
+                room_id TEXT NOT NULL REFERENCES group_rooms(id) ON DELETE CASCADE,
+                topic_id TEXT NOT NULL,
+                sender_kind TEXT NOT NULL,
+                sender_id TEXT NOT NULL,
+                sender_name TEXT NOT NULL,
+                root_message_id TEXT NOT NULL,
+                reply_to_message_id TEXT,
+                client_message_id TEXT UNIQUE,
+                content TEXT NOT NULL DEFAULT '',
+                reasoning TEXT NOT NULL DEFAULT '',
+                tool_state_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL,
+                error TEXT NOT NULL DEFAULT '',
+                visible INTEGER NOT NULL DEFAULT 1,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                FOREIGN KEY(room_id, topic_id)
+                    REFERENCES group_topics(room_id, id) ON DELETE CASCADE
+            )"""
+        )
+        connection.execute(
+            """INSERT INTO group_messages_v4
+            (seq, id, room_id, topic_id, sender_kind, sender_id, sender_name,
+             root_message_id, reply_to_message_id, client_message_id, content,
+             reasoning, tool_state_json, status, error, visible, created_at, updated_at)
+            SELECT seq, id, room_id, root_message_id, sender_kind, sender_id,
+                   sender_name, root_message_id, reply_to_message_id,
+                   client_message_id, content, reasoning, tool_state_json,
+                   status, error, visible, created_at, updated_at
+            FROM group_messages ORDER BY seq ASC"""
+        )
+        connection.execute(
+            """CREATE TABLE group_agent_runs_v4 (
+                id TEXT PRIMARY KEY,
+                room_id TEXT NOT NULL,
+                topic_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                trigger_message_id TEXT NOT NULL,
+                response_message_id TEXT NOT NULL,
+                root_message_id TEXT NOT NULL,
+                depth INTEGER NOT NULL,
+                reply_mode TEXT NOT NULL DEFAULT 'mentioned',
+                status TEXT NOT NULL,
+                runtime_session_id TEXT,
+                error TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                FOREIGN KEY(room_id, topic_id)
+                    REFERENCES group_topics(room_id, id) ON DELETE CASCADE
+            )"""
+        )
+        connection.execute(
+            """INSERT INTO group_agent_runs_v4
+            (id, room_id, topic_id, agent_id, trigger_message_id,
+             response_message_id, root_message_id, depth, reply_mode, status,
+             runtime_session_id, error, created_at, updated_at)
+            SELECT id, room_id, root_message_id, agent_id, trigger_message_id,
+                   response_message_id, root_message_id, depth, reply_mode,
+                   status, runtime_session_id, error, created_at, updated_at
+            FROM group_agent_runs"""
+        )
+        connection.execute(
+            """CREATE TABLE group_interactions_v4 (
+                id TEXT PRIMARY KEY,
+                room_id TEXT NOT NULL,
+                topic_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                resolved_at REAL,
+                FOREIGN KEY(room_id, topic_id)
+                    REFERENCES group_topics(room_id, id) ON DELETE CASCADE
+            )"""
+        )
+        connection.execute(
+            """INSERT INTO group_interactions_v4
+            (id, room_id, topic_id, agent_id, run_id, kind, payload_json,
+             status, created_at, resolved_at)
+            SELECT interaction.id, interaction.room_id, run.topic_id,
+                   interaction.agent_id, interaction.run_id, interaction.kind,
+                   interaction.payload_json, interaction.status,
+                   interaction.created_at, interaction.resolved_at
+            FROM group_interactions AS interaction
+            JOIN group_agent_runs_v4 AS run ON run.id = interaction.run_id"""
+        )
+        connection.execute("DROP TABLE group_interactions")
+        connection.execute("DROP TABLE group_agent_runs")
+        connection.execute("DROP TABLE group_messages")
+        connection.execute("ALTER TABLE group_messages_v4 RENAME TO group_messages")
+        connection.execute(
+            "ALTER TABLE group_agent_runs_v4 RENAME TO group_agent_runs"
+        )
+        connection.execute(
+            "ALTER TABLE group_interactions_v4 RENAME TO group_interactions"
+        )
+        connection.execute(
+            """CREATE TABLE group_agent_topic_state (
+                agent_id TEXT NOT NULL REFERENCES group_agents(id) ON DELETE CASCADE,
+                topic_id TEXT NOT NULL REFERENCES group_topics(id) ON DELETE CASCADE,
+                last_context_message_seq INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                PRIMARY KEY(agent_id, topic_id)
+            )"""
+        )
+        connection.execute(
+            """INSERT INTO group_agent_topic_state
+            (agent_id, topic_id, last_context_message_seq, created_at, updated_at)
+            SELECT agent.id, topic.id,
+                   COALESCE((
+                     SELECT MAX(message.seq) FROM group_messages AS message
+                     WHERE message.topic_id = topic.id
+                       AND message.seq <= agent.last_context_message_seq
+                   ), 0),
+                   topic.created_at,
+                   CASE WHEN agent.updated_at > topic.updated_at
+                        THEN agent.updated_at ELSE topic.updated_at END
+            FROM group_agents AS agent
+            JOIN group_topics AS topic ON topic.room_id = agent.room_id"""
+        )
+
+        def add_topic_ids(value: object) -> object:
+            if isinstance(value, list):
+                return [add_topic_ids(item) for item in value]
+            if not isinstance(value, dict):
+                return value
+            rewritten = {key: add_topic_ids(item) for key, item in value.items()}
+            identity = rewritten.get("id")
+            table: str | None = None
+            if isinstance(identity, str):
+                if "senderKind" in rewritten:
+                    table = "group_messages"
+                elif "triggerMessageId" in rewritten:
+                    table = "group_agent_runs"
+                elif "runId" in rewritten and "kind" in rewritten:
+                    table = "group_interactions"
+            if table is not None and "topicId" not in rewritten:
+                row = connection.execute(
+                    f"SELECT topic_id FROM {table} WHERE id = ?", (identity,)
+                ).fetchone()
+                if row is not None:
+                    rewritten["topicId"] = row["topic_id"]
+            return rewritten
+
+        for ledger in connection.execute(
+            "SELECT request_id, operation, response_json FROM group_idempotency"
+        ).fetchall():
+            try:
+                response = json.loads(ledger["response_json"])
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise GroupStoreError("Stored idempotency response is corrupt") from error
+            rewritten_value = add_topic_ids(response)
+            if (
+                GroupStore._interaction_response_operation(ledger["operation"])
+                is not None
+                and isinstance(rewritten_value, dict)
+                and rewritten_value.get("state") == "failed"
+                and isinstance(rewritten_value.get("run"), dict)
+            ):
+                rewritten_value["run"].pop("topicId", None)
+            rewritten = GroupStore._canonical_json(rewritten_value)
+            if rewritten != ledger["response_json"]:
+                connection.execute(
+                    "UPDATE group_idempotency SET response_json = ? WHERE request_id = ?",
+                    (rewritten, ledger["request_id"]),
+                )
+        for event in connection.execute(
+            """SELECT cursor, payload_json FROM group_events
+            WHERE event_type IN ('message.upsert', 'run.updated',
+                                 'interaction.requested', 'interaction.resolved')"""
+        ).fetchall():
+            try:
+                payload = json.loads(event["payload_json"])
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise GroupStoreError("Stored event is corrupt") from error
+            rewritten = GroupStore._canonical_json(add_topic_ids(payload))
+            if rewritten != event["payload_json"]:
+                connection.execute(
+                    "UPDATE group_events SET payload_json = ? WHERE cursor = ?",
+                    (rewritten, event["cursor"]),
+                )
+        connection.execute(
+            "UPDATE group_meta SET value = '4' WHERE key = 'schema_version'"
+        )
+
+    @staticmethod
+    def _topic_foreign_key_kind(
+        connection: sqlite3.Connection, table: str
+    ) -> str:
+        foreign_keys = list(connection.execute(f"PRAGMA foreign_key_list({table})"))
+        grouped: dict[int, list[sqlite3.Row]] = {}
+        for foreign_key in foreign_keys:
+            grouped.setdefault(int(foreign_key["id"]), []).append(foreign_key)
+        for foreign_key_rows in grouped.values():
+            if foreign_key_rows[0]["table"] != "group_topics" or not all(
+                row["on_delete"] == "CASCADE" for row in foreign_key_rows
+            ):
+                continue
+            columns = [
+                (row["from"], row["to"])
+                for row in sorted(foreign_key_rows, key=lambda item: item["seq"])
+            ]
+            if columns == [("room_id", "room_id"), ("topic_id", "id")]:
+                return "final"
+            if columns == [("topic_id", "id")]:
+                return "early"
+        return "invalid"
+
+    @classmethod
+    def _repair_early_v4(cls, connection: sqlite3.Connection) -> None:
+        """Upgrade the unpublished single-topic-FK v4 draft in one transaction."""
+        tables = ("group_messages", "group_agent_runs", "group_interactions")
+        foreign_key_kinds = {
+            table: cls._topic_foreign_key_kind(connection, table) for table in tables
+        }
+        if all(kind == "final" for kind in foreign_key_kinds.values()):
+            return
+        if any(kind not in {"early", "final"} for kind in foreign_key_kinds.values()):
+            raise GroupStoreError("GroupStore early v4 topic ownership is corrupt")
+
+        invalid_queries = (
+            """SELECT message.id FROM group_messages AS message
+               LEFT JOIN group_topics AS topic ON topic.id = message.topic_id
+               WHERE topic.id IS NULL OR topic.room_id != message.room_id LIMIT 1""",
+            """SELECT run.id FROM group_agent_runs AS run
+               LEFT JOIN group_topics AS topic ON topic.id = run.topic_id
+               LEFT JOIN group_messages AS trigger
+                 ON trigger.id = run.trigger_message_id
+               LEFT JOIN group_messages AS response
+                 ON response.id = run.response_message_id
+               WHERE topic.id IS NULL OR topic.room_id != run.room_id
+                  OR trigger.id IS NULL OR response.id IS NULL
+                  OR trigger.room_id != run.room_id
+                  OR response.room_id != run.room_id
+                  OR trigger.topic_id != run.topic_id
+                  OR response.topic_id != run.topic_id
+               LIMIT 1""",
+            """SELECT interaction.id FROM group_interactions AS interaction
+               LEFT JOIN group_topics AS topic ON topic.id = interaction.topic_id
+               LEFT JOIN group_agent_runs AS run ON run.id = interaction.run_id
+               WHERE topic.id IS NULL OR topic.room_id != interaction.room_id
+                  OR run.id IS NULL OR run.room_id != interaction.room_id
+                  OR run.topic_id != interaction.topic_id
+               LIMIT 1""",
+        )
+        if any(connection.execute(query).fetchone() is not None for query in invalid_queries):
+            raise GroupStoreError("GroupStore early v4 ownership is corrupt")
+
+        counts = {
+            table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            for table in tables
+        }
+        connection.execute(
+            """CREATE TABLE group_messages_v4_repair (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT NOT NULL UNIQUE,
+                room_id TEXT NOT NULL REFERENCES group_rooms(id) ON DELETE CASCADE,
+                topic_id TEXT NOT NULL,
+                sender_kind TEXT NOT NULL,
+                sender_id TEXT NOT NULL,
+                sender_name TEXT NOT NULL,
+                root_message_id TEXT NOT NULL,
+                reply_to_message_id TEXT,
+                client_message_id TEXT UNIQUE,
+                content TEXT NOT NULL DEFAULT '',
+                reasoning TEXT NOT NULL DEFAULT '',
+                tool_state_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL,
+                error TEXT NOT NULL DEFAULT '',
+                visible INTEGER NOT NULL DEFAULT 1,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                FOREIGN KEY(room_id, topic_id)
+                    REFERENCES group_topics(room_id, id) ON DELETE CASCADE
+            )"""
+        )
+        connection.execute(
+            """INSERT INTO group_messages_v4_repair
+            (seq, id, room_id, topic_id, sender_kind, sender_id, sender_name,
+             root_message_id, reply_to_message_id, client_message_id, content,
+             reasoning, tool_state_json, status, error, visible, created_at, updated_at)
+            SELECT seq, id, room_id, topic_id, sender_kind, sender_id, sender_name,
+                   root_message_id, reply_to_message_id, client_message_id, content,
+                   reasoning, tool_state_json, status, error, visible,
+                   created_at, updated_at
+            FROM group_messages ORDER BY seq ASC"""
+        )
+        connection.execute(
+            """CREATE TABLE group_agent_runs_v4_repair (
+                id TEXT PRIMARY KEY,
+                room_id TEXT NOT NULL,
+                topic_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                trigger_message_id TEXT NOT NULL,
+                response_message_id TEXT NOT NULL,
+                root_message_id TEXT NOT NULL,
+                depth INTEGER NOT NULL,
+                reply_mode TEXT NOT NULL DEFAULT 'mentioned',
+                status TEXT NOT NULL,
+                runtime_session_id TEXT,
+                error TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                FOREIGN KEY(room_id, topic_id)
+                    REFERENCES group_topics(room_id, id) ON DELETE CASCADE
+            )"""
+        )
+        connection.execute(
+            """INSERT INTO group_agent_runs_v4_repair
+            (id, room_id, topic_id, agent_id, trigger_message_id,
+             response_message_id, root_message_id, depth, reply_mode, status,
+             runtime_session_id, error, created_at, updated_at)
+            SELECT id, room_id, topic_id, agent_id, trigger_message_id,
+                   response_message_id, root_message_id, depth, reply_mode,
+                   status, runtime_session_id, error, created_at, updated_at
+            FROM group_agent_runs"""
+        )
+        connection.execute(
+            """CREATE TABLE group_interactions_v4_repair (
+                id TEXT PRIMARY KEY,
+                room_id TEXT NOT NULL,
+                topic_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                resolved_at REAL,
+                FOREIGN KEY(room_id, topic_id)
+                    REFERENCES group_topics(room_id, id) ON DELETE CASCADE
+            )"""
+        )
+        connection.execute(
+            """INSERT INTO group_interactions_v4_repair
+            (id, room_id, topic_id, agent_id, run_id, kind, payload_json,
+             status, created_at, resolved_at)
+            SELECT id, room_id, topic_id, agent_id, run_id, kind, payload_json,
+                   status, created_at, resolved_at
+            FROM group_interactions"""
+        )
+        connection.execute("DROP TABLE group_interactions")
+        connection.execute("DROP TABLE group_agent_runs")
+        connection.execute("DROP TABLE group_messages")
+        connection.execute(
+            "ALTER TABLE group_messages_v4_repair RENAME TO group_messages"
+        )
+        connection.execute(
+            "ALTER TABLE group_agent_runs_v4_repair RENAME TO group_agent_runs"
+        )
+        connection.execute(
+            "ALTER TABLE group_interactions_v4_repair RENAME TO group_interactions"
+        )
+        repaired_counts = {
+            table: int(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            for table in tables
+        }
+        if repaired_counts != counts:
+            raise GroupStoreError("GroupStore early v4 repair lost rows")
+
+        for event in connection.execute(
+            """SELECT cursor, payload_json FROM group_events
+            WHERE event_type = 'agent.status'"""
+        ).fetchall():
+            try:
+                payload = cls._load_json(event["payload_json"])
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise GroupStoreError("Stored event is corrupt") from error
+            if not isinstance(payload, dict):
+                raise GroupStoreError("Stored event is corrupt")
+            payload.pop("topicId", None)
+            encoded = cls._canonical_json(payload)
+            if encoded != event["payload_json"]:
+                connection.execute(
+                    "UPDATE group_events SET payload_json = ? WHERE cursor = ?",
+                    (encoded, event["cursor"]),
+                )
+        for ledger in connection.execute(
+            "SELECT request_id, operation, response_json FROM group_idempotency"
+        ).fetchall():
+            if cls._interaction_response_operation(ledger["operation"]) is None:
+                continue
+            try:
+                response = cls._load_json(ledger["response_json"])
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise GroupStoreError("Stored interaction response is corrupt") from error
+            if not isinstance(response, dict):
+                raise GroupStoreError("Stored interaction response is corrupt")
+            run = response.get("run")
+            if response.get("state") != "failed" or not isinstance(run, dict):
+                continue
+            run.pop("topicId", None)
+            encoded = cls._canonical_json(response)
+            if encoded != ledger["response_json"]:
+                connection.execute(
+                    """UPDATE group_idempotency SET response_json = ?
+                    WHERE request_id = ?""",
+                    (encoded, ledger["request_id"]),
+                )
+        connection.execute(
+            """UPDATE group_topics AS topic
+            SET updated_at = COALESCE(
+                (SELECT MAX(message.updated_at) FROM group_messages AS message
+                 WHERE message.room_id = topic.room_id
+                   AND message.topic_id = topic.id AND message.visible = 1),
+                (SELECT MAX(message.updated_at) FROM group_messages AS message
+                 WHERE message.room_id = topic.room_id
+                   AND message.topic_id = topic.id),
+                topic.created_at
+            )"""
+        )
+
+    @staticmethod
+    def _validate_v4_columns(connection: sqlite3.Connection) -> None:
         expected_columns = {
             "group_meta": {"key", "value"},
             "group_rooms": {"id", "name", "cwd", "max_reply_rounds", "created_at", "updated_at", "archived"},
+            "group_topics": {"id", "room_id", "title", "created_at", "updated_at"},
             "group_agents": {"id", "room_id", "profile", "display_name", "display_name_key", "description", "stored_session_id", "last_context_message_seq", "enabled", "reply_without_mention", "model_override", "provider_override", "reasoning_effort_override", "fast_mode_override", "session_config_json", "created_at", "updated_at"},
-            "group_messages": {"seq", "id", "room_id", "sender_kind", "sender_id", "sender_name", "root_message_id", "reply_to_message_id", "client_message_id", "content", "reasoning", "tool_state_json", "status", "error", "visible", "created_at", "updated_at"},
-            "group_agent_runs": {"id", "room_id", "agent_id", "trigger_message_id", "response_message_id", "root_message_id", "depth", "reply_mode", "status", "runtime_session_id", "error", "created_at", "updated_at"},
-            "group_interactions": {"id", "room_id", "agent_id", "run_id", "kind", "payload_json", "status", "created_at", "resolved_at"},
+            "group_agent_topic_state": {"agent_id", "topic_id", "last_context_message_seq", "created_at", "updated_at"},
+            "group_messages": {"seq", "id", "room_id", "topic_id", "sender_kind", "sender_id", "sender_name", "root_message_id", "reply_to_message_id", "client_message_id", "content", "reasoning", "tool_state_json", "status", "error", "visible", "created_at", "updated_at"},
+            "group_agent_runs": {"id", "room_id", "topic_id", "agent_id", "trigger_message_id", "response_message_id", "root_message_id", "depth", "reply_mode", "status", "runtime_session_id", "error", "created_at", "updated_at"},
+            "group_interactions": {"id", "room_id", "topic_id", "agent_id", "run_id", "kind", "payload_json", "status", "created_at", "resolved_at"},
             "group_events": {"cursor", "epoch", "room_id", "event_type", "payload_json", "created_at"},
             "group_idempotency": {"request_id", "operation", "request_hash", "response_json", "created_at"},
         }
@@ -473,6 +1012,10 @@ class GroupStore:
             ("group_agents", "reply_without_mention"): ("INTEGER", 1, "0"),
             ("group_messages", "visible"): ("INTEGER", 1, "1"),
             ("group_agent_runs", "reply_mode"): ("TEXT", 1, "'mentioned'"),
+            ("group_messages", "topic_id"): ("TEXT", 1, None),
+            ("group_agent_runs", "topic_id"): ("TEXT", 1, None),
+            ("group_interactions", "topic_id"): ("TEXT", 1, None),
+            ("group_agent_topic_state", "last_context_message_seq"): ("INTEGER", 1, "0"),
         }
         for table, required in expected_columns.items():
             rows = list(connection.execute(f"PRAGMA table_info({table})"))
@@ -486,9 +1029,12 @@ class GroupStore:
                 actual = (str(row["type"]).upper(), int(row["notnull"]), row["dflt_value"])
                 if actual != spec:
                     raise GroupStoreError("GroupStore schema is partial or corrupt")
+        for table in ("group_messages", "group_agent_runs", "group_interactions"):
+            if GroupStore._topic_foreign_key_kind(connection, table) != "final":
+                raise GroupStoreError("GroupStore schema is partial or corrupt")
 
     @staticmethod
-    def _validate_v3_values(connection: sqlite3.Connection) -> None:
+    def _validate_v4_values(connection: sqlite3.Connection) -> None:
         invalid_value_queries = (
             f"""SELECT 1 FROM group_rooms
                 WHERE typeof(max_reply_rounds) != 'integer'
@@ -518,10 +1064,52 @@ class GroupStore:
                 WHERE typeof(reply_mode) != 'text'
                    OR reply_mode NOT IN ('mentioned', 'automatic')
                 LIMIT 1""",
+            """SELECT 1 FROM group_agent_topic_state
+                WHERE typeof(last_context_message_seq) != 'integer'
+                   OR last_context_message_seq < 0
+                LIMIT 1""",
+            """SELECT 1 FROM group_messages AS message
+                LEFT JOIN group_topics AS topic ON topic.id = message.topic_id
+                WHERE topic.id IS NULL OR topic.room_id != message.room_id
+                LIMIT 1""",
+            """SELECT 1 FROM group_agent_runs AS run
+                LEFT JOIN group_topics AS topic ON topic.id = run.topic_id
+                LEFT JOIN group_messages AS trigger ON trigger.id = run.trigger_message_id
+                LEFT JOIN group_messages AS response ON response.id = run.response_message_id
+                WHERE topic.id IS NULL OR topic.room_id != run.room_id
+                   OR trigger.id IS NULL OR response.id IS NULL
+                   OR trigger.topic_id != run.topic_id
+                   OR response.topic_id != run.topic_id
+                LIMIT 1""",
+            """SELECT 1 FROM group_interactions AS interaction
+                LEFT JOIN group_agent_runs AS run ON run.id = interaction.run_id
+                WHERE run.id IS NULL OR interaction.topic_id != run.topic_id
+                   OR interaction.room_id != run.room_id
+                LIMIT 1""",
+            """SELECT 1 FROM group_agent_topic_state AS state
+                LEFT JOIN group_agents AS agent ON agent.id = state.agent_id
+                LEFT JOIN group_topics AS topic ON topic.id = state.topic_id
+                WHERE agent.id IS NULL OR topic.id IS NULL
+                   OR agent.room_id != topic.room_id
+                LIMIT 1""",
         )
         for query in invalid_value_queries:
             if connection.execute(query).fetchone() is not None:
                 raise GroupStoreError("GroupStore stored values are corrupt")
+        for table, column in (
+            ("group_topics", "id"),
+            ("group_topics", "room_id"),
+            ("group_messages", "topic_id"),
+            ("group_agent_runs", "topic_id"),
+            ("group_interactions", "topic_id"),
+        ):
+            for row in connection.execute(f"SELECT {column} AS value FROM {table}"):
+                try:
+                    canonical = str(uuid.UUID(row["value"]))
+                except (TypeError, ValueError, AttributeError) as error:
+                    raise GroupStoreError("GroupStore stored values are corrupt") from error
+                if row["value"] != canonical:
+                    raise GroupStoreError("GroupStore stored values are corrupt")
 
     @staticmethod
     def _ensure_indexes(connection: sqlite3.Connection) -> None:
@@ -537,6 +1125,26 @@ class GroupStore:
             "idx_group_rooms_ordering": (
                 [("archived", 0), ("updated_at", 1), ("id", 1)],
                 "group_rooms(archived, updated_at DESC, id DESC)",
+            ),
+            "idx_group_topics_room_ordering": (
+                [("room_id", 0), ("updated_at", 1), ("id", 1)],
+                "group_topics(room_id, updated_at DESC, id DESC)",
+            ),
+            "idx_group_messages_room_seq": (
+                [("room_id", 0), ("seq", 0)],
+                "group_messages(room_id, seq)",
+            ),
+            "idx_group_messages_topic_seq": (
+                [("topic_id", 0), ("seq", 0)],
+                "group_messages(topic_id, seq)",
+            ),
+            "idx_group_agent_runs_room": (
+                [("room_id", 0)],
+                "group_agent_runs(room_id)",
+            ),
+            "idx_group_agent_runs_topic": (
+                [("topic_id", 0)],
+                "group_agent_runs(topic_id)",
             ),
             "idx_group_agent_runs_agent_status": (
                 [("agent_id", 0), ("status", 0)],
@@ -557,6 +1165,14 @@ class GroupStore:
             "idx_group_interactions_run_status_kind": (
                 [("run_id", 0), ("status", 0), ("kind", 0)],
                 "group_interactions(run_id, status, kind)",
+            ),
+            "idx_group_interactions_room_agent": (
+                [("room_id", 0), ("agent_id", 0)],
+                "group_interactions(room_id, agent_id)",
+            ),
+            "idx_group_interactions_topic": (
+                [("topic_id", 0)],
+                "group_interactions(topic_id)",
             ),
         }
         for name, (expected, definition) in indexes.items():
@@ -851,6 +1467,52 @@ class GroupStore:
             next_cursor = self._encode_cursor(last["updated_at"], last["id"])
         return CursorPage(items=items, next_cursor=next_cursor)
 
+    def list_topics(
+        self, room_id: str, *, limit: int, cursor: str | None
+    ) -> CursorPage:
+        """Return one room's topics in stable most-recently-active order."""
+        canonical_room_id = self._canonical_uuid(room_id, "roomId")
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or not 1 <= limit <= 100
+        ):
+            raise ValueError("limit must be an integer from 1 to 100")
+        cursor_values = (
+            self._decode_topic_cursor(cursor, canonical_room_id)
+            if cursor is not None
+            else None
+        )
+        query = """SELECT topic.*,
+            (SELECT COUNT(*) FROM group_messages AS counted
+             WHERE counted.topic_id = topic.id AND counted.visible = 1)
+                AS message_count,
+            COALESCE((SELECT CASE WHEN TRIM(latest.content) != ''
+                                  THEN latest.content ELSE latest.error END
+             FROM group_messages AS latest
+             WHERE latest.topic_id = topic.id AND latest.visible = 1
+               AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
+             ORDER BY latest.seq DESC LIMIT 1), '') AS preview
+            FROM group_topics AS topic WHERE topic.room_id = ?"""
+        params: list[object] = [canonical_room_id]
+        if cursor_values is not None:
+            query += " AND ((topic.updated_at < ?) OR (topic.updated_at = ? AND topic.id < ?))"
+            params.extend((cursor_values[0], cursor_values[0], cursor_values[1]))
+        query += " ORDER BY topic.updated_at DESC, topic.id DESC LIMIT ?"
+        params.append(limit + 1)
+        with self.read_transaction() as connection:
+            self._room_detail(connection, canonical_room_id, include_archived=True)
+            rows = connection.execute(query, params).fetchall()
+        has_more = len(rows) > limit
+        items = [self._topic_summary(row) for row in rows[:limit]]
+        next_cursor = None
+        if has_more and items:
+            last = rows[limit - 1]
+            next_cursor = self._encode_topic_cursor(
+                canonical_room_id, last["updated_at"], last["id"]
+            )
+        return CursorPage(items=items, next_cursor=next_cursor)
+
     def update_room(
         self, room_id: str, command: Mapping[str, object]
     ) -> dict[str, object]:
@@ -883,11 +1545,6 @@ class GroupStore:
             connection.execute(
                 f"UPDATE group_rooms SET {', '.join(assignments)} WHERE id = ?", values
             )
-        model_changes = changes & {"model", "provider"}
-        if model_changes and model_changes != {"model", "provider"}:
-            raise ValueError("model and provider must be updated together")
-        if model_changes and ((command["model"] is None) != (command["provider"] is None)):
-            raise ValueError("model and provider must both be set or both be null")
             room = self._room_detail(
                 connection, canonical_room_id, include_archived=True
             )
@@ -1056,6 +1713,13 @@ class GroupStore:
             raise ValueError(
                 "Agent update requires a mutable agent field"
             )
+        model_changes = changes & {"model", "provider"}
+        if model_changes and model_changes != {"model", "provider"}:
+            raise ValueError("model and provider must be updated together")
+        if model_changes and (
+            (command["model"] is None) != (command["provider"] is None)
+        ):
+            raise ValueError("model and provider must both be set or both be null")
 
         def action(connection: sqlite3.Connection) -> dict[str, object]:
             self._active_room(connection, canonical_room_id)
@@ -1273,11 +1937,17 @@ class GroupStore:
         client_message_id: str,
         content: str,
         mention_agent_ids: object,
+        topic_id: str | None = None,
     ) -> dict[str, object]:
         """Persist one human turn and the deterministic agent work it starts."""
         canonical_room_id = self._canonical_uuid(room_id, "roomId")
         canonical_request_id = self._canonical_uuid(request_id, "requestId")
         canonical_client_id = self._canonical_uuid(client_message_id, "clientMessageId")
+        canonical_topic_id = (
+            self._compatibility_topic_id(canonical_room_id)
+            if topic_id is None
+            else self._canonical_uuid(topic_id, "topicId")
+        )
         message_content = self._message_text(
             content, "content", max_bytes=MAX_MESSAGE_BYTES, nonblank=True
         )
@@ -1288,6 +1958,8 @@ class GroupStore:
             "content": message_content,
             "mentionAgentIds": agent_ids,
         }
+        if topic_id is not None:
+            payload["topicId"] = canonical_topic_id
 
         def action(connection: sqlite3.Connection) -> dict[str, object]:
             self._active_room(connection, canonical_room_id)
@@ -1321,16 +1993,24 @@ class GroupStore:
                 if agent["id"] not in explicit_ids
             )
             now = self._now()
+            self._ensure_topic(
+                connection,
+                canonical_room_id,
+                canonical_topic_id,
+                message_content,
+                now,
+            )
             human_id = str(uuid.uuid4())
             connection.execute(
                 """INSERT INTO group_messages
-                (id, room_id, sender_kind, sender_id, sender_name, root_message_id,
+                (id, room_id, topic_id, sender_kind, sender_id, sender_name, root_message_id,
                  reply_to_message_id, client_message_id, content, reasoning, tool_state_json,
                  status, error, created_at, updated_at)
-                VALUES (?, ?, 'human', 'human', '你', ?, NULL, ?, ?, '', '[]', 'completed', '', ?, ?)""",
+                VALUES (?, ?, ?, 'human', 'human', '你', ?, NULL, ?, ?, '', '[]', 'completed', '', ?, ?)""",
                 (
                     human_id,
                     canonical_room_id,
+                    canonical_topic_id,
                     human_id,
                     canonical_client_id,
                     message_content,
@@ -1348,13 +2028,14 @@ class GroupStore:
                 response_id, run_id = str(uuid.uuid4()), str(uuid.uuid4())
                 connection.execute(
                     """INSERT INTO group_messages
-                    (id, room_id, sender_kind, sender_id, sender_name, root_message_id,
+                    (id, room_id, topic_id, sender_kind, sender_id, sender_name, root_message_id,
                      reply_to_message_id, client_message_id, content, reasoning, tool_state_json,
                      status, error, visible, created_at, updated_at)
-                    VALUES (?, ?, 'agent', ?, ?, ?, ?, NULL, '', '', '[]', 'queued', '', ?, ?, ?)""",
+                    VALUES (?, ?, ?, 'agent', ?, ?, ?, ?, NULL, '', '', '[]', 'queued', '', ?, ?, ?)""",
                     (
                         response_id,
                         canonical_room_id,
+                        canonical_topic_id,
                         agent["id"],
                         agent["display_name"],
                         human_id,
@@ -1366,12 +2047,13 @@ class GroupStore:
                 )
                 connection.execute(
                     """INSERT INTO group_agent_runs
-                    (id, room_id, agent_id, trigger_message_id, response_message_id, root_message_id,
+                    (id, room_id, topic_id, agent_id, trigger_message_id, response_message_id, root_message_id,
                      depth, reply_mode, status, runtime_session_id, error, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'queued', NULL, '', ?, ?)""",
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 'queued', NULL, '', ?, ?)""",
                     (
                         run_id,
                         canonical_room_id,
+                        canonical_topic_id,
                         agent["id"],
                         human_id,
                         response_id,
@@ -1429,11 +2111,17 @@ class GroupStore:
         self,
         room_id: str,
         *,
+        topic_id: str | None = None,
         before_seq: int | None = None,
         after_seq: int | None = None,
         limit: int = MAX_MESSAGE_PAGE_SIZE,
     ) -> list[dict[str, object]]:
         canonical_room_id = self._canonical_uuid(room_id, "roomId")
+        canonical_topic_id = (
+            None
+            if topic_id is None
+            else self._canonical_uuid(topic_id, "topicId")
+        )
         self._page_limit(limit, MAX_MESSAGE_PAGE_SIZE, "limit")
         if before_seq is not None and after_seq is not None:
             raise ValueError("before_seq and after_seq are mutually exclusive")
@@ -1449,21 +2137,28 @@ class GroupStore:
         )
         with self.read_transaction() as connection:
             self._room_detail(connection, canonical_room_id, include_archived=True)
+            if canonical_topic_id is not None:
+                self._topic_row(connection, canonical_room_id, canonical_topic_id)
+            scope = "room_id = ?"
+            scope_params: tuple[object, ...] = (canonical_room_id,)
+            if canonical_topic_id is not None:
+                scope += " AND topic_id = ?"
+                scope_params = (canonical_room_id, canonical_topic_id)
             if before is not None:
                 rows = connection.execute(
-                    "SELECT * FROM group_messages WHERE room_id = ? AND visible = 1 AND seq < ? ORDER BY seq DESC LIMIT ?",
-                    (canonical_room_id, before, limit),
+                    f"SELECT * FROM group_messages WHERE {scope} AND visible = 1 AND seq < ? ORDER BY seq DESC LIMIT ?",
+                    (*scope_params, before, limit),
                 ).fetchall()
                 rows = list(reversed(rows))
             elif after is not None:
                 rows = connection.execute(
-                    "SELECT * FROM group_messages WHERE room_id = ? AND visible = 1 AND seq > ? ORDER BY seq ASC LIMIT ?",
-                    (canonical_room_id, after, limit),
+                    f"SELECT * FROM group_messages WHERE {scope} AND visible = 1 AND seq > ? ORDER BY seq ASC LIMIT ?",
+                    (*scope_params, after, limit),
                 ).fetchall()
             else:
                 rows = connection.execute(
-                    "SELECT * FROM group_messages WHERE room_id = ? AND visible = 1 ORDER BY seq DESC LIMIT ?",
-                    (canonical_room_id, limit),
+                    f"SELECT * FROM group_messages WHERE {scope} AND visible = 1 ORDER BY seq DESC LIMIT ?",
+                    (*scope_params, limit),
                 ).fetchall()
                 rows = list(reversed(rows))
             return [self._message_wire(row) for row in rows]
@@ -1532,20 +2227,31 @@ class GroupStore:
             room = self._active_room(connection, run["room_id"])
             agent = self._enabled_agent(connection, run["room_id"], run["agent_id"])
             trigger = self._message_row(connection, run["trigger_message_id"])
-            if trigger["room_id"] != run["room_id"]:
+            if (
+                trigger["room_id"] != run["room_id"]
+                or trigger["topic_id"] != run["topic_id"]
+            ):
                 raise GroupStoreError("Run trigger message is corrupt")
-            lower_seq = int(agent["last_context_message_seq"])
+            topic_state = self._agent_topic_state(
+                connection, run["agent_id"], run["topic_id"]
+            )
+            lower_seq = int(topic_state["last_context_message_seq"])
             trigger_seq = int(trigger["seq"])
             through_seq = self._safe_context_seq(
-                connection, run["room_id"], lower_seq, trigger_seq
+                connection,
+                run["room_id"],
+                run["topic_id"],
+                lower_seq,
+                trigger_seq,
             )
             eligibility = """FROM group_messages
-                WHERE room_id = ? AND seq > ? AND seq <= ?
+                WHERE room_id = ? AND topic_id = ? AND seq > ? AND seq <= ?
                   AND visible = 1
                   AND status IN ('completed', 'failed', 'interrupted')
                   AND NOT (sender_kind = 'agent' AND sender_id = ?)"""
             parameters = (
                 run["room_id"],
+                run["topic_id"],
                 lower_seq,
                 trigger_seq,
                 run["agent_id"],
@@ -1572,6 +2278,8 @@ class GroupStore:
                     ).fetchone()[0]
                 )
             initial = agent["stored_session_id"] is None
+            projected_agent = self._agent_wire(agent)
+            projected_agent["lastContextMessageSeq"] = lower_seq
             messages = [self._projection_message(row) for row in rows]
             messages, omitted, omitted_through_seq, omitted_summary = (
                 self._bound_projection_messages(
@@ -1583,7 +2291,7 @@ class GroupStore:
             return {
                 "run": self._run_wire(run),
                 "room": self._room_wire(room),
-                "agent": self._agent_wire(agent),
+                "agent": projected_agent,
                 "messages": messages,
                 "initial": initial,
                 "triggerSeq": trigger_seq,
@@ -1677,30 +2385,30 @@ class GroupStore:
                 raise GroupConflictError("Run no longer accepts context")
             if run["runtime_session_id"] != runtime:
                 raise GroupConflictError("Run runtime generation changed")
-            if int(agent["last_context_message_seq"]) != expected:
+            topic_state = self._agent_topic_state(
+                connection, run["agent_id"], run["topic_id"]
+            )
+            if int(topic_state["last_context_message_seq"]) != expected:
                 raise GroupConflictError("Agent context generation changed")
             trigger = self._message_row(connection, run["trigger_message_id"])
             safe = self._safe_context_seq(
-                connection, run["room_id"], expected, int(trigger["seq"])
+                connection,
+                run["room_id"],
+                run["topic_id"],
+                expected,
+                int(trigger["seq"]),
             )
             if through < expected or through > safe:
                 raise GroupConflictError("throughSeq exceeds safe projection")
             now = self._now()
             connection.execute(
-                """UPDATE group_agents
-                SET last_context_message_seq = ?, updated_at = ? WHERE id = ?""",
-                (through, now, agent["id"]),
+                """UPDATE group_agent_topic_state
+                SET last_context_message_seq = ?, updated_at = ?
+                WHERE agent_id = ? AND topic_id = ?""",
+                (through, now, agent["id"], run["topic_id"]),
             )
-            changed = self._agent_wire(
-                self._owned_agent(connection, run["room_id"], run["agent_id"])
-            )
-            self._append_event(
-                connection,
-                run["room_id"],
-                "agent.updated",
-                changed,
-                created_at=now,
-            )
+            changed = self._agent_wire(agent)
+            changed["lastContextMessageSeq"] = through
             return changed
 
     def commit_prompt_submission(
@@ -1754,7 +2462,10 @@ class GroupStore:
             if run["runtime_session_id"] != runtime:
                 raise GroupConflictError("Run runtime generation changed")
             current_stored = agent["stored_session_id"]
-            current_context = int(agent["last_context_message_seq"])
+            topic_state = self._agent_topic_state(
+                connection, run["agent_id"], run["topic_id"]
+            )
+            current_context = int(topic_state["last_context_message_seq"])
             existing = connection.execute(
                 """SELECT request_id, operation, request_hash, response_json
                 FROM group_idempotency WHERE request_id = ?""",
@@ -1803,17 +2514,20 @@ class GroupStore:
                 raise GroupConflictError("Agent context generation changed")
             trigger = self._message_row(connection, run["trigger_message_id"])
             safe = self._safe_context_seq(
-                connection, run["room_id"], expected, int(trigger["seq"])
+                connection,
+                run["room_id"],
+                run["topic_id"],
+                expected,
+                int(trigger["seq"]),
             )
             if through < expected or through > safe:
                 raise GroupConflictError("throughSeq exceeds safe projection")
             now = self._now()
-            if current_stored != stored or current_context != through:
+            if current_stored != stored:
                 connection.execute(
                     """UPDATE group_agents
-                    SET stored_session_id = ?, last_context_message_seq = ?,
-                        updated_at = ? WHERE id = ?""",
-                    (stored, through, now, agent["id"]),
+                    SET stored_session_id = ?, updated_at = ? WHERE id = ?""",
+                    (stored, now, agent["id"]),
                 )
                 agent = self._owned_agent(connection, run["room_id"], run["agent_id"])
                 self._append_event(
@@ -1823,9 +2537,18 @@ class GroupStore:
                     self._agent_wire(agent),
                     created_at=now,
                 )
+            if current_context != through:
+                connection.execute(
+                    """UPDATE group_agent_topic_state
+                    SET last_context_message_seq = ?, updated_at = ?
+                    WHERE agent_id = ? AND topic_id = ?""",
+                    (through, now, agent["id"], run["topic_id"]),
+                )
+            result_agent = self._agent_wire(agent)
+            result_agent["lastContextMessageSeq"] = through
             result = {
                 "run": self._run_wire(run),
-                "agent": self._agent_wire(agent),
+                "agent": result_agent,
             }
             connection.execute(
                 """INSERT INTO group_idempotency
@@ -2637,10 +3360,11 @@ class GroupStore:
                 continue
             duplicate = connection.execute(
                 """SELECT 1 FROM group_agent_runs
-                WHERE room_id = ? AND root_message_id = ?
+                WHERE room_id = ? AND topic_id = ? AND root_message_id = ?
                   AND agent_id = ? AND depth = ? LIMIT 1""",
                 (
                     source["room_id"],
+                    source["topic_id"],
                     source["root_message_id"],
                     agent_id,
                     next_depth,
@@ -2660,15 +3384,16 @@ class GroupStore:
             run_id = str(uuid.uuid4())
             connection.execute(
                 """INSERT INTO group_messages
-                (id, room_id, sender_kind, sender_id, sender_name,
+                (id, room_id, topic_id, sender_kind, sender_id, sender_name,
                  root_message_id, reply_to_message_id, client_message_id,
                  content, reasoning, tool_state_json, status, error, visible,
                  created_at, updated_at)
-                VALUES (?, ?, 'agent', ?, ?, ?, ?, NULL,
+                VALUES (?, ?, ?, 'agent', ?, ?, ?, ?, NULL,
                         '', '', '[]', 'queued', '', ?, ?, ?)""",
                 (
                     response_id,
                     source["room_id"],
+                    source["topic_id"],
                     agent_id,
                     agent["display_name"],
                     source["root_message_id"],
@@ -2680,13 +3405,14 @@ class GroupStore:
             )
             connection.execute(
                 """INSERT INTO group_agent_runs
-                (id, room_id, agent_id, trigger_message_id,
+                (id, room_id, topic_id, agent_id, trigger_message_id,
                  response_message_id, root_message_id, depth, reply_mode, status,
                  runtime_session_id, error, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL, '', ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL, '', ?, ?)""",
                 (
                     run_id,
                     source["room_id"],
+                    source["topic_id"],
                     agent_id,
                     source["response_message_id"],
                     response_id,
@@ -2719,12 +3445,13 @@ class GroupStore:
         for warning_text in list(dict.fromkeys(warning_texts))[:MAX_AGENTS_PER_ROOM]:
             duplicate = connection.execute(
                 """SELECT * FROM group_messages
-                WHERE room_id = ? AND sender_kind = 'system'
+                WHERE room_id = ? AND topic_id = ? AND sender_kind = 'system'
                   AND root_message_id = ? AND reply_to_message_id = ?
                   AND content = ? AND status = 'completed'
                 ORDER BY seq ASC LIMIT 1""",
                 (
                     source["room_id"],
+                    source["topic_id"],
                     source["root_message_id"],
                     source["response_message_id"],
                     warning_text,
@@ -2735,15 +3462,16 @@ class GroupStore:
             message_id = str(uuid.uuid4())
             connection.execute(
                 """INSERT INTO group_messages
-                (id, room_id, sender_kind, sender_id, sender_name,
+                (id, room_id, topic_id, sender_kind, sender_id, sender_name,
                  root_message_id, reply_to_message_id, client_message_id,
                  content, reasoning, tool_state_json, status, error,
                  created_at, updated_at)
-                VALUES (?, ?, 'system', 'system', '系统', ?, ?, NULL,
+                VALUES (?, ?, ?, 'system', 'system', '系统', ?, ?, NULL,
                         ?, '', '[]', 'completed', '', ?, ?)""",
                 (
                     message_id,
                     source["room_id"],
+                    source["topic_id"],
                     source["root_message_id"],
                     source["response_message_id"],
                     warning_text,
@@ -3073,11 +3801,12 @@ class GroupStore:
                 now = self._now()
                 connection.execute(
                     """INSERT INTO group_interactions
-                    (id, room_id, agent_id, run_id, kind, payload_json, status, created_at, resolved_at)
-                    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, NULL)""",
+                    (id, room_id, topic_id, agent_id, run_id, kind, payload_json, status, created_at, resolved_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL)""",
                     (
                         interaction_id,
                         run["room_id"],
+                        run["topic_id"],
                         run["agent_id"],
                         canonical_run_id,
                         kind,
@@ -3470,7 +4199,7 @@ class GroupStore:
                 "state": "failed",
                 "reason": failure_reason,
                 "runtimeSessionIds": runtime_ids,
-                "run": changed,
+                "run": self._legacy_interaction_failure_run(changed),
             }
             self._fail_claimed_interaction_ledgers(
                 connection,
@@ -3823,7 +4552,7 @@ class GroupStore:
             "state": "failed",
             "reason": reason,
             "runtimeSessionIds": list(runtime_session_ids),
-            "run": dict(run),
+            "run": self._legacy_interaction_failure_run(run),
         }
         encoded = self._canonical_json(terminal)
         for ledger in (*ledgers, *legacy):
@@ -3886,14 +4615,15 @@ class GroupStore:
     def _safe_context_seq(
         connection: sqlite3.Connection,
         room_id: str,
+        topic_id: str,
         after_seq: int,
         trigger_seq: int,
     ) -> int:
         hole = connection.execute(
             """SELECT MIN(seq) AS seq FROM group_messages
-            WHERE room_id = ? AND seq > ? AND seq <= ?
+            WHERE room_id = ? AND topic_id = ? AND seq > ? AND seq <= ?
               AND status NOT IN ('completed', 'failed', 'interrupted')""",
-            (room_id, after_seq, trigger_seq),
+            (room_id, topic_id, after_seq, trigger_seq),
         ).fetchone()["seq"]
         if hole is None:
             return max(after_seq, trigger_seq)
@@ -3936,6 +4666,7 @@ class GroupStore:
         created_at: float | None = None,
     ) -> int:
         epoch = self._metadata_value_from_connection(connection, "journal_epoch")
+        event_time = self._now() if created_at is None else created_at
         cursor = connection.execute(
             """INSERT INTO group_events(epoch, room_id, event_type, payload_json, created_at)
             VALUES (?, ?, ?, ?, ?) RETURNING cursor""",
@@ -3944,9 +4675,26 @@ class GroupStore:
                 room_id,
                 event_type,
                 self._canonical_json(payload),
-                self._now() if created_at is None else created_at,
+                event_time,
             ),
         ).fetchone()["cursor"]
+        if event_type == "message.upsert":
+            topic_id = payload.get("topicId")
+            if not isinstance(topic_id, str):
+                raise GroupStoreError("Message event topic identity is missing")
+            connection.execute(
+                """UPDATE group_topics
+                SET updated_at = CASE WHEN updated_at < ? THEN ? ELSE updated_at END
+                WHERE id = ? AND room_id = ?""",
+                (event_time, event_time, topic_id, room_id),
+            )
+            topic = self._topic_summary_by_id(connection, room_id, topic_id)
+            connection.execute(
+                """INSERT INTO group_events
+                (epoch, room_id, event_type, payload_json, created_at)
+                VALUES (?, ?, 'topic.updated', ?, ?)""",
+                (epoch, room_id, self._canonical_json(topic), event_time),
+            )
         return int(cursor)
 
     def _append_room_updated_summary(
@@ -4023,6 +4771,12 @@ class GroupStore:
                 WHERE id = ? AND room_id = ?""",
                 (serialized, now, agent["id"], run["room_id"]),
             )
+            connection.execute(
+                """UPDATE group_agent_topic_state
+                SET last_context_message_seq = 0, updated_at = ?
+                WHERE agent_id = ?""",
+                (now, agent["id"]),
+            )
             refreshed = self._owned_agent(connection, run["room_id"], run["agent_id"])
             self._append_event(
                 connection,
@@ -4032,6 +4786,97 @@ class GroupStore:
                 created_at=now,
             )
             return True
+
+    @staticmethod
+    def _compatibility_topic_id(room_id: str) -> str:
+        return str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"hermes://yaoyao-group/{room_id}/compatibility-topic",
+            )
+        )
+
+    @staticmethod
+    def _topic_title(content: str) -> str:
+        normalized = " ".join(content.split()).strip()
+        return (normalized or "话题")[:_TOPIC_TITLE_LENGTH]
+
+    @staticmethod
+    def _topic_row(
+        connection: sqlite3.Connection, room_id: str, topic_id: str
+    ) -> sqlite3.Row:
+        topic = connection.execute(
+            "SELECT * FROM group_topics WHERE id = ? AND room_id = ?",
+            (topic_id, room_id),
+        ).fetchone()
+        if topic is None:
+            raise GroupNotFoundError("Topic not found in room")
+        return topic
+
+    @classmethod
+    def _topic_summary_by_id(
+        cls, connection: sqlite3.Connection, room_id: str, topic_id: str
+    ) -> dict[str, object]:
+        row = connection.execute(
+            """SELECT topic.*,
+            (SELECT COUNT(*) FROM group_messages AS counted
+             WHERE counted.topic_id = topic.id AND counted.visible = 1)
+                AS message_count,
+            COALESCE((SELECT CASE WHEN TRIM(latest.content) != ''
+                                  THEN latest.content ELSE latest.error END
+             FROM group_messages AS latest
+             WHERE latest.topic_id = topic.id AND latest.visible = 1
+               AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
+             ORDER BY latest.seq DESC LIMIT 1), '') AS preview
+            FROM group_topics AS topic
+            WHERE topic.id = ? AND topic.room_id = ?""",
+            (topic_id, room_id),
+        ).fetchone()
+        if row is None:
+            raise GroupNotFoundError("Topic not found in room")
+        return cls._topic_summary(row)
+
+    def _ensure_topic(
+        self,
+        connection: sqlite3.Connection,
+        room_id: str,
+        topic_id: str,
+        title_source: str,
+        now: float,
+    ) -> sqlite3.Row:
+        existing = connection.execute(
+            "SELECT * FROM group_topics WHERE id = ?", (topic_id,)
+        ).fetchone()
+        if existing is not None:
+            if existing["room_id"] != room_id:
+                raise GroupConflictError("Topic does not belong to room")
+            return existing
+        connection.execute(
+            """INSERT INTO group_topics
+            (id, room_id, title, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)""",
+            (topic_id, room_id, self._topic_title(title_source), now, now),
+        )
+        connection.execute(
+            """INSERT INTO group_agent_topic_state
+            (agent_id, topic_id, last_context_message_seq, created_at, updated_at)
+            SELECT id, ?, 0, ?, ? FROM group_agents WHERE room_id = ?""",
+            (topic_id, now, now, room_id),
+        )
+        return self._topic_row(connection, room_id, topic_id)
+
+    @staticmethod
+    def _agent_topic_state(
+        connection: sqlite3.Connection, agent_id: str, topic_id: str
+    ) -> sqlite3.Row:
+        state = connection.execute(
+            """SELECT * FROM group_agent_topic_state
+            WHERE agent_id = ? AND topic_id = ?""",
+            (agent_id, topic_id),
+        ).fetchone()
+        if state is None:
+            raise GroupStoreError("Agent topic context state is missing")
+        return state
 
     def _active_room(self, connection: sqlite3.Connection, room_id: str) -> sqlite3.Row:
         room = connection.execute(
@@ -4112,6 +4957,11 @@ class GroupStore:
     def _validate_run_message_state(
         cls, run: sqlite3.Row, message: sqlite3.Row
     ) -> None:
+        if (
+            run["room_id"] != message["room_id"]
+            or run["topic_id"] != message["topic_id"]
+        ):
+            raise GroupStoreError("Run response message is corrupt")
         cls._validate_run_message_status(run["status"], message["status"])
 
     @staticmethod
@@ -4166,6 +5016,7 @@ class GroupStore:
             "seq": row["seq"],
             "id": row["id"],
             "roomId": row["room_id"],
+            "topicId": row["topic_id"],
             "senderKind": row["sender_kind"],
             "senderId": row["sender_id"],
             "senderName": row["sender_name"],
@@ -4335,6 +5186,7 @@ class GroupStore:
         return {
             "id": row["id"],
             "roomId": row["room_id"],
+            "topicId": row["topic_id"],
             "agentId": row["agent_id"],
             "triggerMessageId": row["trigger_message_id"],
             "responseMessageId": row["response_message_id"],
@@ -4347,6 +5199,15 @@ class GroupStore:
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }
+
+    @staticmethod
+    def _legacy_interaction_failure_run(
+        run: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Keep the pre-v4 strict HTTP replay shape for failed interactions."""
+        result = dict(run)
+        result.pop("topicId", None)
+        return result
 
     @staticmethod
     def _interaction_wire(row: sqlite3.Row) -> dict[str, object]:
@@ -4364,6 +5225,7 @@ class GroupStore:
         return {
             "id": row["id"],
             "roomId": row["room_id"],
+            "topicId": row["topic_id"],
             "agentId": row["agent_id"],
             "runId": row["run_id"],
             "kind": row["kind"],
@@ -4635,6 +5497,12 @@ class GroupStore:
                 now,
             ),
         )
+        connection.execute(
+            """INSERT INTO group_agent_topic_state
+            (agent_id, topic_id, last_context_message_seq, created_at, updated_at)
+            SELECT ?, id, 0, ?, ? FROM group_topics WHERE room_id = ?""",
+            (agent_id, now, now, room_id),
+        )
         return agent_id
 
     @staticmethod
@@ -4691,6 +5559,19 @@ class GroupStore:
             "updatedAt": row["updated_at"],
             "archived": False,
             "agentCount": row["agent_count"],
+        }
+
+    @staticmethod
+    def _topic_summary(row: sqlite3.Row) -> dict[str, object]:
+        preview = str(row["preview"] or "")
+        return {
+            "id": row["id"],
+            "roomId": row["room_id"],
+            "title": row["title"],
+            "preview": preview[:_TOPIC_PREVIEW_LENGTH],
+            "messageCount": int(row["message_count"]),
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
         }
 
     @staticmethod
@@ -4932,3 +5813,54 @@ class GroupStore:
             OverflowError,
         ) as error:
             raise ValueError("cursor is malformed") from error
+
+    @staticmethod
+    def _encode_topic_cursor(
+        room_id: str, updated_at: float, topic_id: str
+    ) -> str:
+        raw = json.dumps(
+            ["topic", room_id, updated_at, topic_id], separators=(",", ":")
+        ).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    @classmethod
+    def _decode_topic_cursor(
+        cls, cursor: str, expected_room_id: str
+    ) -> tuple[float, str]:
+        if (
+            not isinstance(cursor, str)
+            or not cursor
+            or not re.fullmatch(r"[A-Za-z0-9_-]+", cursor)
+        ):
+            raise ValueError("cursor is malformed")
+        try:
+            raw = base64.b64decode(
+                cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True
+            )
+            decoded = json.loads(raw.decode("utf-8"))
+            if (
+                not isinstance(decoded, list)
+                or len(decoded) != 4
+                or decoded[0] != "topic"
+                or isinstance(decoded[2], bool)
+                or not isinstance(decoded[2], (int, float))
+                or not math.isfinite(decoded[2])
+            ):
+                raise ValueError
+            room_id = cls._canonical_uuid(decoded[1], "cursor room id")
+            updated_at = float(decoded[2])
+            topic_id = cls._canonical_uuid(decoded[3], "cursor topic id")
+            if cursor != cls._encode_topic_cursor(room_id, updated_at, topic_id):
+                raise ValueError
+        except (
+            ValueError,
+            TypeError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            binascii.Error,
+            OverflowError,
+        ) as error:
+            raise ValueError("cursor is malformed") from error
+        if room_id != expected_room_id:
+            raise ValueError("cursor does not belong to room")
+        return updated_at, topic_id

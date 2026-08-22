@@ -18,7 +18,7 @@ from pydantic import (
 )
 
 
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 MAX_AGENTS_PER_ROOM = 8
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_TOOL_STATE_BYTES = 256 * 1024
@@ -56,6 +56,7 @@ EVENT_TYPES = frozenset({
     "agent.deleted",
     "agent.status",
     "message.upsert",
+    "topic.updated",
     "interaction.requested",
     "interaction.resolved",
     "run.updated",
@@ -290,6 +291,7 @@ class RequestIDRequest(GroupModel):
 class SendMessageRequest(GroupModel):
     request_id: UUID = Field(alias="requestId")
     client_message_id: UUID = Field(alias="clientMessageId")
+    topic_id: UUID | None = Field(default=None, alias="topicId")
     content: str
     mention_agent_ids: list[UUID] = Field(
         alias="mentionAgentIds", max_length=MAX_AGENTS_PER_ROOM

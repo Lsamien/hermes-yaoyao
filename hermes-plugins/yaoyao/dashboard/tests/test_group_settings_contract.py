@@ -204,8 +204,8 @@ class GroupSettingsContractTests(unittest.TestCase):
                     store.get_room(room["id"])["agents"],
                 )
 
-    def test_protocol_v3_advertises_reply_round_contract(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 3)
+    def test_protocol_v4_advertises_reply_round_contract(self) -> None:
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 4)
         self.assertEqual(
             PROTOCOL.limits_payload()["defaultMaxReplyRounds"], 3
         )
@@ -578,7 +578,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             self._create_v1_database(path)
             store = GroupStore(path)
             store.initialize()
-            self.assertEqual(store.schema_version(), 3)
+            self.assertEqual(store.schema_version(), 4)
             self.assertEqual(store.journal_epoch(), "11111111-1111-4111-8111-111111111111")
             with store.connection() as connection:
                 room = connection.execute("SELECT * FROM group_rooms").fetchone()
@@ -1476,24 +1476,35 @@ class GroupSettingsContractTests(unittest.TestCase):
         message_id, run_id = str(uuid.uuid4()), str(uuid.uuid4())
         with store.write_transaction() as connection:
             now = 10.0
+            store._ensure_topic(connection, room_id, message_id, content, now)
             connection.execute(
                 """INSERT INTO group_messages
-                (id, room_id, sender_kind, sender_id, sender_name, root_message_id,
+                (id, room_id, topic_id, sender_kind, sender_id, sender_name, root_message_id,
                  reply_to_message_id, client_message_id, content, reasoning,
                  tool_state_json, status, error, visible, created_at, updated_at)
-                VALUES (?, ?, 'agent', ?, 'source', ?, NULL, NULL, ?, '', '[]',
+                VALUES (?, ?, ?, 'agent', ?, 'source', ?, NULL, NULL, ?, '', '[]',
                         'completed', '', 1, ?, ?)""",
-                (message_id, room_id, agent_id, message_id, content, now, now),
+                (
+                    message_id,
+                    room_id,
+                    message_id,
+                    agent_id,
+                    message_id,
+                    content,
+                    now,
+                    now,
+                ),
             )
             connection.execute(
                 """INSERT INTO group_agent_runs
-                (id, room_id, agent_id, trigger_message_id, response_message_id,
+                (id, room_id, topic_id, agent_id, trigger_message_id, response_message_id,
                  root_message_id, depth, reply_mode, status, runtime_session_id,
                  error, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'mentioned', 'completed', NULL, '', ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'mentioned', 'completed', NULL, '', ?, ?)""",
                 (
                     run_id,
                     room_id,
+                    message_id,
                     agent_id,
                     message_id,
                     message_id,
