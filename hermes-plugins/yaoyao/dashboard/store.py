@@ -22,6 +22,7 @@ import copy
 import hashlib
 import json
 import logging
+import math
 import mimetypes
 import os
 import sqlite3
@@ -96,6 +97,24 @@ CREATE TABLE IF NOT EXISTS scanner_metadata (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL
 );
+
+-- Last authoritative context-window snapshot for an ordinary Hermes chat.
+-- The database itself is already profile-scoped, so session_id is sufficient
+-- as the primary key and no profile value can leak across stores.
+CREATE TABLE IF NOT EXISTS session_context_snapshots (
+    session_id       TEXT PRIMARY KEY,
+    context_used     INTEGER NOT NULL,
+    context_limit    INTEGER,
+    context_percent  REAL,
+    compressions     INTEGER,
+    model            TEXT,
+    provider         TEXT,
+    observed_at      REAL NOT NULL,
+    updated_at       REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_context_updated
+    ON session_context_snapshots(updated_at DESC);
 """
 
 # Additive migrations run once per data_root at init time. Each is idempotent:
@@ -381,6 +400,162 @@ class Store:
             )
             conn.commit()
         return True
+
+    # -- ordinary-session context snapshots -------------------------------
+
+    def upsert_session_context(
+        self,
+        session_id: str,
+        *,
+        context_used: int,
+        context_limit: Optional[int],
+        context_percent: Optional[float],
+        compressions: Optional[int],
+        model: Optional[str],
+        provider: Optional[str],
+        observed_at: float,
+    ) -> dict[str, Any]:
+        """Persist the newest confirmed context-window reading for a session.
+
+        ``observed_at`` makes writes monotonic across reconnects and devices:
+        a delayed request can never replace a newer model turn.
+        """
+        canonical_id = self._session_context_id(session_id)
+        if isinstance(context_used, bool) or not isinstance(context_used, int):
+            raise ValueError("contextUsed must be an integer")
+        if context_used <= 0:
+            raise ValueError("contextUsed must be positive")
+        if context_limit is not None and (
+            isinstance(context_limit, bool)
+            or not isinstance(context_limit, int)
+            or context_limit <= 0
+        ):
+            raise ValueError("contextLimit must be positive or null")
+        if context_percent is not None and (
+            isinstance(context_percent, bool)
+            or not isinstance(context_percent, (int, float))
+            or not math.isfinite(float(context_percent))
+            or not 0 <= float(context_percent) <= 100
+        ):
+            raise ValueError("contextPercent must be between 0 and 100")
+        if compressions is not None and (
+            isinstance(compressions, bool)
+            or not isinstance(compressions, int)
+            or compressions < 0
+        ):
+            raise ValueError("compressions must be non-negative or null")
+        if (
+            isinstance(observed_at, bool)
+            or not isinstance(observed_at, (int, float))
+            or not math.isfinite(float(observed_at))
+            or observed_at <= 0
+        ):
+            raise ValueError("observedAt must be a positive timestamp")
+        normalized_model = self._optional_context_label(model, "model")
+        normalized_provider = self._optional_context_label(provider, "provider")
+        percentage = (
+            float(context_percent)
+            if context_percent is not None
+            else (
+                min(100.0, max(0.0, context_used / context_limit * 100.0))
+                if context_limit is not None
+                else None
+            )
+        )
+        now = time.time()
+        conn = self.init()
+        with self._lock:
+            conn.execute(
+                """INSERT INTO session_context_snapshots
+                (session_id, context_used, context_limit, context_percent,
+                 compressions, model, provider, observed_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    context_used = excluded.context_used,
+                    context_limit = excluded.context_limit,
+                    context_percent = excluded.context_percent,
+                    compressions = excluded.compressions,
+                    model = excluded.model,
+                    provider = excluded.provider,
+                    observed_at = excluded.observed_at,
+                    updated_at = excluded.updated_at
+                WHERE excluded.observed_at >= session_context_snapshots.observed_at""",
+                (
+                    canonical_id,
+                    context_used,
+                    context_limit,
+                    percentage,
+                    compressions,
+                    normalized_model,
+                    normalized_provider,
+                    float(observed_at),
+                    now,
+                ),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM session_context_snapshots WHERE session_id = ?",
+                (canonical_id,),
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("session context snapshot was not persisted")
+        return self._session_context_payload(row)
+
+    def get_session_context(self, session_id: str) -> Optional[dict[str, Any]]:
+        canonical_id = self._session_context_id(session_id)
+        conn = self.init()
+        with self._lock:
+            row = conn.execute(
+                "SELECT * FROM session_context_snapshots WHERE session_id = ?",
+                (canonical_id,),
+            ).fetchone()
+        return None if row is None else self._session_context_payload(row)
+
+    @staticmethod
+    def _session_context_id(value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("sessionId must be a string")
+        normalized = value.strip()
+        if not normalized or len(normalized.encode("utf-8")) > 4096:
+            raise ValueError("sessionId must be between 1 and 4096 bytes")
+        if any(ord(character) < 32 for character in normalized):
+            raise ValueError("sessionId contains control characters")
+        return normalized
+
+    @staticmethod
+    def _optional_context_label(value: Optional[str], field: str) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(f"{field} must be a string or null")
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if len(normalized.encode("utf-8")) > 4096:
+            raise ValueError(f"{field} exceeds 4096 bytes")
+        return normalized
+
+    @staticmethod
+    def _session_context_payload(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "sessionId": row["session_id"],
+            "usedTokens": int(row["context_used"]),
+            "limitTokens": (
+                None if row["context_limit"] is None else int(row["context_limit"])
+            ),
+            "percent": (
+                None
+                if row["context_percent"] is None
+                else float(row["context_percent"])
+            ),
+            "compressions": (
+                None if row["compressions"] is None else int(row["compressions"])
+            ),
+            "model": row["model"],
+            "provider": row["provider"],
+            "observedAt": float(row["observed_at"]),
+            "updatedAt": float(row["updated_at"]),
+        }
 
     # -- queries -----------------------------------------------------------
 

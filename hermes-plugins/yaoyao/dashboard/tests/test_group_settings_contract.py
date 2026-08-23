@@ -36,6 +36,138 @@ def request_id() -> str:
 
 
 class GroupSettingsContractTests(unittest.TestCase):
+    def test_terminal_session_info_captures_effective_model_for_settlement(self) -> None:
+        async def exercise() -> tuple[object, dict[str, object]]:
+            orchestrator = ORCHESTRATOR.GroupOrchestrator(object())
+            state = ORCHESTRATOR._RuntimeState(
+                run_id=request_id(),
+                room_id=request_id(),
+                agent_id=request_id(),
+                runtime_id="runtime-effective-model",
+                generation=1,
+                expected_stored_id=None,
+                session_stored_id="stored-before",
+                expected_context_seq=0,
+                through_seq=0,
+                profile="default",
+                complete_seen=True,
+                complete_index=1,
+                event_index=2,
+                terminal_status="completed",
+            )
+            captured: dict[str, object] = {}
+
+            async def capture(_state: object, **kwargs: object) -> None:
+                captured.update(kwargs)
+
+            orchestrator._finalize_state_locked = capture  # type: ignore[method-assign]
+            await orchestrator._apply_runtime_event(
+                state,
+                ORCHESTRATOR._GatewayEvent(
+                    runtime_id=state.runtime_id,
+                    generation=state.generation,
+                    event_type="session.info",
+                    payload={
+                        "running": False,
+                        "stored_session_id": "stored-after",
+                        "profile_name": "default",
+                        "model": "claude-sonnet-4-6",
+                        "provider": "anthropic",
+                        "reasoning_effort": "xhigh",
+                        "fast": True,
+                    },
+                ),
+            )
+            return state, captured
+
+        state, captured = asyncio.run(exercise())
+        self.assertEqual(state.actual_model, "claude-sonnet-4-6")
+        self.assertEqual(state.actual_provider, "anthropic")
+        self.assertEqual(state.actual_reasoning_effort, "xhigh")
+        self.assertTrue(state.actual_fast_mode)
+        self.assertEqual(captured["outcome"], "completed")
+        self.assertEqual(captured["stored_session_id"], "stored-after")
+
+    def test_run_records_configured_and_effective_model_on_topic_message(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room(
+                {
+                    "requestId": request_id(),
+                    "name": "模型记录群",
+                    "cwd": "",
+                    "agents": [
+                        {
+                            "profile": "default",
+                            "model": "gpt-5.6",
+                            "provider": "openai-codex",
+                            "reasoningEffort": "high",
+                            "fastMode": False,
+                        }
+                    ],
+                }
+            )
+            created = store.create_human_message(
+                room["id"],
+                request_id=request_id(),
+                client_message_id=request_id(),
+                content="请回答",
+                mention_agent_ids=[room["agents"][0]["id"]],
+            )
+            run = created["runs"][0]
+            self.assertEqual(run["requestedModel"], "gpt-5.6")
+            self.assertEqual(run["requestedProvider"], "openai-codex")
+            self.assertEqual(run["requestedReasoningEffort"], "high")
+            self.assertFalse(run["requestedFastMode"])
+            self.assertIsNone(run["actualModel"])
+
+            claimed = store.claim_next_runnable_run()
+            self.assertEqual(claimed["id"], run["id"])
+            store.bind_run_runtime(run["id"], "runtime-model-attribution")
+            store.upsert_agent_message(
+                run["id"],
+                content="已使用备用模型完成",
+                reasoning="",
+                tool_state=[],
+                status="completed",
+            )
+            settled = store.settle_run(
+                run["id"],
+                runtime_session_id="runtime-model-attribution",
+                expected_stored_session_id=None,
+                stored_session_id="stored-model-attribution",
+                outcome="completed",
+                actual_model="claude-sonnet-4-6",
+                actual_provider="anthropic",
+                actual_reasoning_effort="xhigh",
+                actual_fast_mode=True,
+            )
+            self.assertEqual(
+                settled["run"]["actualModel"], "claude-sonnet-4-6"
+            )
+            self.assertEqual(settled["run"]["actualProvider"], "anthropic")
+            self.assertEqual(settled["run"]["actualReasoningEffort"], "xhigh")
+            self.assertTrue(settled["run"]["actualFastMode"])
+
+            messages = store.list_messages(
+                room["id"], topic_id=created["message"]["topicId"], limit=100
+            )
+            response = next(item for item in messages if item["senderKind"] == "agent")
+            self.assertEqual(
+                response["execution"],
+                {
+                    "requestedModel": "gpt-5.6",
+                    "requestedProvider": "openai-codex",
+                    "requestedReasoningEffort": "high",
+                    "requestedFastMode": False,
+                    "actualModel": "claude-sonnet-4-6",
+                    "actualProvider": "anthropic",
+                    "actualReasoningEffort": "xhigh",
+                    "actualFastMode": True,
+                },
+            )
+
     def test_gateway_session_create_receives_agent_configuration(self) -> None:
         captured: dict[str, object] = {}
         adapter = GATEWAY.GroupGatewayAdapter(dispatcher=lambda *_: None)
@@ -205,7 +337,7 @@ class GroupSettingsContractTests(unittest.TestCase):
                 )
 
     def test_protocol_v5_advertises_reply_round_contract(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 5)
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 7)
         self.assertEqual(
             PROTOCOL.limits_payload()["defaultMaxReplyRounds"], 3
         )
@@ -579,7 +711,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             self._create_v1_database(path)
             store = GroupStore(path)
             store.initialize()
-            self.assertEqual(store.schema_version(), 5)
+            self.assertEqual(store.schema_version(), 7)
             self.assertEqual(store.journal_epoch(), "11111111-1111-4111-8111-111111111111")
             with store.connection() as connection:
                 room = connection.execute("SELECT * FROM group_rooms").fetchone()

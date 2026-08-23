@@ -132,6 +132,18 @@ class UploadBody(BaseModel):
     display_name: Optional[str] = None
 
 
+class SessionContextSnapshotBody(BaseModel):
+    used_tokens: int = Field(alias="usedTokens", gt=0)
+    limit_tokens: Optional[int] = Field(default=None, alias="limitTokens", gt=0)
+    percent: Optional[float] = Field(default=None, ge=0, le=100)
+    compressions: Optional[int] = Field(default=None, ge=0)
+    model: Optional[str] = Field(default=None, max_length=4096)
+    provider: Optional[str] = Field(default=None, max_length=4096)
+    observed_at: float = Field(alias="observedAt", gt=0)
+
+    model_config = {"populate_by_name": True}
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -271,6 +283,36 @@ def get_stats(
 ):
     """Archive summary: counts and total bytes for one profile."""
     return _store_for(profile).stats()
+
+
+@router.get("/session-context/{session_id}")
+def get_session_context(
+    session_id: str,
+    profile: Optional[str] = Query(default=None),
+):
+    """Return the last confirmed context-window reading for one chat."""
+    snapshot = _store_for(profile).get_session_context(session_id)
+    return {"snapshot": snapshot}
+
+
+@router.put("/session-context/{session_id}")
+def put_session_context(
+    session_id: str,
+    body: SessionContextSnapshotBody,
+    profile: Optional[str] = Query(default=None),
+):
+    """Persist a monotonic, profile-scoped context-window reading."""
+    snapshot = _store_for(profile).upsert_session_context(
+        session_id,
+        context_used=body.used_tokens,
+        context_limit=body.limit_tokens,
+        context_percent=body.percent,
+        compressions=body.compressions,
+        model=body.model,
+        provider=body.provider,
+        observed_at=body.observed_at,
+    )
+    return {"snapshot": snapshot}
 
 
 @router.get("/{item_id}")

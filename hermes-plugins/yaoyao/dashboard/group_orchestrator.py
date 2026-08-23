@@ -265,6 +265,10 @@ class _RuntimeState:
     event_index: int = 0
     terminal_status: str | None = None
     terminal_error: str = ""
+    actual_model: str | None = None
+    actual_provider: str | None = None
+    actual_reasoning_effort: str | None = None
+    actual_fast_mode: bool | None = None
     settle_error: BaseException | None = None
     prompt_committed: bool = False
     overflowed: bool = False
@@ -2727,6 +2731,22 @@ class GroupOrchestrator:
                     interrupt=True,
                 )
                 return
+            actual_model = payload.get("model")
+            actual_provider = payload.get("provider")
+            if (
+                isinstance(actual_model, str)
+                and actual_model.strip()
+                and isinstance(actual_provider, str)
+                and actual_provider.strip()
+            ):
+                state.actual_model = actual_model.strip()
+                state.actual_provider = actual_provider.strip()
+            actual_reasoning = payload.get("reasoning_effort")
+            if isinstance(actual_reasoning, str) and actual_reasoning.strip():
+                state.actual_reasoning_effort = actual_reasoning.strip()
+            actual_fast = payload.get("fast")
+            if isinstance(actual_fast, bool):
+                state.actual_fast_mode = actual_fast
             state.terminal_info_received.set()
             await self._finalize_state_locked(
                 state,
@@ -3441,6 +3461,10 @@ class GroupOrchestrator:
                         expected_stored_session_id=expected_stored,
                         stored_session_id=rotated_stored,
                         outcome=outcome,
+                        actual_model=state.actual_model,
+                        actual_provider=state.actual_provider,
+                        actual_reasoning_effort=state.actual_reasoning_effort,
+                        actual_fast_mode=state.actual_fast_mode,
                         error=self._bounded_error(error),
                     )
                     settled = True

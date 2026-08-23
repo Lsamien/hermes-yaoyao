@@ -41,7 +41,7 @@ from .group_protocol import (
 )
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 7
 _WAL_RETRY_DELAYS = (0.01, 0.02, 0.04, 0.08)
 EVENT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MIN_RETAINED_EVENTS = 100_000
@@ -189,6 +189,14 @@ _SCHEMA_STATEMENTS = (
         required_reply INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL,
         runtime_session_id TEXT,
+        requested_model TEXT,
+        requested_provider TEXT,
+        requested_reasoning_effort TEXT,
+        requested_fast_mode INTEGER,
+        actual_model TEXT,
+        actual_provider TEXT,
+        actual_reasoning_effort TEXT,
+        actual_fast_mode INTEGER,
         error TEXT NOT NULL DEFAULT '',
         created_at REAL NOT NULL,
         updated_at REAL NOT NULL,
@@ -461,14 +469,20 @@ class GroupStore:
         if raw_version == "4":
             self._repair_early_v4(connection)
             self._migrate_v4_to_v5(connection)
+            raw_version = "5"
+        if raw_version == "5":
+            self._migrate_v5_to_v6(connection)
+            raw_version = "6"
+        if raw_version == "6":
+            self._migrate_v6_to_v7(connection)
         self._validated_schema_version(
             self._metadata_value_from_connection(connection, "schema_version")
         )
         self._validated_epoch(
             self._metadata_value_from_connection(connection, "journal_epoch")
         )
-        self._validate_v5_columns(connection)
-        self._validate_v5_values(connection)
+        self._validate_v7_columns(connection)
+        self._validate_v7_values(connection)
 
     @staticmethod
     def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
@@ -1082,7 +1096,39 @@ class GroupStore:
         )
 
     @staticmethod
-    def _validate_v5_columns(connection: sqlite3.Connection) -> None:
+    def _migrate_v5_to_v6(connection: sqlite3.Connection) -> None:
+        """Add immutable configured and terminal effective model attribution."""
+        for column in (
+            "requested_model",
+            "requested_provider",
+            "actual_model",
+            "actual_provider",
+        ):
+            connection.execute(
+                f"ALTER TABLE group_agent_runs ADD COLUMN {column} TEXT"
+            )
+        connection.execute(
+            "UPDATE group_meta SET value = '6' WHERE key = 'schema_version'"
+        )
+
+    @staticmethod
+    def _migrate_v6_to_v7(connection: sqlite3.Connection) -> None:
+        """Add requested and effective reasoning/fast execution attribution."""
+        for definition in (
+            "requested_reasoning_effort TEXT",
+            "requested_fast_mode INTEGER",
+            "actual_reasoning_effort TEXT",
+            "actual_fast_mode INTEGER",
+        ):
+            connection.execute(
+                f"ALTER TABLE group_agent_runs ADD COLUMN {definition}"
+            )
+        connection.execute(
+            "UPDATE group_meta SET value = '7' WHERE key = 'schema_version'"
+        )
+
+    @staticmethod
+    def _validate_v7_columns(connection: sqlite3.Connection) -> None:
         expected_columns = {
             "group_meta": {"key", "value"},
             "group_rooms": {"id", "name", "cwd", "max_reply_rounds", "created_at", "updated_at", "archived"},
@@ -1090,7 +1136,7 @@ class GroupStore:
             "group_agents": {"id", "room_id", "profile", "display_name", "display_name_key", "description", "stored_session_id", "last_context_message_seq", "enabled", "reply_without_mention", "is_host", "model_override", "provider_override", "reasoning_effort_override", "fast_mode_override", "session_config_json", "created_at", "updated_at"},
             "group_agent_topic_state": {"agent_id", "topic_id", "last_context_message_seq", "created_at", "updated_at"},
             "group_messages": {"seq", "id", "room_id", "topic_id", "sender_kind", "sender_id", "sender_name", "root_message_id", "reply_to_message_id", "client_message_id", "content", "reasoning", "tool_state_json", "status", "error", "visible", "created_at", "updated_at"},
-            "group_agent_runs": {"id", "room_id", "topic_id", "agent_id", "trigger_message_id", "response_message_id", "root_message_id", "depth", "reply_mode", "required_reply", "status", "runtime_session_id", "error", "created_at", "updated_at"},
+            "group_agent_runs": {"id", "room_id", "topic_id", "agent_id", "trigger_message_id", "response_message_id", "root_message_id", "depth", "reply_mode", "required_reply", "status", "runtime_session_id", "requested_model", "requested_provider", "requested_reasoning_effort", "requested_fast_mode", "actual_model", "actual_provider", "actual_reasoning_effort", "actual_fast_mode", "error", "created_at", "updated_at"},
             "group_interactions": {"id", "room_id", "topic_id", "agent_id", "run_id", "kind", "payload_json", "status", "created_at", "resolved_at"},
             "group_events": {"cursor", "epoch", "room_id", "event_type", "payload_json", "created_at"},
             "group_idempotency": {"request_id", "operation", "request_hash", "response_json", "created_at"},
@@ -1124,7 +1170,7 @@ class GroupStore:
                 raise GroupStoreError("GroupStore schema is partial or corrupt")
 
     @staticmethod
-    def _validate_v5_values(connection: sqlite3.Connection) -> None:
+    def _validate_v7_values(connection: sqlite3.Connection) -> None:
         invalid_value_queries = (
             f"""SELECT 1 FROM group_rooms
                 WHERE typeof(max_reply_rounds) != 'integer'
@@ -1174,6 +1220,28 @@ class GroupStore:
                 WHERE typeof(required_reply) != 'integer'
                    OR required_reply NOT IN (0, 1)
                    OR (required_reply = 1 AND reply_mode != 'automatic')
+                LIMIT 1""",
+            """SELECT 1 FROM group_agent_runs
+                WHERE (requested_model IS NULL) != (requested_provider IS NULL)
+                   OR (actual_model IS NULL) != (actual_provider IS NULL)
+                   OR length(COALESCE(requested_model, '')) > 4096
+                   OR length(COALESCE(requested_provider, '')) > 4096
+                   OR length(COALESCE(actual_model, '')) > 4096
+                   OR length(COALESCE(actual_provider, '')) > 4096
+                LIMIT 1""",
+            """SELECT 1 FROM group_agent_runs
+                WHERE (requested_reasoning_effort IS NOT NULL
+                       AND requested_reasoning_effort NOT IN
+                         ('none','minimal','low','medium','high','xhigh','max','ultra'))
+                   OR (actual_reasoning_effort IS NOT NULL
+                       AND actual_reasoning_effort NOT IN
+                         ('none','minimal','low','medium','high','xhigh','max','ultra'))
+                   OR (requested_fast_mode IS NOT NULL
+                       AND (typeof(requested_fast_mode) != 'integer'
+                            OR requested_fast_mode NOT IN (0, 1)))
+                   OR (actual_fast_mode IS NOT NULL
+                       AND (typeof(actual_fast_mode) != 'integer'
+                            OR actual_fast_mode NOT IN (0, 1)))
                 LIMIT 1""",
             """SELECT 1 FROM group_agent_runs AS run
                 JOIN group_messages AS response
@@ -2305,8 +2373,12 @@ class GroupStore:
                     """INSERT INTO group_agent_runs
                     (id, room_id, topic_id, agent_id, trigger_message_id, response_message_id, root_message_id,
                      depth, reply_mode, required_reply, status, runtime_session_id,
-                     error, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'queued', NULL, '', ?, ?)""",
+                     requested_model, requested_provider,
+                     requested_reasoning_effort, requested_fast_mode,
+                     actual_model, actual_provider, actual_reasoning_effort,
+                     actual_fast_mode, error, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'queued', NULL,
+                            ?, ?, ?, ?, NULL, NULL, NULL, NULL, '', ?, ?)""",
                     (
                         run_id,
                         canonical_room_id,
@@ -2317,6 +2389,10 @@ class GroupStore:
                         human_id,
                         reply_mode,
                         int(required_reply),
+                        agent["model_override"],
+                        agent["provider_override"],
+                        agent["reasoning_effort_override"],
+                        agent["fast_mode_override"],
                         now,
                         now,
                     ),
@@ -2350,7 +2426,7 @@ class GroupStore:
         canonical_message_id = self._canonical_uuid(message_id, "messageId")
         with self.read_transaction() as connection:
             return self._message_wire(
-                self._message_row(connection, canonical_message_id)
+                self._message_with_execution_row(connection, canonical_message_id)
             )
 
     def get_run(self, run_id: str) -> dict[str, object]:
@@ -2397,25 +2473,37 @@ class GroupStore:
             self._room_detail(connection, canonical_room_id, include_archived=True)
             if canonical_topic_id is not None:
                 self._topic_row(connection, canonical_room_id, canonical_topic_id)
-            scope = "room_id = ?"
+            scope = "message.room_id = ?"
             scope_params: tuple[object, ...] = (canonical_room_id,)
             if canonical_topic_id is not None:
-                scope += " AND topic_id = ?"
+                scope += " AND message.topic_id = ?"
                 scope_params = (canonical_room_id, canonical_topic_id)
+            select = """SELECT message.*,
+                run.requested_model AS execution_requested_model,
+                run.requested_provider AS execution_requested_provider,
+                run.requested_reasoning_effort AS execution_requested_reasoning_effort,
+                run.requested_fast_mode AS execution_requested_fast_mode,
+                run.actual_model AS execution_actual_model,
+                run.actual_provider AS execution_actual_provider,
+                run.actual_reasoning_effort AS execution_actual_reasoning_effort,
+                run.actual_fast_mode AS execution_actual_fast_mode
+                FROM group_messages AS message
+                LEFT JOIN group_agent_runs AS run
+                  ON run.response_message_id = message.id"""
             if before is not None:
                 rows = connection.execute(
-                    f"SELECT * FROM group_messages WHERE {scope} AND visible = 1 AND seq < ? ORDER BY seq DESC LIMIT ?",
+                    f"{select} WHERE {scope} AND message.visible = 1 AND message.seq < ? ORDER BY message.seq DESC LIMIT ?",
                     (*scope_params, before, limit),
                 ).fetchall()
                 rows = list(reversed(rows))
             elif after is not None:
                 rows = connection.execute(
-                    f"SELECT * FROM group_messages WHERE {scope} AND visible = 1 AND seq > ? ORDER BY seq ASC LIMIT ?",
+                    f"{select} WHERE {scope} AND message.visible = 1 AND message.seq > ? ORDER BY message.seq ASC LIMIT ?",
                     (*scope_params, after, limit),
                 ).fetchall()
             else:
                 rows = connection.execute(
-                    f"SELECT * FROM group_messages WHERE {scope} AND visible = 1 ORDER BY seq DESC LIMIT ?",
+                    f"{select} WHERE {scope} AND message.visible = 1 ORDER BY message.seq DESC LIMIT ?",
                     (*scope_params, limit),
                 ).fetchall()
                 rows = list(reversed(rows))
@@ -2832,6 +2920,10 @@ class GroupStore:
         expected_stored_session_id: str | None,
         stored_session_id: str | None,
         outcome: str,
+        actual_model: str | None = None,
+        actual_provider: str | None = None,
+        actual_reasoning_effort: str | None = None,
+        actual_fast_mode: bool | None = None,
         error: str = "",
     ) -> dict[str, object]:
         """Settle message, run, session rotation, and status in one transaction."""
@@ -2839,6 +2931,17 @@ class GroupStore:
         runtime = self._runtime_session_id(runtime_session_id)
         expected_stored = self._runtime_session_id(expected_stored_session_id)
         stored = self._runtime_session_id(stored_session_id)
+        effective_model = self._agent_configuration_value(actual_model, "model")
+        effective_provider = self._agent_configuration_value(
+            actual_provider, "provider"
+        )
+        if (effective_model is None) != (effective_provider is None):
+            raise ValueError("actual model and provider must both be set or both be null")
+        effective_reasoning = self._agent_configuration_value(
+            actual_reasoning_effort, "reasoningEffort"
+        )
+        if actual_fast_mode is not None and not isinstance(actual_fast_mode, bool):
+            raise ValueError("actual fast mode must be a boolean or null")
         run_error = self._message_text(error, "error", max_bytes=4096)
         if outcome not in {"completed", "failed", "interrupted"}:
             raise ValueError("outcome is invalid")
@@ -2873,6 +2976,20 @@ class GroupStore:
                     self._agent_wire(agent),
                     created_at=now,
                 )
+            connection.execute(
+                """UPDATE group_agent_runs
+                SET actual_model = ?, actual_provider = ?,
+                    actual_reasoning_effort = ?, actual_fast_mode = ?
+                WHERE id = ?""",
+                (
+                    effective_model,
+                    effective_provider,
+                    effective_reasoning,
+                    None if actual_fast_mode is None else int(actual_fast_mode),
+                    run["id"],
+                ),
+            )
+            run = self._run_row(connection, run["id"])
             self._cancel_pending_interactions(connection, run, now)
             changed = self._update_run(connection, run, outcome, now, None, run_error)
             self._fail_claimed_interaction_ledgers(
@@ -2904,9 +3021,27 @@ class GroupStore:
                         connection,
                         run["room_id"],
                         "message.upsert",
-                        self._message_wire(response),
+                        self._message_wire(
+                            self._message_with_execution_row(
+                                connection, response["id"]
+                            )
+                        ),
                         created_at=now,
                     )
+            elif (
+                effective_model is not None
+                or effective_reasoning is not None
+                or actual_fast_mode is not None
+            ) and response["visible"]:
+                self._append_event(
+                    connection,
+                    run["room_id"],
+                    "message.upsert",
+                    self._message_wire(
+                        self._message_with_execution_row(connection, response["id"])
+                    ),
+                    created_at=now,
+                )
             if outcome == "completed":
                 self._record_cascade_plan(
                     connection,
@@ -2917,7 +3052,9 @@ class GroupStore:
             self._append_agent_status(connection, run["room_id"], run["agent_id"], now)
             return {
                 "run": changed,
-                "message": self._message_wire(response),
+                "message": self._message_wire(
+                    self._message_with_execution_row(connection, response["id"])
+                ),
                 "agent": self._agent_wire(agent),
             }
 
@@ -3668,9 +3805,13 @@ class GroupStore:
                 """INSERT INTO group_agent_runs
                 (id, room_id, topic_id, agent_id, trigger_message_id,
                  response_message_id, root_message_id, depth, reply_mode,
-                 required_reply, status, runtime_session_id, error, created_at,
+                 required_reply, status, runtime_session_id, requested_model,
+                 requested_provider, requested_reasoning_effort,
+                 requested_fast_mode, actual_model, actual_provider,
+                 actual_reasoning_effort, actual_fast_mode, error, created_at,
                  updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'queued', NULL, '', ?, ?)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'queued', NULL,
+                        ?, ?, ?, ?, NULL, NULL, NULL, NULL, '', ?, ?)""",
                 (
                     run_id,
                     source["room_id"],
@@ -3681,6 +3822,10 @@ class GroupStore:
                     source["root_message_id"],
                     next_depth,
                     reply_mode,
+                    agent["model_override"],
+                    agent["provider_override"],
+                    agent["reasoning_effort_override"],
+                    agent["fast_mode_override"],
                     now,
                     now,
                 ),
@@ -5253,6 +5398,30 @@ class GroupStore:
         return row
 
     @staticmethod
+    def _message_with_execution_row(
+        connection: sqlite3.Connection, message_id: str
+    ) -> sqlite3.Row:
+        row = connection.execute(
+            """SELECT message.*,
+                run.requested_model AS execution_requested_model,
+                run.requested_provider AS execution_requested_provider,
+                run.requested_reasoning_effort AS execution_requested_reasoning_effort,
+                run.requested_fast_mode AS execution_requested_fast_mode,
+                run.actual_model AS execution_actual_model,
+                run.actual_provider AS execution_actual_provider,
+                run.actual_reasoning_effort AS execution_actual_reasoning_effort,
+                run.actual_fast_mode AS execution_actual_fast_mode
+            FROM group_messages AS message
+            LEFT JOIN group_agent_runs AS run
+              ON run.response_message_id = message.id
+            WHERE message.id = ?""",
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            raise GroupNotFoundError("Message not found")
+        return row
+
+    @staticmethod
     def _run_row(connection: sqlite3.Connection, run_id: str) -> sqlite3.Row:
         row = connection.execute(
             "SELECT * FROM group_agent_runs WHERE id = ?", (run_id,)
@@ -5331,7 +5500,7 @@ class GroupStore:
             isinstance(item, dict) for item in tool_state
         ):
             raise GroupStoreError("Stored message tool state is corrupt")
-        return {
+        result = {
             "seq": row["seq"],
             "id": row["id"],
             "roomId": row["room_id"],
@@ -5351,6 +5520,31 @@ class GroupStore:
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }
+        keys = set(row.keys())
+        if "execution_actual_model" in keys:
+            values = {
+                "requestedModel": row["execution_requested_model"],
+                "requestedProvider": row["execution_requested_provider"],
+                "requestedReasoningEffort": row[
+                    "execution_requested_reasoning_effort"
+                ],
+                "requestedFastMode": (
+                    None
+                    if row["execution_requested_fast_mode"] is None
+                    else bool(row["execution_requested_fast_mode"])
+                ),
+                "actualModel": row["execution_actual_model"],
+                "actualProvider": row["execution_actual_provider"],
+                "actualReasoningEffort": row["execution_actual_reasoning_effort"],
+                "actualFastMode": (
+                    None
+                    if row["execution_actual_fast_mode"] is None
+                    else bool(row["execution_actual_fast_mode"])
+                ),
+            }
+            if any(value is not None for value in values.values()):
+                result["execution"] = values
+        return result
 
     @classmethod
     def _projection_message(cls, row: sqlite3.Row) -> dict[str, object]:
@@ -5514,6 +5708,22 @@ class GroupStore:
             "replyMode": row["reply_mode"],
             "status": row["status"],
             "runtimeSessionId": row["runtime_session_id"],
+            "requestedModel": row["requested_model"],
+            "requestedProvider": row["requested_provider"],
+            "requestedReasoningEffort": row["requested_reasoning_effort"],
+            "requestedFastMode": (
+                None
+                if row["requested_fast_mode"] is None
+                else bool(row["requested_fast_mode"])
+            ),
+            "actualModel": row["actual_model"],
+            "actualProvider": row["actual_provider"],
+            "actualReasoningEffort": row["actual_reasoning_effort"],
+            "actualFastMode": (
+                None
+                if row["actual_fast_mode"] is None
+                else bool(row["actual_fast_mode"])
+            ),
             "error": row["error"],
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
@@ -5526,6 +5736,17 @@ class GroupStore:
         """Keep the pre-v4 strict HTTP replay shape for failed interactions."""
         result = dict(run)
         result.pop("topicId", None)
+        for field in (
+            "requestedModel",
+            "requestedProvider",
+            "requestedReasoningEffort",
+            "requestedFastMode",
+            "actualModel",
+            "actualProvider",
+            "actualReasoningEffort",
+            "actualFastMode",
+        ):
+            result.pop(field, None)
         return result
 
     @staticmethod

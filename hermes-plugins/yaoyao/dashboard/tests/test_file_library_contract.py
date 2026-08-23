@@ -19,6 +19,77 @@ with mock.patch.object(poller, "start", return_value=None):
 
 
 class FileLibraryContractTests(unittest.TestCase):
+    def test_session_context_snapshot_is_profile_scoped_and_monotonic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            first = store.Store(Path(directory) / "first")
+            second = store.Store(Path(directory) / "second")
+
+            saved = first.upsert_session_context(
+                "session-history-1",
+                context_used=41_920,
+                context_limit=256_000,
+                context_percent=None,
+                compressions=2,
+                model="gpt-5.6",
+                provider="openai-codex",
+                observed_at=200,
+            )
+            stale = first.upsert_session_context(
+                "session-history-1",
+                context_used=12_000,
+                context_limit=128_000,
+                context_percent=9,
+                compressions=0,
+                model="old-model",
+                provider="old-provider",
+                observed_at=100,
+            )
+
+            self.assertEqual(saved["usedTokens"], 41_920)
+            self.assertAlmostEqual(saved["percent"], 16.375)
+            self.assertEqual(stale["usedTokens"], 41_920)
+            self.assertEqual(stale["model"], "gpt-5.6")
+            self.assertEqual(
+                first.get_session_context("session-history-1"), stale
+            )
+            self.assertIsNone(second.get_session_context("session-history-1"))
+
+    def test_session_context_routes_use_selected_profile_store(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive = store.Store(Path(directory) / "profile")
+            requested_profiles: list[str | None] = []
+
+            def resolve(profile: str | None):
+                requested_profiles.append(profile)
+                return archive
+
+            body = plugin_api.SessionContextSnapshotBody.model_validate(
+                {
+                    "usedTokens": 33_600,
+                    "limitTokens": 256_000,
+                    "percent": 13.125,
+                    "compressions": 1,
+                    "model": "claude-sonnet-4-6",
+                    "provider": "anthropic",
+                    "observedAt": 300,
+                }
+            )
+            with mock.patch.object(plugin_api, "_store_for", side_effect=resolve):
+                written = plugin_api.put_session_context(
+                    "session-2", body, profile="planner"
+                )
+                loaded = plugin_api.get_session_context(
+                    "session-2", profile="planner"
+                )
+
+            self.assertEqual(requested_profiles, ["planner", "planner"])
+            self.assertEqual(
+                written["snapshot"]["model"], "claude-sonnet-4-6"
+            )
+            self.assertEqual(loaded, written)
+            paths = {getattr(route, "path", "") for route in plugin_api.router.routes}
+            self.assertIn("/session-context/{session_id}", paths)
+
     def test_search_and_kind_filter_before_cursor_pagination(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
