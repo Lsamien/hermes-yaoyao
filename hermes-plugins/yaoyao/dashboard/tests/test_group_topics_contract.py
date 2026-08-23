@@ -247,6 +247,11 @@ class GroupTopicsContractTests(unittest.TestCase):
                 original_message_count = connection.execute(
                     "SELECT COUNT(*) FROM group_messages"
                 ).fetchone()[0]
+                original_latest_visible_seq = connection.execute(
+                    """SELECT COALESCE(MAX(seq), 0) FROM group_messages
+                    WHERE topic_id = ? AND visible = 1""",
+                    (topic_id,),
+                ).fetchone()[0]
             with store.write_transaction() as connection:
                 columns = {
                     row["name"]
@@ -271,8 +276,12 @@ class GroupTopicsContractTests(unittest.TestCase):
                 message_count = connection.execute(
                     "SELECT COUNT(*) FROM group_messages"
                 ).fetchone()[0]
-            self.assertEqual(topic["last_read_message_seq"], 0)
+            self.assertEqual(
+                topic["last_read_message_seq"],
+                original_latest_visible_seq,
+            )
             self.assertEqual(message_count, original_message_count)
+            self.assertEqual(migrated.room_activity(room["id"])["unreadCount"], 0)
 
     def test_room_activity_counts_active_runs_and_unread_agent_messages(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

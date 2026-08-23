@@ -1144,6 +1144,14 @@ class GroupStore:
                 last_read_message_seq INTEGER NOT NULL DEFAULT 0"""
             )
         connection.execute(
+            """UPDATE group_topics
+            SET last_read_message_seq = COALESCE((
+                SELECT MAX(message.seq) FROM group_messages AS message
+                WHERE message.topic_id = group_topics.id
+                  AND message.visible = 1
+            ), 0)"""
+        )
+        connection.execute(
             "UPDATE group_meta SET value = '8' WHERE key = 'schema_version'"
         )
 
