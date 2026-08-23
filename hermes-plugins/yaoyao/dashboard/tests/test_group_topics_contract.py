@@ -58,8 +58,19 @@ class GroupTopicsContractTests(unittest.TestCase):
         )
 
     def test_group_upload_persists_server_readable_attachment(self) -> None:
-        room_id = new_id()
         with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room(
+                {
+                    "requestId": new_id(),
+                    "name": "附件群",
+                    "cwd": "",
+                    "agents": [{"profile": "default"}],
+                }
+            )
+            [agent] = room["agents"]
+            room_id = room["id"]
             result = asyncio.run(
                 group_plugin_api._persist_group_uploads(
                     room_id,
@@ -70,19 +81,40 @@ class GroupTopicsContractTests(unittest.TestCase):
                             headers=Headers({"content-type": "image/png"}),
                         )
                     ],
-                    root=Path(directory),
+                    root=Path(directory) / "uploads",
                 )
             )
 
             [uploaded] = result
             path = Path(uploaded["path"])
-            self.assertEqual(path.parent, Path(directory).resolve() / room_id)
+            self.assertEqual(
+                path.parent,
+                Path(directory).resolve() / "uploads" / room_id,
+            )
             self.assertEqual(path.suffix, ".png")
             self.assertEqual(path.read_bytes(), b"fixture-image")
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(uploaded["name"], "photo.png")
             self.assertEqual(uploaded["mimeType"], "image/png")
             self.assertEqual(uploaded["size"], len(b"fixture-image"))
+
+            created = store.create_human_message(
+                room_id,
+                request_id=new_id(),
+                client_message_id=new_id(),
+                topic_id=new_id(),
+                content=f"请查看图片\n\n![photo.png](<{path}>)",
+                mention_agent_ids=[agent["id"]],
+            )
+            [run] = created["runs"]
+            self.assertEqual(store.claim_next_runnable_run()["id"], run["id"])
+            projection = store.read_run_projection(run["id"])
+            prompt = ORCHESTRATOR.build_run_prompt(
+                projection,
+                store.get_room(room_id)["agents"],
+            )
+            self.assertIn(str(path), prompt)
+            self.assertTrue(path.is_file())
 
     def test_group_upload_rejects_oversize_and_removes_partial_files(self) -> None:
         room_id = new_id()
