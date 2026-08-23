@@ -152,8 +152,8 @@ describe('group protocol continuity', () => {
   it('normalizes v5 host fields while keeping v4 agents non-host by default', () => {
     expect(normalizeGroupAgent({ id: 'legacy', room_id: 'room-1', profile: 'legacy' }).isHost).toBe(false)
     expect(normalizeGroupAgent({ id: 'host', room_id: 'room-1', profile: 'host', is_host: true }).isHost).toBe(true)
-    expect(isSupportedGroupProtocolVersion(5)).toBe(true)
-    expect(isSupportedGroupProtocolVersion(6)).toBe(false)
-    expect(SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL).toBe('v2–v5')
+    expect(isSupportedGroupProtocolVersion(7)).toBe(true)
+    expect(isSupportedGroupProtocolVersion(8)).toBe(false)
+    expect(SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL).toBe('v2–v7')
   })
 })
