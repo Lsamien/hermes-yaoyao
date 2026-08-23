@@ -1,22 +1,26 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import importlib
 import json
-from pathlib import Path
 import sqlite3
 import sys
 import tempfile
 import unittest
 import uuid
+from io import BytesIO
+from pathlib import Path
+from unittest.mock import patch
 
+from fastapi import UploadFile
+from starlette.datastructures import Headers
 
 DASHBOARD_DIR = Path(__file__).resolve().parents[1]
 if str(DASHBOARD_DIR) not in sys.path:
     sys.path.insert(0, str(DASHBOARD_DIR))
 
 import group_plugin_api  # noqa: E402
-
 
 PROTOCOL = importlib.import_module(f"{group_plugin_api._LOCAL_PACKAGE}.group_protocol")
 STORE_MODULE = importlib.import_module(f"{group_plugin_api._LOCAL_PACKAGE}.group_store")
@@ -49,6 +53,65 @@ class GroupTopicsContractTests(unittest.TestCase):
             if hasattr(route, "methods")
         }
         self.assertIn(("/v1/rooms/{room_id}/topics", ("GET",)), route_methods)
+        self.assertIn(
+            ("/v1/rooms/{room_id}/uploads", ("POST",)), route_methods
+        )
+
+    def test_group_upload_persists_server_readable_attachment(self) -> None:
+        room_id = new_id()
+        with tempfile.TemporaryDirectory() as directory:
+            result = asyncio.run(
+                group_plugin_api._persist_group_uploads(
+                    room_id,
+                    [
+                        UploadFile(
+                            filename="../photo.png",
+                            file=BytesIO(b"fixture-image"),
+                            headers=Headers({"content-type": "image/png"}),
+                        )
+                    ],
+                    root=Path(directory),
+                )
+            )
+
+            [uploaded] = result
+            path = Path(uploaded["path"])
+            self.assertEqual(path.parent, Path(directory).resolve() / room_id)
+            self.assertEqual(path.suffix, ".png")
+            self.assertEqual(path.read_bytes(), b"fixture-image")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(uploaded["name"], "photo.png")
+            self.assertEqual(uploaded["mimeType"], "image/png")
+            self.assertEqual(uploaded["size"], len(b"fixture-image"))
+
+    def test_group_upload_rejects_oversize_and_removes_partial_files(self) -> None:
+        room_id = new_id()
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(group_plugin_api, "_MAX_GROUP_UPLOAD_FILE_BYTES", 4),
+        ):
+            with self.assertRaises(group_plugin_api.GroupAPIError) as raised:
+                asyncio.run(
+                    group_plugin_api._persist_group_uploads(
+                        room_id,
+                        [
+                            UploadFile(
+                                filename="too-large.bin",
+                                file=BytesIO(b"12345"),
+                                headers=Headers(
+                                    {"content-type": "application/octet-stream"}
+                                ),
+                            )
+                        ],
+                        root=Path(directory),
+                    )
+                )
+
+            self.assertEqual(raised.exception.status_code, 413)
+            self.assertEqual(
+                [path for path in Path(directory).rglob("*") if path.is_file()],
+                [],
+            )
 
     def test_room_settings_still_update_without_changing_agents(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

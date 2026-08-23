@@ -3,29 +3,37 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
 import hashlib
 import importlib
 import inspect
 import logging
+import os
+import re
 import sqlite3
 import sys
 import threading
+from collections.abc import Callable
+from contextlib import asynccontextmanager
 from importlib.machinery import ModuleSpec
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable
-from uuid import UUID
+from typing import Annotated, Any
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Path as APIPath, Query, Request, WebSocket
+from fastapi import APIRouter, File, Query, Request, UploadFile, WebSocket
+from fastapi import Path as APIPath
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
-
 logger = logging.getLogger(__name__)
 _PLUGIN_NAME = "yaoyao"
 _agent_name_resolver: Callable[[str], str] = lambda _profile: ""
+
+_MAX_GROUP_UPLOAD_FILES = 8
+_MAX_GROUP_UPLOAD_FILE_BYTES = 25 * 1_024 * 1_024
+_MAX_GROUP_UPLOAD_REQUEST_BYTES = 50 * 1_024 * 1_024
+_GROUP_UPLOAD_CHUNK_BYTES = 1_024 * 1_024
 
 _DASHBOARD_DIR = Path(__file__).resolve().parent
 _LOCAL_PACKAGE = (
@@ -162,6 +170,109 @@ class GroupInternalAPIError(GroupAPIError):
 
     def __init__(self) -> None:
         super().__init__("internal_error", "Internal server error", 500)
+
+
+def _group_upload_root() -> Path:
+    store_path = getattr(_store_instance(), "path", None)
+    if not isinstance(store_path, Path):
+        raise GroupStorageAPIError()
+    return store_path.parent / "group-uploads"
+
+
+def _safe_upload_name(value: str | None) -> str:
+    candidate = (value or "attachment").replace("\\", "/").rsplit("/", 1)[-1]
+    cleaned = "".join(
+        character
+        for character in candidate
+        if ord(character) >= 32 and ord(character) != 127
+    ).strip()[:240]
+    return cleaned or "attachment"
+
+
+def _safe_upload_extension(name: str) -> str:
+    suffix = Path(name).suffix.lower()
+    return suffix if re.fullmatch(r"\.[a-z0-9]{1,10}", suffix) else ""
+
+
+async def _persist_group_uploads(
+    room_id: str,
+    files: list[UploadFile],
+    *,
+    root: Path | None = None,
+) -> list[dict[str, object]]:
+    if not files:
+        raise GroupInvalidRequest("At least one attachment is required")
+    if len(files) > _MAX_GROUP_UPLOAD_FILES:
+        raise GroupAPIError(
+            "too_many_uploads",
+            f"At most {_MAX_GROUP_UPLOAD_FILES} attachments are allowed",
+            413,
+        )
+    upload_root = (root or _group_upload_root()).resolve()
+    room_root = upload_root / room_id
+    created: list[Path] = []
+    temporary: list[Path] = []
+    total_bytes = 0
+    result: list[dict[str, object]] = []
+    try:
+        room_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(upload_root, 0o700)
+        os.chmod(room_root, 0o700)
+        for source in files:
+            identifier = str(uuid4())
+            name = _safe_upload_name(source.filename)
+            destination = room_root / f"{identifier}{_safe_upload_extension(name)}"
+            partial = room_root / f".{identifier}.part"
+            temporary.append(partial)
+            file_bytes = 0
+            with partial.open("xb") as output:
+                os.chmod(partial, 0o600)
+                while True:
+                    chunk = await source.read(_GROUP_UPLOAD_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    file_bytes += len(chunk)
+                    total_bytes += len(chunk)
+                    if file_bytes > _MAX_GROUP_UPLOAD_FILE_BYTES:
+                        raise GroupAPIError(
+                            "upload_too_large",
+                            f"{name} exceeds 25 MiB",
+                            413,
+                        )
+                    if total_bytes > _MAX_GROUP_UPLOAD_REQUEST_BYTES:
+                        raise GroupAPIError(
+                            "upload_request_too_large",
+                            "Combined attachments exceed 50 MiB",
+                            413,
+                        )
+                    output.write(chunk)
+            partial.replace(destination)
+            temporary.remove(partial)
+            os.chmod(destination, 0o600)
+            created.append(destination)
+            media_type = (source.content_type or "application/octet-stream").strip()
+            result.append(
+                {
+                    "id": identifier,
+                    "name": name,
+                    "path": str(destination),
+                    "mimeType": media_type or "application/octet-stream",
+                    "size": file_bytes,
+                }
+            )
+        return result
+    except GroupAPIError:
+        for path in [*temporary, *created]:
+            path.unlink(missing_ok=True)
+        raise
+    except (OSError, ValueError) as error:
+        for path in [*temporary, *created]:
+            path.unlink(missing_ok=True)
+        _log_runtime_failure("Failed to persist a group attachment", error)
+        raise GroupStorageAPIError() from error
+    finally:
+        for source in files:
+            await source.close()
 
 
 def _error_response(error: GroupAPIError) -> JSONResponse:
@@ -1035,6 +1146,17 @@ async def list_messages(
     return {"items": items}
 
 
+async def upload_group_files(
+    room_id: UUID,
+    files: Annotated[list[UploadFile], File(alias="file")],
+) -> dict[str, object]:
+    canonical_room_id = str(room_id)
+    await _store_call("room_snapshot", canonical_room_id)
+    return {
+        "files": await _persist_group_uploads(canonical_room_id, files),
+    }
+
+
 async def send_message(room_id: UUID, request: SendMessageRequest) -> dict[str, object]:
     return await _runtime_call(
         "send_message",
@@ -1131,6 +1253,9 @@ def _build_router() -> APIRouter:
         methods=["POST"],
     )
     built.add_api_route("/rooms/{room_id}/topics", list_topics, methods=["GET"])
+    built.add_api_route(
+        "/rooms/{room_id}/uploads", upload_group_files, methods=["POST"]
+    )
     built.add_api_route("/rooms/{room_id}/messages", list_messages, methods=["GET"])
     built.add_api_route("/rooms/{room_id}/messages", send_message, methods=["POST"])
     built.add_api_route(
