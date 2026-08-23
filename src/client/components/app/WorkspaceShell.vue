@@ -190,6 +190,7 @@ onBeforeUnmount(() => {
       </button>
 
       <button
+        v-if="activeNav.key !== 'files'"
         class="sidebar-search-trigger"
         :class="{ 'sidebar-search-trigger--searching': sidebarSearchOpen }"
         type="button"
@@ -295,6 +296,7 @@ onBeforeUnmount(() => {
       </div>
 
       <button
+        v-if="activeNav.key !== 'files'"
         class="sidebar-search-trigger"
         :class="{ 'sidebar-search-trigger--searching': sidebarSearchOpen }"
         type="button"

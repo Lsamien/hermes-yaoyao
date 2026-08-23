@@ -62,10 +62,11 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   await expect(page.getByRole('heading', { name: '文件库', exact: true }).last()).toBeVisible()
   const fileSidebar = page.locator('.desktop-sidebar')
   await expect(fileSidebar.getByRole('button', { name: '新建聊天' })).toBeVisible()
+  await expect(fileSidebar.getByRole('button', { name: '搜索', exact: true })).toHaveCount(0)
   const compactControlHeights = await fileSidebar.locator('.sidebar-search-trigger, .sidebar-primary-action button, .sidebar-feature-nav button').evaluateAll(elements => (
     elements.map(element => element.getBoundingClientRect().height)
   ))
-  expect(compactControlHeights.length).toBeGreaterThanOrEqual(4)
+  expect(compactControlHeights.length).toBeGreaterThanOrEqual(3)
   expect(Math.max(...compactControlHeights)).toBeLessThanOrEqual(36)
   await expect(page.getByText('demo-report.pdf')).toBeVisible()
   const firstFileCard = page.locator('.library-grid article').first()
