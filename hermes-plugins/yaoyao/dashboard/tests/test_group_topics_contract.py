@@ -437,7 +437,6 @@ class GroupTopicsContractTests(unittest.TestCase):
                     "room.activity",
                     "message.upsert",
                     "topic.updated",
-                    "room.activity",
                     "run.updated",
                     "room.activity",
                 ],

@@ -5289,7 +5289,11 @@ class GroupStore:
                 VALUES (?, ?, 'topic.updated', ?, ?)""",
                 (epoch, room_id, self._canonical_json(topic), event_time),
             )
-        if event_type in {"message.upsert", "run.updated"}:
+        message_activity = (
+            event_type == "message.upsert"
+            and payload.get("status") in {"completed", "failed", "interrupted"}
+        )
+        if event_type == "run.updated" or message_activity:
             activity = self._room_activity_from_connection(connection, room_id)
             connection.execute(
                 """INSERT INTO group_events
