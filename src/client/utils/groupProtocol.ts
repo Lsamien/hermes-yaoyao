@@ -1,8 +1,9 @@
 import type {
-  GroupAgent, GroupInteraction, GroupMessage, GroupRoomDetail, GroupRoomSummary, GroupSocketEnvelope, JsonValue,
+  GroupAgent, GroupInteraction, GroupMessage, GroupRoomDetail, GroupRoomSummary, GroupSocketEnvelope, GroupTopicSummary,
 } from '@shared/types'
 import {
-  normalizeGroupAgent, normalizeGroupInteraction, normalizeGroupMessage, normalizeGroupRoom, normalizeGroupRoomDetail, record, string,
+  normalizeGroupAgent, normalizeGroupInteraction, normalizeGroupMessage, normalizeGroupRoom, normalizeGroupRoomDetail,
+  normalizeGroupRun, normalizeGroupTopic, record, string,
 } from './normalize'
 
 export interface GroupProtocolState {
@@ -11,6 +12,8 @@ export interface GroupProtocolState {
   rooms: GroupRoomSummary[]
   roomDetails: Record<string, GroupRoomDetail>
   messagesByRoom: Record<string, GroupMessage[]>
+  topicsByRoom: Record<string, GroupTopicSummary[]>
+  messagesByTopic: Record<string, GroupMessage[]>
 }
 
 export type GroupEnvelopeVerdict = 'ready' | 'apply' | 'ignore' | 'heartbeat' | 'reset'
@@ -31,6 +34,10 @@ function upsert<T extends { id: string }>(items: T[], incoming: T): T[] {
   const result = [...items]
   result[index] = { ...items[index], ...incoming }
   return result
+}
+
+export function upsertGroupTopic(items: GroupTopicSummary[], incoming: GroupTopicSummary): GroupTopicSummary[] {
+  return upsert(items, incoming).sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id))
 }
 
 export function upsertGroupMessage(items: GroupMessage[], incoming: GroupMessage): GroupMessage[] {
@@ -56,6 +63,8 @@ export function applyGroupEnvelope(state: GroupProtocolState, envelope: GroupSoc
     rooms: [...state.rooms],
     roomDetails: { ...state.roomDetails },
     messagesByRoom: { ...state.messagesByRoom },
+    topicsByRoom: { ...state.topicsByRoom },
+    messagesByTopic: { ...state.messagesByTopic },
   }
   switch (envelope.event) {
     case 'room.created':
@@ -97,10 +106,20 @@ export function applyGroupEnvelope(state: GroupProtocolState, envelope: GroupSoc
     case 'message.upsert': {
       const message = normalizeGroupMessage(payload)
       if (!message.id || !message.roomId) break
-      next.messagesByRoom[message.roomId] = upsertGroupMessage(next.messagesByRoom[message.roomId] ?? [], message)
+      if (message.topicId) {
+        next.messagesByTopic[message.topicId] = upsertGroupMessage(next.messagesByTopic[message.topicId] ?? [], message)
+      } else {
+        next.messagesByRoom[message.roomId] = upsertGroupMessage(next.messagesByRoom[message.roomId] ?? [], message)
+      }
       next.rooms = next.rooms.map(room => room.id === message.roomId
         ? { ...room, lastMessage: message, updatedAt: Math.max(room.updatedAt, message.updatedAt) }
         : room)
+      break
+    }
+    case 'topic.updated': {
+      const topic = normalizeGroupTopic(payload)
+      if (!topic.id || !topic.roomId) break
+      next.topicsByRoom[topic.roomId] = upsertGroupTopic(next.topicsByRoom[topic.roomId] ?? [], topic)
       break
     }
     case 'interaction.requested':
@@ -116,10 +135,10 @@ export function applyGroupEnvelope(state: GroupProtocolState, envelope: GroupSoc
       break
     }
     case 'run.updated': {
-      const run = payload as unknown as GroupRoomDetail['runs'][number]
-      const detail = next.roomDetails[roomId]
-      if (detail && string((run as unknown as Record<string, JsonValue>).id)) {
-        next.roomDetails[roomId] = { ...detail, runs: upsert(detail.runs, run) }
+      const run = normalizeGroupRun(payload)
+      const detail = next.roomDetails[run.roomId || roomId]
+      if (detail && run.id) {
+        next.roomDetails[detail.id] = { ...detail, runs: upsert(detail.runs, run) }
       }
       break
     }
@@ -131,13 +150,22 @@ export function snapshotGroupRoom(
   state: GroupProtocolState,
   roomValue: unknown,
   messages: GroupMessage[],
+  options: { topicId?: string; topics?: GroupTopicSummary[] } = {},
 ): GroupProtocolState {
   const room = normalizeGroupRoomDetail(roomValue)
+  const messagesByRoom = options.topicId
+    ? state.messagesByRoom
+    : { ...state.messagesByRoom, [room.id]: messages }
+  const messagesByTopic = options.topicId
+    ? { ...state.messagesByTopic, [options.topicId]: messages }
+    : state.messagesByTopic
   return {
     ...state,
     rooms: upsert(state.rooms, normalizeGroupRoom(roomValue)),
     roomDetails: { ...state.roomDetails, [room.id]: room },
-    messagesByRoom: { ...state.messagesByRoom, [room.id]: messages },
+    messagesByRoom,
+    topicsByRoom: options.topics ? { ...state.topicsByRoom, [room.id]: options.topics } : state.topicsByRoom,
+    messagesByTopic,
     cursor: Math.max(state.cursor, room.latestCursor),
   }
 }

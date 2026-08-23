@@ -10,6 +10,8 @@ import type {
   GroupMessage,
   GroupRoomDetail,
   GroupRoomSummary,
+  GroupRun,
+  GroupTopicSummary,
   JsonValue,
   ModelOption,
   Profile,
@@ -364,6 +366,7 @@ export function normalizeGroupMessage(value: unknown): GroupMessage {
   const status = string(source.status, 'unknown') as GroupMessage['status']
   return {
     seq: number(source.seq), id: string(source.id), roomId: string(pick(source, 'roomId', 'room_id')),
+    topicId: string(pick(source, 'topicId', 'topic_id')) || null,
     senderKind: ['human', 'agent', 'system'].includes(senderKind) ? senderKind : 'unknown',
     senderId: string(pick(source, 'senderId', 'sender_id')), senderName: string(pick(source, 'senderName', 'sender_name')),
     rootMessageId: string(pick(source, 'rootMessageId', 'root_message_id')), replyToMessageId: string(pick(source, 'replyToMessageId', 'reply_to_message_id')) || null,
@@ -377,10 +380,43 @@ export function normalizeGroupMessage(value: unknown): GroupMessage {
 export function normalizeGroupInteraction(value: unknown): GroupInteraction {
   const source = record(value)
   return {
-    id: string(source.id), roomId: string(pick(source, 'roomId', 'room_id')), agentId: string(pick(source, 'agentId', 'agent_id')),
+    id: string(source.id), roomId: string(pick(source, 'roomId', 'room_id')), topicId: string(pick(source, 'topicId', 'topic_id')) || null,
+    agentId: string(pick(source, 'agentId', 'agent_id')),
     runId: string(pick(source, 'runId', 'run_id')), kind: string(source.kind, 'unknown') as GroupInteraction['kind'],
     payload: (source.payload ?? null) as JsonValue, status: string(source.status, 'unknown') as GroupInteraction['status'],
     createdAt: number(pick(source, 'createdAt', 'created_at')), resolvedAt: pick(source, 'resolvedAt', 'resolved_at') == null ? null : number(pick(source, 'resolvedAt', 'resolved_at')),
+  }
+}
+
+export function normalizeGroupRun(value: unknown): GroupRun {
+  const source = record(value)
+  const status = string(source.status, 'unknown') as GroupRun['status']
+  const replyMode = string(pick(source, 'replyMode', 'reply_mode'))
+  return {
+    id: string(source.id), roomId: string(pick(source, 'roomId', 'room_id')),
+    topicId: string(pick(source, 'topicId', 'topic_id')) || null,
+    agentId: string(pick(source, 'agentId', 'agent_id')),
+    triggerMessageId: string(pick(source, 'triggerMessageId', 'trigger_message_id')),
+    responseMessageId: string(pick(source, 'responseMessageId', 'response_message_id')),
+    rootMessageId: string(pick(source, 'rootMessageId', 'root_message_id')),
+    depth: number(source.depth),
+    status: ['queued', 'running', 'awaiting_input', 'completed', 'failed', 'interrupted'].includes(status) ? status : 'unknown',
+    runtimeSessionId: string(pick(source, 'runtimeSessionId', 'runtime_session_id')) || null,
+    error: string(source.error),
+    replyMode: replyMode === 'mentioned' || replyMode === 'automatic' ? replyMode : null,
+    createdAt: number(pick(source, 'createdAt', 'created_at')),
+    updatedAt: number(pick(source, 'updatedAt', 'updated_at')),
+  }
+}
+
+export function normalizeGroupTopic(value: unknown): GroupTopicSummary {
+  const source = record(value)
+  return {
+    id: string(source.id), roomId: string(pick(source, 'roomId', 'room_id')),
+    title: string(source.title, '新话题'), preview: string(source.preview),
+    messageCount: number(pick(source, 'messageCount', 'message_count')),
+    createdAt: number(pick(source, 'createdAt', 'created_at')),
+    updatedAt: number(pick(source, 'updatedAt', 'updated_at')),
   }
 }
 
@@ -402,7 +438,7 @@ export function normalizeGroupRoomDetail(value: unknown): GroupRoomDetail {
   return {
     id: summary.id, name: summary.name, cwd: summary.cwd, createdAt: summary.createdAt, updatedAt: summary.updatedAt,
     archived: summary.archived, maxReplyRounds: summary.maxReplyRounds,
-    agents: values(source.agents).map(normalizeGroupAgent), runs: values(source.runs).map(run => record(run) as unknown as GroupRoomDetail['runs'][number]),
+    agents: values(source.agents).map(normalizeGroupAgent), runs: values(source.runs).map(normalizeGroupRun),
     pendingInteractions: values(pick(source, 'pendingInteractions', 'pending_interactions')).map(normalizeGroupInteraction),
     latestCursor: number(pick(source, 'latestCursor', 'latest_cursor')),
   }

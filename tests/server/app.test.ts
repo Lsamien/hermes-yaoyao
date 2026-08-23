@@ -311,6 +311,34 @@ describe('8800 BFF', () => {
     expect(history.search.get('profile')).toBe('default')
   })
 
+  it('proxies topic pagination and forwards topic-scoped message queries', async () => {
+    const records: RecordedRequest[] = []
+    const runtime = createApplication({ config: makeConfig(), fetchImpl: fakeGateway(records) })
+    runtimes.push(runtime)
+    const roomID = '11111111-1111-4111-8111-111111111111'
+    const topicID = '22222222-2222-4222-8222-222222222222'
+
+    await request(runtime.app.callback())
+      .get(`/api/app/groups/rooms/${roomID}/topics?limit=25&cursor=next-topic&ignored=drop-me`)
+      .set('Host', '127.0.0.1:8800')
+      .expect(200)
+    const topics = records.at(-1)!
+    expect(topics.path).toBe(`/api/plugins/yaoyao/v1/rooms/${roomID}/topics`)
+    expect(topics.search.get('limit')).toBe('25')
+    expect(topics.search.get('cursor')).toBe('next-topic')
+    expect(topics.search.has('ignored')).toBe(false)
+
+    await request(runtime.app.callback())
+      .get(`/api/app/groups/rooms/${roomID}/messages?topicId=${topicID}&beforeSeq=40&limit=20`)
+      .set('Host', '127.0.0.1:8800')
+      .expect(200)
+    const messages = records.at(-1)!
+    expect(messages.path).toBe(`/api/plugins/yaoyao/v1/rooms/${roomID}/messages`)
+    expect(messages.search.get('topicId')).toBe(topicID)
+    expect(messages.search.get('beforeSeq')).toBe('40')
+    expect(messages.search.get('limit')).toBe('20')
+  })
+
   it('keeps unknown API routes out of the SPA fallback', async () => {
     const runtime = createApplication({ config: makeConfig(), fetchImpl: fakeGateway([]) })
     runtimes.push(runtime)

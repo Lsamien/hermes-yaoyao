@@ -241,7 +241,7 @@ export interface GroupLimits {
 }
 
 export const MIN_SUPPORTED_GROUP_PROTOCOL_VERSION = 2
-export const MAX_SUPPORTED_GROUP_PROTOCOL_VERSION = 3
+export const MAX_SUPPORTED_GROUP_PROTOCOL_VERSION = 4
 export const SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL = `v${MIN_SUPPORTED_GROUP_PROTOCOL_VERSION}–v${MAX_SUPPORTED_GROUP_PROTOCOL_VERSION}`
 
 export function isSupportedGroupProtocolVersion(value: number): boolean {
@@ -284,6 +284,7 @@ export interface GroupMessage {
   seq: number
   id: string
   roomId: string
+  topicId?: string | null
   senderKind: 'human' | 'agent' | 'system' | 'unknown'
   senderId: string
   senderName: string
@@ -302,6 +303,7 @@ export interface GroupMessage {
 export interface GroupRun {
   id: string
   roomId: string
+  topicId?: string | null
   agentId: string
   triggerMessageId: string
   responseMessageId: string
@@ -318,6 +320,7 @@ export interface GroupRun {
 export interface GroupInteraction {
   id: string
   roomId: string
+  topicId?: string | null
   agentId: string
   runId: string
   kind: 'approval' | 'clarification' | 'unknown'
@@ -352,6 +355,21 @@ export interface GroupRoomPage {
   nextCursor?: string | null
 }
 
+export interface GroupTopicSummary {
+  id: string
+  roomId: string
+  title: string
+  preview: string
+  messageCount: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface GroupTopicPage {
+  items: GroupTopicSummary[]
+  nextCursor?: string | null
+}
+
 export interface GroupMessagePage {
   items: GroupMessage[]
 }
@@ -365,6 +383,7 @@ export type GroupEventType =
   | 'agent.deleted'
   | 'agent.status'
   | 'message.upsert'
+  | 'topic.updated'
   | 'interaction.requested'
   | 'interaction.resolved'
   | 'run.updated'

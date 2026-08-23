@@ -7,6 +7,10 @@ export type SidebarItem = {
   active?: boolean
   unread?: number
   pinned?: boolean
+  nested?: boolean
+  showMore?: boolean
+  expandable?: boolean
+  expanded?: boolean
   status?: 'online' | 'working' | 'offline'
-  icon?: 'chat' | 'groups' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'artifacts'
+  icon?: 'chat' | 'groups' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'artifacts' | 'branch'
 }

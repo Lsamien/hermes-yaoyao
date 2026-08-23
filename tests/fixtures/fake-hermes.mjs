@@ -5,6 +5,8 @@ const port = Number(process.env.FAKE_HERMES_PORT || 19119)
 const epoch = '11111111-1111-4111-8111-111111111111'
 const roomId = '22222222-2222-4222-8222-222222222222'
 const agentId = '33333333-3333-4333-8333-333333333333'
+const topicId = '77777777-7777-4777-8777-777777777777'
+const releaseTopicId = '88888888-8888-4888-8888-888888888888'
 const now = () => Date.now() / 1000
 let groupCursor = 0
 const groupClients = new Set()
@@ -57,7 +59,7 @@ const messages = [
   { id: 'message-thinking-tool', role: 'assistant', content: '', reasoning_content: '先检索文件，再归纳结果。', tool_calls: [{ id: 'tool-thinking', type: 'function', function: { name: 'file_search', arguments: '{"query":"产物"}' } }], timestamp: now() - 177 },
   { id: 'message-tool-call', role: 'assistant', content: '', tool_calls: [{ id: 'tool-1', type: 'function', function: { name: 'file_search', arguments: '{"query":"产物"}' } }], timestamp: now() - 176 },
   { id: 'message-tool', role: 'tool', tool_name: 'file_search', tool_call_id: 'tool-1', summary: '扫描产物目录', result: { path: '/tmp/demo-report.pdf', count: 1 }, timestamp: now() - 175 },
-  { id: 'message-assistant', role: 'assistant', content: '已整理完成。下面是 **验收摘要**：\n\n## 验收摘要\n\n- 普通聊天已连接\n- 群聊 v2 已就绪\n- [打开报告](https://example.com/report)', reasoning_content: '先核对会话与文件索引。', timestamp: now() - 170 },
+  { id: 'message-assistant', role: 'assistant', content: '已整理完成。下面是 **验收摘要**：\n\n## 验收摘要\n\n- 普通聊天已连接\n- 群聊 v4 已就绪\n- [打开报告](https://example.com/report)', reasoning_content: '先核对会话与文件索引。', timestamp: now() - 170 },
   { id: 'message-image', role: 'assistant', content: '预览图：![夭夭 Logo](/brand/AppIcon-1024.png)', timestamp: now() - 160 },
   { id: 'message-image-second', role: 'assistant', content: '第二张：![夭夭 Logo 2](/brand/AppIcon-1024.png?variant=2)', timestamp: now() - 155 },
   { id: 'message-legacy-media', role: 'assistant', content: '历史兼容：MEDIA:/brand/AppIcon-1024.png', timestamp: now() - 150 },
@@ -67,9 +69,15 @@ const messages = [
   { id: 'message-system', role: 'user', content: '[System: The active model for this chat has changed to gpt-5.6-terra via provider openai.]', timestamp: now() - 130 },
 ]
 const groupAgent = { id: agentId, roomId, profile: 'yaoyao', displayName: '夭夭', description: '主 Agent', enabled: true, replyWithoutMention: true, model: 'gpt-5.6', provider: 'openai', reasoningEffort: 'high', fastMode: true, status: 'idle', createdAt: now() - 2000, updatedAt: now() }
-const groupMessage = { seq: 1, id: '44444444-4444-4444-8444-444444444444', roomId, senderKind: 'human', senderId: 'demo-user', senderName: '验收用户', content: '大家好，检查一下群聊输入框。', status: 'completed', createdAt: now() - 120, updatedAt: now() - 120 }
-const groupAssistantMessage = { seq: 2, id: '55555555-5555-4555-8555-555555555555', roomId, senderKind: 'agent', senderId: agentId, senderName: '夭夭', content: '历史兼容：MEDIA:/brand/AppIcon-1024.png', status: 'completed', createdAt: now() - 100, updatedAt: now() - 100 }
-const groupMessages = [groupMessage, groupAssistantMessage]
+const groupMessage = { seq: 1, id: '44444444-4444-4444-8444-444444444444', roomId, topicId, senderKind: 'human', senderId: 'demo-user', senderName: '验收用户', content: '大家好，检查一下群聊输入框。', status: 'completed', createdAt: now() - 120, updatedAt: now() - 120 }
+const groupAssistantMessage = { seq: 2, id: '55555555-5555-4555-8555-555555555555', roomId, topicId, senderKind: 'agent', senderId: agentId, senderName: '夭夭', content: '历史兼容：MEDIA:/brand/AppIcon-1024.png', status: 'completed', createdAt: now() - 100, updatedAt: now() - 100 }
+const releaseTopicMessage = { seq: 3, id: '99999999-9999-4999-8999-999999999999', roomId, topicId: releaseTopicId, senderKind: 'human', senderId: 'demo-user', senderName: '验收用户', content: '请核对发布话题的独立历史。', status: 'completed', createdAt: now() - 500, updatedAt: now() - 500 }
+const groupMessages = [groupMessage, groupAssistantMessage, releaseTopicMessage]
+const groupTopics = [
+  { id: topicId, roomId, title: '设计验收', preview: groupAssistantMessage.content, messageCount: 2, createdAt: now() - 120, updatedAt: now() - 100 },
+  { id: releaseTopicId, roomId, title: '发布检查', preview: releaseTopicMessage.content, messageCount: 1, createdAt: now() - 500, updatedAt: now() - 500 },
+]
+let nextGroupSeq = 4
 const room = { id: roomId, name: '设计与工程协作', cwd: '/tmp', createdAt: now() - 2000, updatedAt: now(), archived: false, agentCount: 1, maxReplyRounds: -1, lastMessage: groupAssistantMessage, unreadCount: 0 }
 const rpcRequests = []
 const previewPdf = Buffer.from('JVBERi0xLjQKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFnZXMgMiAwIFI+PgplbmRvYmoKMiAwIG9iago8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PgplbmRvYmoKMyAwIG9iago8PC9UeXBlL1BhZ2UvUGFyZW50IDIgMCBSL01lZGlhQm94WzAgMCAyMDAgMjAwXT4+CmVuZG9iagp4cmVmCjAgNAowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTAgMDAwMDAgbiAKMDAwMDAwMDA1MyAwMDAwMCBuIAowMDAwMDAwMTA1IDAwMDAwIG4gCnRyYWlsZXIKPDwvU2l6ZSA0L1Jvb3QgMSAwIFI+PgpzdGFydHhyZWYKMTY2CiUlRU9G', 'base64')
@@ -131,7 +139,7 @@ const server = createServer(async (request, response) => {
     return session ? json(response, 200, session) : json(response, 404, { detail: 'Not found' })
   }
   if (url.pathname === '/api/session-unread') return json(response, 200, { items: { 'session-demo': 0 } })
-  if (url.pathname === '/api/plugins/yaoyao/v1/capabilities') return json(response, 200, { protocolVersion: 3, journalEpoch: epoch, latestCursor: groupCursor, limits: { maxAgentsPerRoom: 8, maxMessageBytes: 65536, maxMessagePageSize: 100, defaultMaxReplyRounds: 3, unlimitedReplyRoundsValue: -1, maxAgentDisplayNameLength: 100 }, eventTypes: ['message.upsert', 'agent.status'] })
+  if (url.pathname === '/api/plugins/yaoyao/v1/capabilities') return json(response, 200, { protocolVersion: 4, journalEpoch: epoch, latestCursor: groupCursor, limits: { maxAgentsPerRoom: 8, maxMessageBytes: 65536, maxMessagePageSize: 100, defaultMaxReplyRounds: 3, unlimitedReplyRoundsValue: -1, maxAgentDisplayNameLength: 100 }, eventTypes: ['message.upsert', 'topic.updated', 'run.updated', 'agent.status'] })
   if (url.pathname === '/api/plugins/yaoyao/v1/rooms') return json(response, 200, { items: [room], nextCursor: null })
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}`) return json(response, 200, { ...room, agents: [groupAgent], runs: [], pendingInteractions: [], latestCursor: groupCursor })
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/agents/${agentId}` && request.method === 'PATCH') {
@@ -143,16 +151,44 @@ const server = createServer(async (request, response) => {
     groupAgent.updatedAt = now()
     return json(response, 200, groupAgent)
   }
+  if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/topics`) {
+    return json(response, 200, { items: [...groupTopics].sort((a, b) => b.updatedAt - a.updatedAt), nextCursor: null })
+  }
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/messages` && request.method === 'POST') {
     const input = await body(request)
-    const sent = { ...groupMessage, seq: 3, id: input.clientMessageId, clientMessageId: input.clientMessageId, content: input.content, createdAt: now(), updatedAt: now() }
-    json(response, 200, { message: sent, runs: [{ id: '66666666-6666-4666-8666-666666666666', roomId, agentId, status: 'queued' }] })
-    setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'queued', runId: '66666666-6666-4666-8666-666666666666' }), 40)
-    setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'running', runId: '66666666-6666-4666-8666-666666666666' }), 650)
+    if (typeof input.topicId !== 'string' || !input.topicId) return json(response, 400, { detail: 'topicId is required for group protocol v4' })
+    const sentAt = now()
+    const sent = { ...groupMessage, seq: nextGroupSeq++, id: input.clientMessageId, topicId: input.topicId, clientMessageId: input.clientMessageId, content: input.content, createdAt: sentAt, updatedAt: sentAt }
+    groupMessages.push(sent)
+    let topic = groupTopics.find(item => item.id === input.topicId)
+    if (topic) {
+      topic.preview = sent.content
+      topic.messageCount = groupMessages.filter(message => message.topicId === input.topicId).length
+      topic.updatedAt = sentAt
+    } else {
+      topic = { id: input.topicId, roomId, title: String(input.content || '').trim().split('\n')[0].slice(0, 40) || '新话题', preview: sent.content, messageCount: 1, createdAt: sentAt, updatedAt: sentAt }
+      groupTopics.push(topic)
+    }
+    room.lastMessage = sent
+    room.updatedAt = sentAt
+    const runId = '66666666-6666-4666-8666-666666666666'
+    const run = { id: runId, roomId, topicId: input.topicId, agentId, triggerMessageId: sent.id, responseMessageId: '', rootMessageId: sent.id, depth: 0, status: 'queued', runtimeSessionId: null, error: '', replyMode: 'automatic', createdAt: sentAt, updatedAt: sentAt }
+    json(response, 200, { message: sent, runs: [run] })
+    setTimeout(() => broadcastGroup('message.upsert', sent), 20)
+    setTimeout(() => broadcastGroup('topic.updated', topic), 30)
+    setTimeout(() => broadcastGroup('run.updated', { ...run, status: 'queued', updatedAt: now() }), 40)
+    setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'queued', runId }), 40)
+    setTimeout(() => broadcastGroup('run.updated', { ...run, status: 'running', runtimeSessionId: 'group-runtime-demo', updatedAt: now() }), 650)
+    setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'running', runId }), 650)
+    setTimeout(() => broadcastGroup('run.updated', { ...run, status: 'completed', runtimeSessionId: 'group-runtime-demo', updatedAt: now() }), 1800)
     setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'idle', runId: null }), 1800)
     return
   }
-  if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/messages`) return json(response, 200, { items: groupMessages })
+  if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/messages`) {
+    const selectedTopicId = url.searchParams.get('topicId')
+    const items = selectedTopicId ? groupMessages.filter(message => message.topicId === selectedTopicId) : groupMessages
+    return json(response, 200, { items })
+  }
   if (url.pathname === '/api/plugins/yaoyao/files') return json(response, 200, { items: [{ id: 1, path: '/tmp/demo-report.pdf', name: 'demo-report.pdf', extension: 'pdf', mimeType: 'application/pdf', size: 204800, modifiedAt: now(), exists: true, origins: [{ profile: 'yaoyao', sessionId: 'session-demo', sessionTitle: '夭夭 Web 验收会话', messageId: 'message-assistant', authorKind: 'assistant', authorName: '夭夭', observedAt: now() }] }], nextCursor: null, total: 1 })
   if (url.pathname === '/api/plugins/yaoyao/1/download') {
     response.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': previewPdf.length })

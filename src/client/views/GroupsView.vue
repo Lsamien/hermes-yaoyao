@@ -19,6 +19,7 @@ import MessageTimeline from '@/components/messages/MessageTimeline.vue'
 import type { UiMessage } from '@/components/messages/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
 import FloatingResourceSearch from '@/components/app/FloatingResourceSearch.vue'
+import type { SidebarItem } from '@/components/app/types'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
 import { loadComposerFile } from '@/components/workspace/pendingComposer'
 import { readAgentShowThinking, writeAgentShowThinking } from '@/utils/sessionPreferences'
@@ -43,9 +44,48 @@ const modelOptionsLoading = ref<Record<string, boolean>>({})
 const modelOptionsError = ref<Record<string, string>>({})
 const agentUpdateBusy = ref<Record<string, boolean>>({})
 const agentUpdateError = ref<Record<string, string>>({})
+const roomActionMenu = ref<{ roomId: string; x: number; y: number } | null>(null)
+const expandedRoomIds = ref(new Set<string>())
 
 const activeRooms = computed(() => groups.rooms.filter(room => !room.archived))
-const sidebarItems = computed(() => activeRooms.value.map(roomSidebarItem))
+const roomSidebarItems = computed(() => activeRooms.value.map(roomSidebarItem))
+function topicSidebarItemId(roomId: string, topicId: string): string { return `topic:${roomId}:${topicId}` }
+function topicFromSidebarItemId(id: string): { roomId: string; topicId: string } | undefined {
+  const match = /^topic:([^:]+):([^:]+)$/.exec(id)
+  return match ? { roomId: match[1]!, topicId: match[2]! } : undefined
+}
+const sidebarItems = computed<SidebarItem[]>(() => activeRooms.value.flatMap(room => {
+  const roomItem = roomSidebarItem(room)
+  const expanded = groups.topicProtocol && expandedRoomIds.value.has(room.id)
+  roomItem.expandable = groups.topicProtocol
+  roomItem.expanded = expanded
+  const items: SidebarItem[] = [roomItem]
+  if (!expanded) return items
+  items.push(...groups.topicsForRoom(room.id).map(topic => ({
+    id: topicSidebarItemId(room.id, topic.id),
+    title: topic.title,
+    subtitle: topic.preview || `${topic.messageCount} 条消息`,
+    meta: `${topic.messageCount} 条`,
+    section: roomItem.section,
+    icon: 'branch' as const,
+    nested: true,
+    showMore: false,
+    active: topic.id === groups.selectedTopicId,
+  })))
+  if (room.id === groups.selectedRoomId && groups.selectedTopicId && !groups.selectedTopic) {
+    items.push({
+      id: topicSidebarItemId(room.id, groups.selectedTopicId),
+      title: '新话题',
+      subtitle: '发送第一条消息以创建',
+      section: roomItem.section,
+      icon: 'branch',
+      nested: true,
+      showMore: false,
+      active: true,
+    })
+  }
+  return items
+}))
 const messages = computed(() => groups.messages.map(groupMessageToUi))
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
 const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
@@ -63,8 +103,22 @@ const mentionOptions = computed<ComposerOption[]>(() => [
   { id: 'all', label: '所有人', detail: '通知房间内全部 Agent' },
   ...groups.agents.map(agent => ({ id: agent.id, label: agent.displayName || agent.profile, detail: agent.profile, disabled: !agent.enabled })),
 ])
+const activeAgentIds = computed(() => {
+  if (!groups.topicProtocol) {
+    return new Set(groups.agents.filter(agent => ['queued', 'running'].includes(agent.status)).map(agent => agent.id))
+  }
+  return new Set((groups.selectedRoom?.runs ?? [])
+    .filter(run => run.topicId === groups.selectedTopicId && ['queued', 'running'].includes(run.status))
+    .map(run => run.agentId))
+})
+const typingAgentIds = computed(() => {
+  if (!groups.topicProtocol) return new Set(groups.agents.filter(agent => agent.status === 'running').map(agent => agent.id))
+  return new Set((groups.selectedRoom?.runs ?? [])
+    .filter(run => run.topicId === groups.selectedTopicId && run.status === 'running')
+    .map(run => run.agentId))
+})
 const typingAgentNames = computed(() => [...new Set(groups.agents
-  .filter(agent => agent.status === 'running')
+  .filter(agent => typingAgentIds.value.has(agent.id))
   .map(agent => agent.displayName || agent.profile))])
 const typingActivity = computed(() => {
   if (!connected.value) return ''
@@ -73,6 +127,16 @@ const typingActivity = computed(() => {
   if (names.length <= 3) return `${names.join('、')}正在输入…`
   return `${names.slice(0, 2).join('、')}等 ${names.length} 个 Agent 正在输入…`
 })
+
+function groupRoute(roomId = groups.selectedRoomId, topicId = groups.selectedTopicId): string {
+  if (!roomId) return '/groups'
+  const roomPath = `/groups/${encodeURIComponent(roomId)}`
+  return groups.topicProtocol && topicId ? `${roomPath}/${encodeURIComponent(topicId)}` : roomPath
+}
+
+const roomActionMenuStyle = computed(() => roomActionMenu.value
+  ? { left: `${roomActionMenu.value.x}px`, top: `${roomActionMenu.value.y}px` }
+  : {})
 
 function restoreShowThinking(profile = auth.activeProfile?.name || 'default') {
   showThinking.value = readAgentShowThinking(auth.user?.id ?? 'local', profile)
@@ -83,10 +147,104 @@ function toggleShowThinking() {
   writeAgentShowThinking(auth.user?.id ?? 'local', auth.activeProfile?.name || 'default', showThinking.value)
 }
 
+function stopActiveTopic() {
+  for (const agentId of activeAgentIds.value) void groups.interruptAgent(agentId).catch(() => undefined)
+}
+
 async function selectRoom(id: string) {
-  await router.push(`/groups/${encodeURIComponent(id)}`)
-  await groups.selectRoom(id)
+  try { await groups.selectRoom(id) }
+  catch { return }
+  expandRoom(id)
+  await router.push(groupRoute())
   quoted.value = null
+}
+
+async function selectTopic(id: string) {
+  if (!id || id === groups.selectedTopicId) return
+  try { await groups.selectTopic(id) }
+  catch { return }
+  await router.push(groupRoute())
+  quoted.value = null
+}
+
+async function selectSidebarItem(id: string) {
+  const topic = topicFromSidebarItemId(id)
+  if (topic) {
+    if (topic.roomId !== groups.selectedRoomId) {
+      try { await groups.selectRoom(topic.roomId, topic.topicId) }
+      catch { return }
+      expandRoom(topic.roomId)
+      await router.push(groupRoute())
+      quoted.value = null
+      return
+    }
+    await selectTopic(topic.topicId)
+    return
+  }
+  await selectRoom(id)
+}
+
+function expandRoom(roomId: string) {
+  if (!groups.topicProtocol || expandedRoomIds.value.has(roomId)) return
+  expandedRoomIds.value = new Set([...expandedRoomIds.value, roomId])
+}
+
+async function toggleRoomTopics(roomId: string) {
+  if (!groups.topicProtocol) return
+  if (expandedRoomIds.value.has(roomId)) {
+    const next = new Set(expandedRoomIds.value)
+    next.delete(roomId)
+    expandedRoomIds.value = next
+    return
+  }
+  expandRoom(roomId)
+  try { await groups.loadRoomTopics(roomId) }
+  catch { /* store-level request errors are surfaced when the room is opened */ }
+}
+
+async function openRoomManager(id: string) {
+  if (topicFromSidebarItemId(id)) return
+  await selectRoom(id)
+  managerOpen.value = true
+}
+
+function openRoomActions(roomId: string, event: MouseEvent) {
+  if (!groups.topicProtocol || topicFromSidebarItemId(roomId) || !activeRooms.value.some(room => room.id === roomId)) return
+  const width = 174
+  const height = 46
+  const inset = 8
+  roomActionMenu.value = {
+    roomId,
+    x: Math.max(inset, Math.min(event.clientX, window.innerWidth - width - inset)),
+    y: Math.max(inset, Math.min(event.clientY, window.innerHeight - height - inset)),
+  }
+}
+
+function closeRoomActions() { roomActionMenu.value = null }
+
+function handleRoomActionPointer(event: PointerEvent) {
+  if (!roomActionMenu.value || (event.target as HTMLElement).closest('.group-room-actions')) return
+  closeRoomActions()
+}
+
+function handleRoomActionKey(event: KeyboardEvent) {
+  if (event.key === 'Escape' && roomActionMenu.value) closeRoomActions()
+}
+
+async function startTopicFromRoomAction() {
+  const roomId = roomActionMenu.value?.roomId
+  closeRoomActions()
+  if (!roomId) return
+  try {
+    await groups.selectRoom(roomId)
+    expandRoom(roomId)
+    const topicId = await groups.startNewTopic()
+    if (!topicId) return
+    await router.push(groupRoute(roomId, topicId))
+    quoted.value = null
+    await nextTick()
+    composer.value?.focus()
+  } catch { /* store publishes the error */ }
 }
 
 async function createRoom(payload: { name: string; profiles: string[]; autoReply: boolean; replyRounds: number }) {
@@ -96,7 +254,7 @@ async function createRoom(payload: { name: string; profiles: string[]; autoReply
     maxReplyRounds: payload.replyRounds,
   })
   createOpen.value = false
-  await router.push(`/groups/${encodeURIComponent(detail.id)}`)
+  await router.push(groupRoute(detail.id, groups.selectedTopicId))
 }
 
 async function send(payload: ComposerSubmit) {
@@ -152,7 +310,7 @@ async function archiveRoom() {
   if (!groups.selectedRoom) return
   await groups.archiveRoom(groups.selectedRoom.id)
   managerOpen.value = false
-  await router.replace(groups.selectedRoomId ? `/groups/${encodeURIComponent(groups.selectedRoomId)}` : '/groups')
+  await router.replace(groupRoute())
 }
 
 function openLocalFile({ name, url }: { name: string; url: string }) {
@@ -190,20 +348,43 @@ async function addMediaToComposer(media: PreviewMedia) {
 }
 
 onMounted(async () => {
+  document.addEventListener('pointerdown', handleRoomActionPointer)
+  document.addEventListener('keydown', handleRoomActionKey)
   restoreShowThinking()
   try {
     await groups.start()
     const requested = typeof route.params.roomId === 'string' ? route.params.roomId : ''
-    if (requested && requested !== groups.selectedRoomId) await groups.selectRoom(requested)
-    else if (groups.selectedRoomId) await router.replace(`/groups/${encodeURIComponent(groups.selectedRoomId)}`)
+    const requestedTopic = typeof route.params.topicId === 'string' ? route.params.topicId : undefined
+    if (requested) {
+      try { await groups.selectRoom(requested, requestedTopic) }
+      catch {
+        if (groups.selectedRoomId) await router.replace(groupRoute())
+        return
+      }
+    }
+    if (groups.selectedRoomId) {
+      expandRoom(groups.selectedRoomId)
+      if (route.fullPath !== groupRoute()) await router.replace(groupRoute())
+    }
   } catch { /* availability state renders the error */ }
 })
 
-onBeforeUnmount(() => groups.stop())
-
-watch(() => route.params.roomId, async roomId => {
-  if (typeof roomId === 'string' && roomId && roomId !== groups.selectedRoomId) await groups.selectRoom(roomId)
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handleRoomActionPointer)
+  document.removeEventListener('keydown', handleRoomActionKey)
+  groups.stop()
 })
+
+watch(() => [route.params.roomId, route.params.topicId] as const, async ([roomValue, topicValue]) => {
+  const roomId = typeof roomValue === 'string' ? roomValue : ''
+  const topicId = typeof topicValue === 'string' ? topicValue : undefined
+  if (roomId && (roomId !== groups.selectedRoomId || (groups.topicProtocol && topicId && topicId !== groups.selectedTopicId))) {
+    try { await groups.selectRoom(roomId, topicId) }
+    catch { if (groups.selectedRoomId && route.fullPath !== groupRoute()) await router.replace(groupRoute()) }
+  }
+})
+watch(() => groups.selectedRoomId, roomId => { if (roomId) expandRoom(roomId) })
+watch(() => groups.topicProtocol, supported => { if (supported && groups.selectedRoomId) expandRoom(groups.selectedRoomId) })
 watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThinking(profile) })
 </script>
 
@@ -224,8 +405,10 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         search-placeholder="搜索群聊"
         empty-title="还没有群聊"
         empty-description="新建群聊，邀请 1–8 个 Agent 一起协作。"
-        @select="selectRoom"
-        @more="id => { selectRoom(id); managerOpen = true }"
+        @select="selectSidebarItem"
+        @more="openRoomManager"
+        @context-menu="openRoomActions"
+        @toggle="toggleRoomTopics"
       />
     </template>
 
@@ -235,8 +418,8 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
     <div v-else class="groups-workspace">
       <MessageTimeline
         :messages="messages"
-        :title="groups.selectedRoom?.name || '群聊'"
-        :subtitle="groups.selectedRoom ? `${groups.agents.length} 个 Agent · 最多 ${groups.selectedRoom.maxReplyRounds} 轮回复` : '选择或新建一个群聊'"
+        :title="groups.topicProtocol ? (groups.selectedTopic?.title || '新话题') : (groups.selectedRoom?.name || '群聊')"
+        :subtitle="groups.selectedRoom ? `${groups.selectedRoom.name} · ${groups.agents.length} 个 Agent · 最多 ${groups.selectedRoom.maxReplyRounds} 轮回复` : '选择或新建一个群聊'"
         :loading="groups.isLoading"
         :has-older="groups.hasMoreBefore"
         :connected="connected"
@@ -244,8 +427,8 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :show-tools="showThinking"
         :interaction="activeInteraction"
         :mention-names="mentionNames"
-        empty-title="让多个 Agent 一起工作"
-        empty-description="使用 @ 提及指定 Agent，或直接发送消息触发已启用自动回复的成员。"
+        :empty-title="groups.topicProtocol ? '开始一个新话题' : '让多个 Agent 一起工作'"
+        :empty-description="groups.topicProtocol ? '第一条消息会创建独立话题，各话题分别保留 Agent 上下文。' : '使用 @ 提及指定 Agent，或直接发送消息触发已启用自动回复的成员。'"
         @load-older="groups.loadOlder"
         @quote="quoted = $event"
         @preview="openAttachment"
@@ -264,9 +447,9 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
       <ComposerShell
         ref="composer"
         mode="group"
-        :draft-key="`${auth.user?.id || 'local'}:${groups.selectedRoomId || 'new'}`"
+        :draft-key="`${auth.user?.id || 'local'}:${groups.selectedRoomId || 'new'}:${groups.selectedTopicId || 'legacy'}`"
         :disabled="!groups.selectedRoom || groups.availability !== 'available'"
-        :streaming="groups.agents.some(agent => ['queued', 'running'].includes(agent.status))"
+        :streaming="activeAgentIds.size > 0"
         :sending="groups.isSending"
         :activity-text="typingActivity"
         :tool-trace-visible="showThinking"
@@ -275,7 +458,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :attachments-enabled="uploadsEnabled"
         placeholder="发消息给群聊，输入 @ 提及 Agent"
         @send="send"
-        @stop="groups.agents.filter(agent => ['queued', 'running'].includes(agent.status)).forEach(agent => groups.interruptAgent(agent.id))"
+        @stop="stopActiveTopic"
         @tool-trace-toggle="toggleShowThinking"
         @clear-reference="quoted = null"
       />
@@ -304,14 +487,25 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
     </template>
   </WorkspaceView>
 
-  <FloatingResourceSearch section="groups" label="搜索群聊" :items="sidebarItems" @select="selectRoom" />
+  <FloatingResourceSearch section="groups" label="搜索群聊" :items="roomSidebarItems" @select="selectRoom" />
   <CreateGroupDialog :open="createOpen" :profiles="profiles" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
   <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="addPreviewToComposer" @source="preview = null" />
   <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" :can-add="uploadsEnabled" @add="addMediaToComposer" />
+
+  <Teleport to="body">
+    <Transition name="group-menu">
+      <section v-if="roomActionMenu" class="group-room-actions" :style="roomActionMenuStyle" role="menu" aria-label="群聊房间操作" @contextmenu.prevent>
+        <button class="group-action-row" role="menuitem" type="button" @click="startTopicFromRoomAction"><AppIcon name="plus" :size="14" />新建话题</button>
+      </section>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
 .groups-workspace, .groups-unavailable { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; background: var(--conversation-canvas); }.groups-unavailable { overflow: auto; }
+.group-room-actions { position: fixed; z-index: 205; width: 174px; box-sizing: border-box; padding: 6px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-raised); box-shadow: 0 12px 34px rgba(0,0,0,.16); }
+.group-action-row { display: flex; width: 100%; min-height: 34px; align-items: center; gap: 8px; padding: 0 9px; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 11px; text-align: left; }.group-action-row:hover, .group-action-row:focus-visible { outline: 0; background: var(--surface-soft); color: var(--text-primary); }
+.group-menu-enter-active, .group-menu-leave-active { transition: opacity 100ms ease, transform 120ms var(--ease-out); transform-origin: top right; }.group-menu-enter-from, .group-menu-leave-to { opacity: 0; transform: translateY(-3px) scale(.98); }
 .sidebar-primary-action { display: flex; width: 100%; min-height: 40px; align-items: center; gap: 10px; padding: 0 11px; border: 0; border-radius: 9px; background: transparent; color: var(--text-primary); cursor: pointer; font-size: 12px; font-weight: 610; text-align: left; transition: background-color 120ms ease; }
 .sidebar-primary-action:hover, .sidebar-primary-action:focus-visible { background: var(--surface-hover); outline: 0; }
 .sidebar-primary-action:focus-visible { box-shadow: inset 0 0 0 1px var(--line-strong); }
@@ -319,5 +513,5 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 .group-header-actions { display: flex; align-items: center; gap: 8px; }.group-avatars { display: flex; align-items: center; }.group-avatars span, .group-avatars em { display: grid; width: 24px; height: 24px; margin-left: -5px; place-items: center; border: 2px solid var(--canvas); border-radius: 8px; background: var(--accent); color: var(--text-on-solid); font-size: 8px; font-style: normal; font-weight: 650; }.group-avatars span:first-child { margin-left: 0; }.group-avatars em { background: var(--surface-hover); color: var(--text-secondary); }
 .group-error { display: flex; width: min(760px, calc(100% - 32px)); margin: 0 auto 4px; align-items: center; gap: 6px; color: var(--danger); font-size: 9px; }
 @media (max-width: 480px) { .group-avatars { display: none; } }
-@media (prefers-reduced-motion: reduce) { .sidebar-primary-action { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .sidebar-primary-action, .group-menu-enter-active, .group-menu-leave-active { transition: none; } }
 </style>

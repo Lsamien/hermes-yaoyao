@@ -47,7 +47,7 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   await expect(page.getByRole('option').first()).toContainText('夭夭')
   await expect(page.locator('.desktop-sidebar').getByText('已置顶 1', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '群聊' }).click()
-  await expect(page.getByRole('heading', { name: '设计与工程协作' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '设计验收' })).toBeVisible()
   await expect(page.getByRole('button', { name: '对话', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '群聊', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '文件库', exact: true })).toHaveCount(0)
@@ -105,7 +105,7 @@ test('uses the active session or group title in the browser title', async ({ pag
 
 test('uses a floating search dialog for group rooms', async ({ page }) => {
   await page.getByRole('button', { name: '群聊' }).click()
-  await expect(page.getByRole('heading', { name: '设计与工程协作' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '设计验收' })).toBeVisible()
 
   await page.locator('.desktop-sidebar').getByRole('button', { name: '搜索', exact: true }).click()
   const searchDialog = page.getByRole('dialog', { name: '搜索群聊' })
@@ -117,9 +117,9 @@ test('uses a floating search dialog for group rooms', async ({ page }) => {
   await expect(searchDialog).toBeHidden()
 })
 
-test('edits every protocol v3 Agent setting with one inspector close control', async ({ page }) => {
+test('edits every protocol v4 Agent setting with one inspector close control', async ({ page }) => {
   await page.getByRole('button', { name: '群聊' }).click()
-  await expect(page.getByRole('heading', { name: '设计与工程协作' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '设计验收' })).toBeVisible()
   await page.getByRole('button', { name: '管理群聊' }).click()
 
   await expect(page.getByRole('button', { name: '关闭群聊管理' })).toHaveCount(1)
@@ -199,7 +199,7 @@ test('recovers the group page after its initial upstream connection fails', asyn
   await page.getByRole('button', { name: '群聊' }).click()
   await expect(page.getByRole('heading', { name: '群聊服务暂不可用' })).toBeVisible()
   await page.request.post('http://127.0.0.1:19119/__test/groups/availability', { data: { available: true } })
-  await expect(page.getByRole('heading', { name: '设计与工程协作' })).toBeVisible({ timeout: 5_000 })
+  await expect(page.getByRole('heading', { name: '设计验收' })).toBeVisible({ timeout: 5_000 })
 })
 
 test('previews an octet-stream Markdown file from the file library', async ({ page }) => {
@@ -506,6 +506,66 @@ test('renders historical assistant MEDIA as Markdown in chat and group chat', as
 
   await page.getByRole('button', { name: '群聊' }).click()
   await expect(page.locator('.markdown img[alt="AppIcon-1024.png"]')).toBeVisible()
+})
+
+test('selects existing group topics and creates a new protocol v4 topic on first send', async ({ page }) => {
+  const roomId = '22222222-2222-4222-8222-222222222222'
+  const existingTopicId = '88888888-8888-4888-8888-888888888888'
+  const existingTopicSidebarId = `topic:${roomId}:${existingTopicId}`
+
+  await page.getByRole('button', { name: '群聊' }).click()
+  const sidebar = page.locator('.desktop-sidebar')
+  const roomItem = sidebar.locator(`[data-sidebar-id="${roomId}"]`)
+  const existingTopic = sidebar.locator(`[data-sidebar-id="${existingTopicSidebarId}"]`)
+  await expect(existingTopic).toContainText('发布检查')
+  await roomItem.getByRole('button', { name: '收起 设计与工程协作 的话题' }).click()
+  await expect(existingTopic).toHaveCount(0)
+  await roomItem.getByRole('button', { name: '展开 设计与工程协作 的话题' }).click()
+  await expect(existingTopic).toContainText('发布检查')
+
+  const existingTopicRequest = page.waitForRequest(request => {
+    const url = new URL(request.url())
+    return request.method() === 'GET'
+      && url.pathname === `/api/app/groups/rooms/${roomId}/messages`
+      && url.searchParams.get('topicId') === existingTopicId
+  })
+  await existingTopic.click()
+  await existingTopicRequest
+  await expect(page).toHaveURL(new RegExp(`/groups/${roomId}/${existingTopicId}$`))
+  const timeline = page.locator('.message-stack')
+  await expect(timeline.getByText('请核对发布话题的独立历史。', { exact: true })).toBeVisible()
+  await expect(timeline.getByText('大家好，检查一下群聊输入框。', { exact: true })).toHaveCount(0)
+
+  await roomItem.click({ button: 'right' })
+  const roomActions = page.getByRole('menu', { name: '群聊房间操作' })
+  await roomActions.getByRole('menuitem', { name: '新建话题' }).click()
+  const draftTopic = sidebar.locator('.sidebar-item--nested').filter({ hasText: '新话题' })
+  await expect(draftTopic).toBeVisible()
+  const draftSidebarId = await draftTopic.getAttribute('data-sidebar-id')
+  const newTopicId = draftSidebarId?.split(':').at(-1) || ''
+  expect(newTopicId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+  expect(newTopicId).not.toBe(existingTopicId)
+  await expect(page).toHaveURL(new RegExp(`/groups/${roomId}/${newTopicId}$`))
+
+  const content = '新的发布验收话题'
+  const sendRequestPromise = page.waitForRequest(request => {
+    const url = new URL(request.url())
+    return request.method() === 'POST' && url.pathname === `/api/app/groups/rooms/${roomId}/messages`
+  })
+  await page.getByRole('textbox', { name: '发消息给群聊，输入 @ 提及 Agent' }).fill(content)
+  await page.getByRole('button', { name: '发送消息' }).click()
+  const sendRequest = await sendRequestPromise
+  const sentPayload = sendRequest.postDataJSON() as { topicId: string; content: string; clientMessageId: string }
+  expect(sentPayload).toMatchObject({ topicId: newTopicId, content })
+
+  const createdTopic = sidebar.locator(`[data-sidebar-id="topic:${roomId}:${newTopicId}"]`)
+  const sentMessage = page.locator(`[data-message-id="${sentPayload.clientMessageId}"]`)
+  await expect(createdTopic).toContainText(content)
+  await expect(sentMessage).toContainText(content)
+
+  await page.reload()
+  await expect(createdTopic).toContainText(content)
+  await expect(sentMessage).toContainText(content)
 })
 
 test('renders persisted user file markers as attachment cards', async ({ page }) => {

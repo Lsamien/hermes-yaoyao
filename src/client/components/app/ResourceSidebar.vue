@@ -38,13 +38,14 @@ const emit = defineEmits<{
   search: [value: string]
   more: [id: string, event: MouseEvent]
   contextMenu: [id: string, event: MouseEvent]
+  toggle: [id: string]
   loadMore: []
 }>()
 
 const searchInput = ref<HTMLInputElement | null>(null)
 const searchOpen = ref(Boolean(props.search))
 const sectionCounts = computed(() => props.items.reduce<Record<string, number>>((counts, item) => {
-  if (item.section) counts[item.section] = (counts[item.section] ?? 0) + 1
+  if (item.section && !item.nested) counts[item.section] = (counts[item.section] ?? 0) + 1
   return counts
 }, {}))
 const sidebarRows = computed(() => props.items.map((item, index) => ({
@@ -125,15 +126,27 @@ defineExpose({ focusSearch })
           <div v-if="row.section" class="sidebar-section-label" :class="{ 'sidebar-section-label--pinned': row.section === '已置顶' }" role="presentation"><span>{{ row.sectionLabel }}</span></div>
           <div
             class="sidebar-item"
-            :class="{ active: row.item.id === activeId || row.item.active, 'sidebar-item--single-line': singleLine }"
+            :class="{ active: row.item.id === activeId || row.item.active, 'sidebar-item--single-line': singleLine, 'sidebar-item--nested': row.item.nested, 'sidebar-item--expandable': row.item.expandable }"
             role="option"
             tabindex="0"
             :aria-selected="row.item.id === activeId || row.item.active"
+            :data-sidebar-id="row.item.id"
             @click="emit('select', row.item.id)"
             @contextmenu.prevent.stop="emit('contextMenu', row.item.id, $event)"
             @keydown.enter.prevent="emit('select', row.item.id)"
             @keydown.space.prevent="emit('select', row.item.id)"
           >
+            <button
+              v-if="row.item.expandable"
+              class="sidebar-item__expand"
+              :class="{ 'sidebar-item__expand--collapsed': !row.item.expanded }"
+              type="button"
+              :aria-label="`${row.item.expanded ? '收起' : '展开'} ${row.item.title} 的话题`"
+              :aria-expanded="row.item.expanded"
+              @click.stop="emit('toggle', row.item.id)"
+            >
+              <AppIcon name="chevron-down" :size="13" />
+            </button>
             <span v-if="!singleLine" class="sidebar-item__icon" :class="{ 'sidebar-item__icon--avatar': !row.item.icon }">
               <AppIcon v-if="row.item.icon" :name="row.item.icon" :size="15" />
               <template v-else>{{ row.item.title.slice(0, 1).toUpperCase() }}</template>
@@ -149,7 +162,7 @@ defineExpose({ focusSearch })
                 <b v-if="row.item.unread">{{ row.item.unread > 99 ? '99+' : row.item.unread }}</b>
               </span>
             </span>
-            <button class="sidebar-item__more" type="button" aria-label="更多操作" @click.stop="emit('more', row.item.id, $event)">
+            <button v-if="row.item.showMore !== false" class="sidebar-item__more" type="button" aria-label="更多操作" @click.stop="emit('more', row.item.id, $event)">
               <AppIcon name="dots" :size="16" />
             </button>
           </div>
@@ -188,6 +201,13 @@ defineExpose({ focusSearch })
 .sidebar-item--single-line .sidebar-item__row { min-height: 27px; }
 .sidebar-item--single-line .sidebar-item__row strong { font-size: 11.5px; font-weight: 450; }
 .sidebar-item--single-line .sidebar-item__more { top: 1px; }
+.sidebar-item--nested { min-height: 32px; margin-left: 17px; width: calc(100% - 17px); padding-block: 1px; }
+.sidebar-item--nested .sidebar-item__icon { width: 19px; height: 19px; flex-basis: 19px; border-radius: 6px; color: var(--text-muted); }
+.sidebar-item--nested .sidebar-item__row { min-height: 25px; }
+.sidebar-item--nested .sidebar-item__row strong { font-size: 10.5px; font-weight: 500; }
+.sidebar-item--nested .sidebar-item__row--secondary { display: none; }
+.sidebar-item--nested .sidebar-item__more { display: none; }
+.sidebar-item__expand { display: grid; width: 18px; height: 24px; flex: 0 0 18px; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); cursor: pointer; }.sidebar-item__expand:hover, .sidebar-item__expand:focus-visible { outline: 0; background: var(--surface-hover); color: var(--text-primary); }.sidebar-item__expand :deep(.app-icon) { transition: transform 120ms ease; }.sidebar-item__expand--collapsed :deep(.app-icon) { transform: rotate(-90deg); }
 .sidebar-item__icon { position: relative; display: grid; place-items: center; width: 23px; height: 23px; flex: 0 0 23px; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; }
 .sidebar-item.active .sidebar-item__icon, .sidebar-item:hover .sidebar-item__icon { color: var(--text-secondary); }
 .sidebar-item__icon--avatar { background: var(--surface-hover); color: var(--text-secondary); font-size: 9px; font-weight: 700; }

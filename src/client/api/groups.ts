@@ -1,10 +1,10 @@
 import type {
-  GroupAgent, GroupCapabilities, GroupInteraction, GroupMessagePage, GroupRoomDetail, GroupRoomPage, JsonValue, UploadReference,
+  GroupAgent, GroupCapabilities, GroupInteraction, GroupMessagePage, GroupRoomDetail, GroupRoomPage, GroupRun, GroupTopicPage, JsonValue, UploadReference,
 } from '@shared/types'
 import { apiRequest, apiUrl, unwrapData } from './client'
 import {
   normalizeGroupAgent, normalizeGroupCapabilities, normalizeGroupInteraction, normalizeGroupMessage,
-  normalizeGroupRoom, normalizeGroupRoomDetail, record, values,
+  normalizeGroupRoom, normalizeGroupRoomDetail, normalizeGroupRun, normalizeGroupTopic, record, values,
 } from '@/utils/normalize'
 import { createUuid } from '@/utils/id'
 
@@ -27,6 +27,17 @@ export async function getGroupRooms(cursor?: string, limit = 50): Promise<GroupR
 
 export async function getGroupRoom(roomId: string): Promise<GroupRoomDetail> {
   return normalizeGroupRoomDetail(unwrapData(await apiRequest<unknown>(`${BASE}/rooms/${encodeURIComponent(roomId)}`)))
+}
+
+export async function getGroupTopics(roomId: string, cursor?: string, limit = 50): Promise<GroupTopicPage> {
+  const payload = unwrapData(await apiRequest<unknown>(apiUrl(`${BASE}/rooms/${encodeURIComponent(roomId)}/topics`, {
+    cursor, limit: Math.max(1, Math.min(100, limit)),
+  })))
+  const source = record(payload)
+  return {
+    items: values(source.items ?? source.topics ?? payload).map(normalizeGroupTopic).filter(topic => topic.id && topic.roomId),
+    nextCursor: typeof source.nextCursor === 'string' ? source.nextCursor : typeof source.next_cursor === 'string' ? source.next_cursor : null,
+  }
 }
 
 export interface AgentSeed {
@@ -82,10 +93,10 @@ export async function interruptGroupAgent(roomId: string, agentId: string): Prom
   }))
 }
 
-export async function getGroupMessages(roomId: string, options: { beforeSeq?: number; afterSeq?: number; limit?: number } = {}): Promise<GroupMessagePage> {
+export async function getGroupMessages(roomId: string, options: { topicId?: string; beforeSeq?: number; afterSeq?: number; limit?: number } = {}): Promise<GroupMessagePage> {
   if (options.beforeSeq && options.afterSeq) throw new Error('beforeSeq 与 afterSeq 不能同时使用')
   const payload = unwrapData(await apiRequest<unknown>(apiUrl(`${BASE}/rooms/${encodeURIComponent(roomId)}/messages`, {
-    beforeSeq: options.beforeSeq, afterSeq: options.afterSeq, limit: Math.max(1, Math.min(100, options.limit ?? 100)),
+    topicId: options.topicId, beforeSeq: options.beforeSeq, afterSeq: options.afterSeq, limit: Math.max(1, Math.min(100, options.limit ?? 100)),
   })))
   const source = record(payload)
   return { items: values(source.items ?? source.messages ?? payload).map(normalizeGroupMessage).filter(message => message.id) }
@@ -96,13 +107,14 @@ export async function sendGroupMessage(
   content: string,
   mentionAgentIds: string[],
   clientMessageId: string,
+  topicId?: string,
   uploadIds: string[] = [],
   stableRequestId = requestId(),
-): Promise<{ message: ReturnType<typeof normalizeGroupMessage>; runs: unknown[] }> {
+): Promise<{ message: ReturnType<typeof normalizeGroupMessage>; runs: GroupRun[] }> {
   const payload = record(unwrapData(await apiRequest<unknown>(`${BASE}/rooms/${encodeURIComponent(roomId)}/messages`, {
-    method: 'POST', body: { requestId: stableRequestId, clientMessageId, content, mentionAgentIds, uploadIds } as JsonValue,
+    method: 'POST', body: { requestId: stableRequestId, clientMessageId, topicId, content, mentionAgentIds, uploadIds } as JsonValue,
   })))
-  return { message: normalizeGroupMessage(payload.message), runs: values(payload.runs) }
+  return { message: normalizeGroupMessage(payload.message), runs: values(payload.runs).map(normalizeGroupRun).filter(run => run.id) }
 }
 
 export async function approveGroupInteraction(roomId: string, interactionId: string, choice: 'once' | 'session' | 'always' | 'deny'): Promise<GroupInteraction | unknown> {

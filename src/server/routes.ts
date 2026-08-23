@@ -669,9 +669,14 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       method: 'POST', requestBody: body(ctx),
     })
   })
+  router.get('/api/app/groups/rooms/:roomID/topics', async (ctx) => {
+    await proxy(ctx, dependencies.upstream, groupPath(ctx, '/topics'), {
+      search: searchFrom(ctx, ['limit', 'cursor']),
+    })
+  })
   router.get('/api/app/groups/rooms/:roomID/messages', async (ctx) => {
     await proxy(ctx, dependencies.upstream, groupPath(ctx, '/messages'), {
-      search: searchFrom(ctx, ['beforeSeq', 'afterSeq', 'limit']),
+      search: searchFrom(ctx, ['topicId', 'beforeSeq', 'afterSeq', 'limit']),
     })
   })
   router.post('/api/app/groups/rooms/:roomID/messages', async (ctx) => {
