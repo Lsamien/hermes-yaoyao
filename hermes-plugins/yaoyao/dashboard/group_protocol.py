@@ -18,7 +18,7 @@ from pydantic import (
 )
 
 
-PROTOCOL_VERSION = 4
+PROTOCOL_VERSION = 5
 MAX_AGENTS_PER_ROOM = 8
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_TOOL_STATE_BYTES = 256 * 1024
@@ -97,6 +97,7 @@ class AgentSeed(GroupModel):
     reply_without_mention: StrictBool = Field(
         default=False, alias="replyWithoutMention"
     )
+    is_host: StrictBool = Field(default=False, alias="isHost")
     model: str | None = Field(default=None, max_length=4096)
     provider: str | None = Field(default=None, max_length=4096)
     reasoning_effort: str | None = Field(
@@ -139,6 +140,12 @@ class CreateRoomRequest(GroupModel):
     def validate_max_reply_rounds(cls, value: int) -> int:
         return normalize_max_reply_rounds(value)
 
+    @model_validator(mode="after")
+    def validate_unique_host(self) -> "CreateRoomRequest":
+        if sum(agent.is_host for agent in self.agents) > 1:
+            raise ValueError("Room may contain only one host Agent")
+        return self
+
 
 class UpdateRoomRequest(GroupModel):
     request_id: UUID = Field(alias="requestId")
@@ -175,6 +182,7 @@ class AddAgentRequest(GroupModel):
     reply_without_mention: StrictBool = Field(
         default=False, alias="replyWithoutMention"
     )
+    is_host: StrictBool = Field(default=False, alias="isHost")
     model: str | None = Field(default=None, max_length=4096)
     provider: str | None = Field(default=None, max_length=4096)
     reasoning_effort: str | None = Field(
@@ -213,6 +221,7 @@ class UpdateAgentRequest(GroupModel):
     reply_without_mention: StrictBool | None = Field(
         default=None, alias="replyWithoutMention"
     )
+    is_host: StrictBool | None = Field(default=None, alias="isHost")
     model: str | None = Field(default=None, max_length=4096)
     provider: str | None = Field(default=None, max_length=4096)
     reasoning_effort: str | None = Field(
@@ -221,7 +230,8 @@ class UpdateAgentRequest(GroupModel):
     fast_mode: StrictBool | None = Field(default=None, alias="fastMode")
 
     @field_validator(
-        "display_name", "description", "enabled", "reply_without_mention", mode="before"
+        "display_name", "description", "enabled", "reply_without_mention", "is_host",
+        mode="before"
     )
     @classmethod
     def reject_explicit_null(cls, value: Any) -> Any:
@@ -249,6 +259,7 @@ class UpdateAgentRequest(GroupModel):
         if not (
             {
                 "display_name", "description", "enabled", "reply_without_mention",
+                "is_host",
                 "model", "provider", "reasoning_effort", "fast_mode",
             }
             & self.model_fields_set

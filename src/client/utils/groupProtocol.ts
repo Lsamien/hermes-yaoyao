@@ -36,6 +36,15 @@ function upsert<T extends { id: string }>(items: T[], incoming: T): T[] {
   return result
 }
 
+export function convergeGroupAgents(items: GroupAgent[], incoming: GroupAgent): GroupAgent[] {
+  const current = items.find(agent => agent.id === incoming.id)
+  if (current && incoming.updatedAt < current.updatedAt) return items
+  const converged = incoming.isHost
+    ? items.map(agent => agent.id === incoming.id || !agent.isHost ? agent : { ...agent, isHost: false })
+    : items
+  return upsert(converged, incoming)
+}
+
 export function upsertGroupTopic(items: GroupTopicSummary[], incoming: GroupTopicSummary): GroupTopicSummary[] {
   return upsert(items, incoming).sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id))
 }
@@ -84,7 +93,7 @@ export function applyGroupEnvelope(state: GroupProtocolState, envelope: GroupSoc
     case 'agent.updated': {
       const agent = normalizeGroupAgent(payload)
       const detail = next.roomDetails[agent.roomId || roomId]
-      if (detail) next.roomDetails[detail.id] = { ...detail, agents: upsert(detail.agents, agent) }
+      if (detail) next.roomDetails[detail.id] = { ...detail, agents: convergeGroupAgents(detail.agents, agent) }
       break
     }
     case 'agent.deleted': {

@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { GroupMessage, GroupSocketEnvelope } from '@shared/types'
 import {
-  applyGroupEnvelope, classifyGroupEnvelope, type GroupProtocolState, upsertGroupMessage,
+  isSupportedGroupProtocolVersion, SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL,
+  type GroupAgent, type GroupMessage, type GroupSocketEnvelope,
+} from '@shared/types'
+import {
+  applyGroupEnvelope, classifyGroupEnvelope, convergeGroupAgents, type GroupProtocolState, upsertGroupMessage,
 } from '@/utils/groupProtocol'
+import { normalizeGroupAgent } from '@/utils/normalize'
 
 const epoch = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
@@ -24,6 +28,15 @@ function initial(): GroupProtocolState {
     epoch, cursor: 8,
     rooms: [{ id: 'room-1', name: '群聊', cwd: '', createdAt: 1, updatedAt: 1, archived: false, agentCount: 1, unreadCount: 0, maxReplyRounds: 3 }],
     roomDetails: {}, topicsByRoom: { 'room-1': [] }, messagesByRoom: { 'room-1': [] }, messagesByTopic: {},
+  }
+}
+
+function groupAgent(id: string, displayName: string, isHost: boolean): GroupAgent {
+  return {
+    id, roomId: 'room-1', profile: displayName, displayName, description: '', storedSessionId: null,
+    lastContextMessageSeq: 0, enabled: true, replyWithoutMention: false, isHost,
+    model: null, provider: null, reasoningEffort: null, fastMode: null,
+    createdAt: 1, updatedAt: 1, status: 'idle',
   }
 }
 
@@ -92,5 +105,55 @@ describe('group protocol continuity', () => {
 
     expect(reduced.messagesByTopic['topic-1']).toEqual([expect.objectContaining({ id: 'server-topic', topicId: 'topic-1' })])
     expect(reduced.messagesByRoom['room-1']).toEqual([])
+  })
+
+  it('converges immediately to one host when agent.updated promotes a new host', () => {
+    const state = initial()
+    const first = groupAgent('agent-1', '夭夭', true)
+    const second = groupAgent('agent-2', '瑶儿', false)
+    state.roomDetails['room-1'] = {
+      id: 'room-1', name: '群聊', cwd: '', createdAt: 1, updatedAt: 1, archived: false,
+      maxReplyRounds: 3, agents: [first, second], runs: [], pendingInteractions: [], latestCursor: 8,
+    }
+
+    const promoted = applyGroupEnvelope(state, {
+      type: 'group.event', epoch, cursor: 9, roomId: 'room-1', event: 'agent.updated',
+      payload: { ...second, isHost: true, updatedAt: 2 },
+    })
+    expect(promoted.roomDetails['room-1'].agents.map(agent => [agent.id, agent.isHost])).toEqual([
+      ['agent-1', false], ['agent-2', true],
+    ])
+
+    const demoted = applyGroupEnvelope(promoted, {
+      type: 'group.event', epoch, cursor: 10, roomId: 'room-1', event: 'agent.updated',
+      payload: { ...first, isHost: false, updatedAt: 2 },
+    })
+    expect(demoted.roomDetails['room-1'].agents.filter(agent => agent.isHost).map(agent => agent.id)).toEqual(['agent-2'])
+  })
+
+  it('ignores an older REST host response after a newer host event', () => {
+    const state = initial()
+    const former = groupAgent('agent-1', '夭夭', false)
+    former.updatedAt = 3
+    const current = groupAgent('agent-2', '瑶儿', true)
+    current.updatedAt = 3
+    state.roomDetails['room-1'] = {
+      id: 'room-1', name: '群聊', cwd: '', createdAt: 1, updatedAt: 1, archived: false,
+      maxReplyRounds: 3, agents: [former, current], runs: [], pendingInteractions: [], latestCursor: 8,
+    }
+
+    const stale = { ...former, isHost: true, updatedAt: 2 }
+    state.roomDetails['room-1'].agents = convergeGroupAgents(state.roomDetails['room-1'].agents, stale)
+
+    expect(state.roomDetails['room-1'].agents.filter(agent => agent.isHost).map(agent => agent.id)).toEqual(['agent-2'])
+    expect(state.roomDetails['room-1'].agents.find(agent => agent.id === 'agent-1')?.updatedAt).toBe(3)
+  })
+
+  it('normalizes v5 host fields while keeping v4 agents non-host by default', () => {
+    expect(normalizeGroupAgent({ id: 'legacy', room_id: 'room-1', profile: 'legacy' }).isHost).toBe(false)
+    expect(normalizeGroupAgent({ id: 'host', room_id: 'room-1', profile: 'host', is_host: true }).isHost).toBe(true)
+    expect(isSupportedGroupProtocolVersion(5)).toBe(true)
+    expect(isSupportedGroupProtocolVersion(6)).toBe(false)
+    expect(SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL).toBe('v2–v5')
   })
 })

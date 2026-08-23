@@ -352,6 +352,7 @@ export function normalizeGroupAgent(value: unknown): GroupAgent {
     description: string(source.description), storedSessionId: string(pick(source, 'storedSessionId', 'stored_session_id')) || null,
     lastContextMessageSeq: number(pick(source, 'lastContextMessageSeq', 'last_context_message_seq')),
     enabled: bool(source.enabled, true), replyWithoutMention: bool(pick(source, 'replyWithoutMention', 'reply_without_mention')),
+    isHost: bool(pick(source, 'isHost', 'is_host')),
     model: string(source.model) || null, provider: string(source.provider) || null,
     reasoningEffort: string(pick(source, 'reasoningEffort', 'reasoning_effort')) || null,
     fastMode: rawFastMode == null ? null : bool(rawFastMode),

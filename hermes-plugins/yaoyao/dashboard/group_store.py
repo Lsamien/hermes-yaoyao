@@ -41,7 +41,7 @@ from .group_protocol import (
 )
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 _WAL_RETRY_DELAYS = (0.01, 0.02, 0.04, 0.08)
 EVENT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MIN_RETAINED_EVENTS = 100_000
@@ -93,7 +93,7 @@ _CASCADE_OPERATIONS = frozenset(
         _CASCADE_DISCARDED_OPERATION,
     }
 )
-_CASCADE_PARSE_VERSION = 2
+_CASCADE_PARSE_VERSION = 3
 _MAX_CASCADE_PAGE_SIZE = 32
 _MAX_CASCADE_PLAN_BYTES = 16 * 1024
 _TOPIC_TITLE_LENGTH = 120
@@ -135,6 +135,7 @@ _SCHEMA_STATEMENTS = (
         last_context_message_seq INTEGER NOT NULL DEFAULT 0,
         enabled INTEGER NOT NULL DEFAULT 1,
         reply_without_mention INTEGER NOT NULL DEFAULT 0,
+        is_host INTEGER NOT NULL DEFAULT 0,
         model_override TEXT,
         provider_override TEXT,
         reasoning_effort_override TEXT,
@@ -185,6 +186,7 @@ _SCHEMA_STATEMENTS = (
         root_message_id TEXT NOT NULL,
         depth INTEGER NOT NULL,
         reply_mode TEXT NOT NULL DEFAULT 'mentioned',
+        required_reply INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL,
         runtime_session_id TEXT,
         error TEXT NOT NULL DEFAULT '',
@@ -231,6 +233,8 @@ _SCHEMA_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_group_agent_runs_agent_status ON group_agent_runs(agent_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_group_agent_runs_room_status ON group_agent_runs(room_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_group_agent_runs_status_order ON group_agent_runs(status, created_at, id)",
+    """CREATE UNIQUE INDEX IF NOT EXISTS idx_group_agents_room_host
+    ON group_agents(room_id) WHERE is_host = 1""",
     """CREATE UNIQUE INDEX IF NOT EXISTS idx_group_agent_runs_active_runtime
     ON group_agent_runs(runtime_session_id)
     WHERE runtime_session_id IS NOT NULL
@@ -453,16 +457,18 @@ class GroupStore:
             raw_version = "3"
         if raw_version == "3":
             self._migrate_v3_to_v4(connection)
-        elif raw_version == "4":
+            raw_version = "4"
+        if raw_version == "4":
             self._repair_early_v4(connection)
+            self._migrate_v4_to_v5(connection)
         self._validated_schema_version(
             self._metadata_value_from_connection(connection, "schema_version")
         )
         self._validated_epoch(
             self._metadata_value_from_connection(connection, "journal_epoch")
         )
-        self._validate_v4_columns(connection)
-        self._validate_v4_values(connection)
+        self._validate_v5_columns(connection)
+        self._validate_v5_values(connection)
 
     @staticmethod
     def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
@@ -993,16 +999,98 @@ class GroupStore:
             )"""
         )
 
+    @classmethod
+    def _migrate_v4_to_v5(cls, connection: sqlite3.Connection) -> None:
+        """Assign one durable host per room and freeze required-reply run state."""
+        connection.execute(
+            "ALTER TABLE group_agents ADD COLUMN is_host INTEGER NOT NULL DEFAULT 0"
+        )
+        connection.execute(
+            """ALTER TABLE group_agent_runs
+            ADD COLUMN required_reply INTEGER NOT NULL DEFAULT 0"""
+        )
+        for room in connection.execute(
+            "SELECT id FROM group_rooms ORDER BY created_at ASC, id ASC"
+        ).fetchall():
+            host = connection.execute(
+                """SELECT id FROM group_agents WHERE room_id = ?
+                ORDER BY CASE
+                    WHEN enabled = 1 AND reply_without_mention = 1 THEN 0
+                    WHEN enabled = 1 THEN 1
+                    ELSE 2
+                END, created_at ASC, id ASC
+                LIMIT 1""",
+                (room["id"],),
+            ).fetchone()
+            if host is None:
+                raise GroupStoreError("GroupStore room has no host candidate")
+            connection.execute(
+                "UPDATE group_agents SET is_host = 1 WHERE id = ? AND room_id = ?",
+                (host["id"], room["id"]),
+            )
+
+        def add_host_flags(value: object) -> object:
+            if isinstance(value, list):
+                return [add_host_flags(item) for item in value]
+            if not isinstance(value, dict):
+                return value
+            rewritten = {key: add_host_flags(item) for key, item in value.items()}
+            identity = rewritten.get("id")
+            room_id = rewritten.get("roomId")
+            if (
+                isinstance(identity, str)
+                and isinstance(room_id, str)
+                and {"profile", "displayName", "replyWithoutMention"}
+                <= rewritten.keys()
+            ):
+                agent = connection.execute(
+                    "SELECT is_host FROM group_agents WHERE id = ? AND room_id = ?",
+                    (identity, room_id),
+                ).fetchone()
+                rewritten["isHost"] = bool(agent["is_host"]) if agent else False
+            return rewritten
+
+        for ledger in connection.execute(
+            "SELECT request_id, response_json FROM group_idempotency"
+        ).fetchall():
+            try:
+                response = cls._load_json(ledger["response_json"])
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise GroupStoreError("Stored idempotency response is corrupt") from error
+            rewritten = cls._canonical_json(add_host_flags(response))
+            if rewritten != ledger["response_json"]:
+                connection.execute(
+                    """UPDATE group_idempotency SET response_json = ?
+                    WHERE request_id = ?""",
+                    (rewritten, ledger["request_id"]),
+                )
+        for event in connection.execute(
+            "SELECT cursor, payload_json FROM group_events"
+        ).fetchall():
+            try:
+                payload = cls._load_json(event["payload_json"])
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise GroupStoreError("Stored event is corrupt") from error
+            rewritten = cls._canonical_json(add_host_flags(payload))
+            if rewritten != event["payload_json"]:
+                connection.execute(
+                    "UPDATE group_events SET payload_json = ? WHERE cursor = ?",
+                    (rewritten, event["cursor"]),
+                )
+        connection.execute(
+            "UPDATE group_meta SET value = '5' WHERE key = 'schema_version'"
+        )
+
     @staticmethod
-    def _validate_v4_columns(connection: sqlite3.Connection) -> None:
+    def _validate_v5_columns(connection: sqlite3.Connection) -> None:
         expected_columns = {
             "group_meta": {"key", "value"},
             "group_rooms": {"id", "name", "cwd", "max_reply_rounds", "created_at", "updated_at", "archived"},
             "group_topics": {"id", "room_id", "title", "created_at", "updated_at"},
-            "group_agents": {"id", "room_id", "profile", "display_name", "display_name_key", "description", "stored_session_id", "last_context_message_seq", "enabled", "reply_without_mention", "model_override", "provider_override", "reasoning_effort_override", "fast_mode_override", "session_config_json", "created_at", "updated_at"},
+            "group_agents": {"id", "room_id", "profile", "display_name", "display_name_key", "description", "stored_session_id", "last_context_message_seq", "enabled", "reply_without_mention", "is_host", "model_override", "provider_override", "reasoning_effort_override", "fast_mode_override", "session_config_json", "created_at", "updated_at"},
             "group_agent_topic_state": {"agent_id", "topic_id", "last_context_message_seq", "created_at", "updated_at"},
             "group_messages": {"seq", "id", "room_id", "topic_id", "sender_kind", "sender_id", "sender_name", "root_message_id", "reply_to_message_id", "client_message_id", "content", "reasoning", "tool_state_json", "status", "error", "visible", "created_at", "updated_at"},
-            "group_agent_runs": {"id", "room_id", "topic_id", "agent_id", "trigger_message_id", "response_message_id", "root_message_id", "depth", "reply_mode", "status", "runtime_session_id", "error", "created_at", "updated_at"},
+            "group_agent_runs": {"id", "room_id", "topic_id", "agent_id", "trigger_message_id", "response_message_id", "root_message_id", "depth", "reply_mode", "required_reply", "status", "runtime_session_id", "error", "created_at", "updated_at"},
             "group_interactions": {"id", "room_id", "topic_id", "agent_id", "run_id", "kind", "payload_json", "status", "created_at", "resolved_at"},
             "group_events": {"cursor", "epoch", "room_id", "event_type", "payload_json", "created_at"},
             "group_idempotency": {"request_id", "operation", "request_hash", "response_json", "created_at"},
@@ -1010,8 +1098,10 @@ class GroupStore:
         exact_specs = {
             ("group_rooms", "max_reply_rounds"): ("INTEGER", 1, "3"),
             ("group_agents", "reply_without_mention"): ("INTEGER", 1, "0"),
+            ("group_agents", "is_host"): ("INTEGER", 1, "0"),
             ("group_messages", "visible"): ("INTEGER", 1, "1"),
             ("group_agent_runs", "reply_mode"): ("TEXT", 1, "'mentioned'"),
+            ("group_agent_runs", "required_reply"): ("INTEGER", 1, "0"),
             ("group_messages", "topic_id"): ("TEXT", 1, None),
             ("group_agent_runs", "topic_id"): ("TEXT", 1, None),
             ("group_interactions", "topic_id"): ("TEXT", 1, None),
@@ -1034,7 +1124,7 @@ class GroupStore:
                 raise GroupStoreError("GroupStore schema is partial or corrupt")
 
     @staticmethod
-    def _validate_v4_values(connection: sqlite3.Connection) -> None:
+    def _validate_v5_values(connection: sqlite3.Connection) -> None:
         invalid_value_queries = (
             f"""SELECT 1 FROM group_rooms
                 WHERE typeof(max_reply_rounds) != 'integer'
@@ -1045,6 +1135,22 @@ class GroupStore:
             """SELECT 1 FROM group_agents
                 WHERE typeof(reply_without_mention) != 'integer'
                    OR reply_without_mention NOT IN (0, 1)
+                LIMIT 1""",
+            """SELECT 1 FROM group_agents
+                WHERE typeof(is_host) != 'integer' OR is_host NOT IN (0, 1)
+                LIMIT 1""",
+            """SELECT 1 FROM group_rooms AS room
+                LEFT JOIN group_agents AS agent ON agent.room_id = room.id
+                GROUP BY room.id
+                HAVING SUM(CASE WHEN agent.is_host = 1 THEN 1 ELSE 0 END) != 1
+                LIMIT 1""",
+            """SELECT 1 FROM group_agents AS host
+                WHERE host.is_host = 1 AND host.enabled = 0
+                  AND EXISTS (
+                    SELECT 1 FROM group_agents AS candidate
+                    WHERE candidate.room_id = host.room_id
+                      AND candidate.enabled = 1 AND candidate.id != host.id
+                  )
                 LIMIT 1""",
             """SELECT 1 FROM group_agents
                 WHERE fast_mode_override IS NOT NULL
@@ -1063,6 +1169,16 @@ class GroupStore:
             """SELECT 1 FROM group_agent_runs
                 WHERE typeof(reply_mode) != 'text'
                    OR reply_mode NOT IN ('mentioned', 'automatic')
+                LIMIT 1""",
+            """SELECT 1 FROM group_agent_runs
+                WHERE typeof(required_reply) != 'integer'
+                   OR required_reply NOT IN (0, 1)
+                   OR (required_reply = 1 AND reply_mode != 'automatic')
+                LIMIT 1""",
+            """SELECT 1 FROM group_agent_runs AS run
+                JOIN group_messages AS response
+                  ON response.id = run.response_message_id
+                WHERE run.required_reply = 1 AND response.visible != 1
                 LIMIT 1""",
             """SELECT 1 FROM group_agent_topic_state
                 WHERE typeof(last_context_message_seq) != 'integer'
@@ -1196,6 +1312,25 @@ class GroupStore:
                 continue
             connection.execute(f"DROP INDEX IF EXISTS {name}")
             connection.execute(f"CREATE INDEX {name} ON {definition}")
+        host_definition = """CREATE UNIQUE INDEX idx_group_agents_room_host
+            ON group_agents(room_id) WHERE is_host = 1"""
+        stored = connection.execute(
+            """SELECT sql FROM sqlite_master
+            WHERE type = 'index' AND name = ?""",
+            ("idx_group_agents_room_host",),
+        ).fetchone()
+        expected_sql = canonical_index_sql(host_definition)
+        stored_sql = (
+            None
+            if stored is None or stored["sql"] is None
+            else canonical_index_sql(stored["sql"])
+        )
+        if stored_sql != expected_sql:
+            connection.execute("DROP INDEX IF EXISTS idx_group_agents_room_host")
+            try:
+                connection.execute(host_definition)
+            except sqlite3.IntegrityError as error:
+                raise GroupStoreError("Room hosts are not unique") from error
         active_runtime_definition = """CREATE UNIQUE INDEX
             idx_group_agent_runs_active_runtime
             ON group_agent_runs(runtime_session_id)
@@ -1449,7 +1584,8 @@ class GroupStore:
             raise ValueError("limit must be an integer from 1 to 100")
         cursor_values = self._decode_cursor(cursor) if cursor is not None else None
         query = """SELECT id, name, cwd, max_reply_rounds, created_at, updated_at, archived,
-            (SELECT COUNT(*) FROM group_agents WHERE room_id = group_rooms.id) AS agent_count
+            (SELECT COUNT(*) FROM group_agents WHERE room_id = group_rooms.id) AS agent_count,
+            (SELECT COUNT(*) FROM group_topics WHERE room_id = group_rooms.id) AS topic_count
             FROM group_rooms WHERE archived = 0"""
         params: list[object] = []
         if cursor_values is not None:
@@ -1614,6 +1750,7 @@ class GroupStore:
                 "displayName",
                 "description",
                 "replyWithoutMention",
+                "isHost",
                 "model",
                 "provider",
                 "reasoningEffort",
@@ -1640,6 +1777,7 @@ class GroupStore:
                         "displayName",
                         "description",
                         "replyWithoutMention",
+                        "isHost",
                         "model",
                         "provider",
                         "reasoningEffort",
@@ -1649,13 +1787,35 @@ class GroupStore:
                 }
             )
             now = self._now()
+            requested_host = bool(agent["is_host"])
+            agent["is_host"] = False
             agent_id = self._insert_agent(connection, canonical_room_id, agent, now)
+            current_host = self._room_host(connection, canonical_room_id)
+            switched: tuple[dict[str, object], dict[str, object]] | None = None
+            if requested_host or not bool(current_host["enabled"]):
+                switched = self._switch_host(
+                    connection, canonical_room_id, agent_id, now=now
+                )
             result = self._agent_detail(connection, canonical_room_id, agent_id)
             connection.execute(
                 "UPDATE group_rooms SET updated_at = ? WHERE id = ?",
                 (now, canonical_room_id),
             )
-            self._append_event(connection, canonical_room_id, "agent.created", result)
+            if switched is not None:
+                self._append_event(
+                    connection,
+                    canonical_room_id,
+                    "agent.updated",
+                    switched[0],
+                    created_at=now,
+                )
+            self._append_event(
+                connection,
+                canonical_room_id,
+                "agent.created",
+                result,
+                created_at=now,
+            )
             self._append_room_updated_summary(
                 connection, canonical_room_id, created_at=now
             )
@@ -1688,6 +1848,7 @@ class GroupStore:
                 "description",
                 "enabled",
                 "replyWithoutMention",
+                "isHost",
                 "model",
                 "provider",
                 "reasoningEffort",
@@ -1702,6 +1863,7 @@ class GroupStore:
                 "description",
                 "enabled",
                 "replyWithoutMention",
+                "isHost",
                 "model",
                 "provider",
                 "reasoningEffort",
@@ -1726,6 +1888,31 @@ class GroupStore:
             previous = self._owned_agent(
                 connection, canonical_room_id, canonical_agent_id
             )
+            requested_host = command.get("isHost")
+            if requested_host is not None and not isinstance(requested_host, bool):
+                raise ValueError("isHost must be a boolean")
+            if requested_host is False and bool(previous["is_host"]):
+                raise GroupConflictError(
+                    "Current host cannot be cleared without selecting a replacement"
+                )
+            if requested_host is True and command.get("enabled") is False:
+                raise GroupConflictError("Host Agent must be enabled")
+            replacement_id: str | None = None
+            if (
+                bool(previous["is_host"])
+                and command.get("enabled") is False
+                and bool(previous["enabled"])
+            ):
+                replacement = self._first_enabled_host_candidate(
+                    connection,
+                    canonical_room_id,
+                    exclude_agent_id=canonical_agent_id,
+                )
+                if replacement is None:
+                    raise GroupConflictError(
+                        "Host Agent cannot be disabled without an enabled replacement"
+                    )
+                replacement_id = str(replacement["id"])
             assignments: list[str] = []
             values: list[object] = []
             if "displayName" in changes:
@@ -1799,6 +1986,21 @@ class GroupStore:
                 f"UPDATE group_agents SET {', '.join(assignments)} WHERE id = ? AND room_id = ?",
                 values,
             )
+            switched: tuple[dict[str, object], dict[str, object]] | None = None
+            if replacement_id is not None:
+                switched = self._switch_host(
+                    connection, canonical_room_id, replacement_id, now=now
+                )
+            elif requested_host is True:
+                switched = self._switch_host(
+                    connection, canonical_room_id, canonical_agent_id, now=now
+                )
+            elif command.get("enabled") is True:
+                current_host = self._room_host(connection, canonical_room_id)
+                if not bool(current_host["enabled"]):
+                    switched = self._switch_host(
+                        connection, canonical_room_id, canonical_agent_id, now=now
+                    )
             connection.execute(
                 "UPDATE group_rooms SET updated_at = ? WHERE id = ?",
                 (now, canonical_room_id),
@@ -1806,7 +2008,29 @@ class GroupStore:
             result = self._agent_detail(
                 connection, canonical_room_id, canonical_agent_id
             )
-            self._append_event(connection, canonical_room_id, "agent.updated", result)
+            if switched is None:
+                self._append_event(
+                    connection,
+                    canonical_room_id,
+                    "agent.updated",
+                    result,
+                    created_at=now,
+                )
+            else:
+                self._append_event(
+                    connection,
+                    canonical_room_id,
+                    "agent.updated",
+                    switched[0],
+                    created_at=now,
+                )
+                self._append_event(
+                    connection,
+                    canonical_room_id,
+                    "agent.updated",
+                    switched[1],
+                    created_at=now,
+                )
             self._append_room_updated_summary(
                 connection, canonical_room_id, created_at=now
             )
@@ -1854,6 +2078,23 @@ class GroupStore:
             if agent_count <= 1:
                 raise GroupConflictError("Room must retain at least one agent")
             now = self._now()
+            switched: tuple[dict[str, object], dict[str, object]] | None = None
+            if result["isHost"] is True:
+                replacement = self._first_enabled_host_candidate(
+                    connection,
+                    canonical_room_id,
+                    exclude_agent_id=canonical_agent_id,
+                )
+                if replacement is None:
+                    raise GroupConflictError(
+                        "Host Agent cannot be removed without an enabled replacement"
+                    )
+                switched = self._switch_host(
+                    connection,
+                    canonical_room_id,
+                    str(replacement["id"]),
+                    now=now,
+                )
             interrupted = self._interrupt_runs_for_scope(
                 connection,
                 room_id=canonical_room_id,
@@ -1869,6 +2110,14 @@ class GroupStore:
                 "UPDATE group_rooms SET updated_at = ? WHERE id = ?",
                 (now, canonical_room_id),
             )
+            if switched is not None:
+                self._append_event(
+                    connection,
+                    canonical_room_id,
+                    "agent.updated",
+                    switched[1],
+                    created_at=now,
+                )
             self._append_event(
                 connection, canonical_room_id, "agent.deleted", result, created_at=now
             )
@@ -1963,7 +2212,7 @@ class GroupStore:
 
         def action(connection: sqlite3.Connection) -> dict[str, object]:
             self._active_room(connection, canonical_room_id)
-            agents: list[tuple[sqlite3.Row, str]] = []
+            agents: list[tuple[sqlite3.Row, str, bool]] = []
             room_agents = connection.execute(
                 """SELECT * FROM group_agents WHERE room_id = ?
                 ORDER BY created_at ASC, id ASC""",
@@ -1975,23 +2224,30 @@ class GroupStore:
                 source_agent_id="human",
                 include_automatic=False,
             )
-            explicit_agent_ids = list(dict.fromkeys([*agent_ids, *parsed_ids]))
-            explicit_ids = set(explicit_agent_ids)
-            for agent_id in explicit_agent_ids:
-                agent = self._owned_agent(connection, canonical_room_id, agent_id)
-                if not agent["enabled"]:
-                    raise GroupConflictError("Mentioned agent is disabled")
-                agents.append((agent, "mentioned"))
-            automatic_agents = [
-                agent
-                for agent in room_agents
-                if agent["enabled"] and agent["reply_without_mention"]
+            agents_by_id = {str(agent["id"]): agent for agent in room_agents}
+            explicit_agent_ids = [
+                agent_id
+                for agent_id in dict.fromkeys([*agent_ids, *parsed_ids])
+                if agent_id in agents_by_id and agents_by_id[agent_id]["enabled"]
             ]
-            agents.extend(
-                (agent, "automatic")
-                for agent in automatic_agents
-                if agent["id"] not in explicit_ids
-            )
+            if explicit_agent_ids:
+                agents.extend(
+                    (agents_by_id[agent_id], "mentioned", False)
+                    for agent_id in explicit_agent_ids
+                )
+            else:
+                host = self._room_host(connection, canonical_room_id)
+                scheduled_ids: set[str] = set()
+                if host["enabled"]:
+                    agents.append((host, "automatic", True))
+                    scheduled_ids.add(str(host["id"]))
+                agents.extend(
+                    (agent, "automatic", False)
+                    for agent in room_agents
+                    if agent["enabled"]
+                    and agent["reply_without_mention"]
+                    and agent["id"] not in scheduled_ids
+                )
             now = self._now()
             self._ensure_topic(
                 connection,
@@ -2023,8 +2279,8 @@ class GroupStore:
                 connection, canonical_room_id, "message.upsert", message, created_at=now
             )
             runs: list[dict[str, object]] = []
-            for agent, reply_mode in agents:
-                visible = reply_mode == "mentioned"
+            for agent, reply_mode, required_reply in agents:
+                visible = reply_mode == "mentioned" or required_reply
                 response_id, run_id = str(uuid.uuid4()), str(uuid.uuid4())
                 connection.execute(
                     """INSERT INTO group_messages
@@ -2048,8 +2304,9 @@ class GroupStore:
                 connection.execute(
                     """INSERT INTO group_agent_runs
                     (id, room_id, topic_id, agent_id, trigger_message_id, response_message_id, root_message_id,
-                     depth, reply_mode, status, runtime_session_id, error, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 'queued', NULL, '', ?, ?)""",
+                     depth, reply_mode, required_reply, status, runtime_session_id,
+                     error, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'queued', NULL, '', ?, ?)""",
                     (
                         run_id,
                         canonical_room_id,
@@ -2059,6 +2316,7 @@ class GroupStore:
                         response_id,
                         human_id,
                         reply_mode,
+                        int(required_reply),
                         now,
                         now,
                     ),
@@ -2288,8 +2546,10 @@ class GroupStore:
                     omitted_through_seq=omitted_through_seq,
                 )
             )
+            projected_run = self._run_wire(run)
+            projected_run["requiredReply"] = bool(run["required_reply"])
             return {
-                "run": self._run_wire(run),
+                "run": projected_run,
                 "room": self._room_wire(room),
                 "agent": projected_agent,
                 "messages": messages,
@@ -2822,7 +3082,7 @@ class GroupStore:
                 index += 1 + len(token.group(0))
             else:
                 index += 1
-        if include_automatic:
+        if include_automatic and not targets:
             for agent in agents:
                 if (
                     agent["enabled"]
@@ -2985,7 +3245,7 @@ class GroupStore:
             raise GroupStoreError("Stored cascade plan is corrupt")
         parse_version = plan.get("parseVersion")
         if (
-            parse_version not in {1, 2}
+            parse_version not in {1, 2, 3}
             or request_hash
             != self._cascade_request_hash(source_id, parse_version=parse_version)
         ):
@@ -3160,6 +3420,7 @@ class GroupStore:
         expected_hashes = {
             self._cascade_request_hash(canonical_source_id, parse_version=1),
             self._cascade_request_hash(canonical_source_id, parse_version=2),
+            self._cascade_request_hash(canonical_source_id, parse_version=3),
         }
         with self.write_transaction() as connection:
             ledger = connection.execute(
@@ -3406,9 +3667,10 @@ class GroupStore:
             connection.execute(
                 """INSERT INTO group_agent_runs
                 (id, room_id, topic_id, agent_id, trigger_message_id,
-                 response_message_id, root_message_id, depth, reply_mode, status,
-                 runtime_session_id, error, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL, '', ?, ?)""",
+                 response_message_id, root_message_id, depth, reply_mode,
+                 required_reply, status, runtime_session_id, error, created_at,
+                 updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'queued', NULL, '', ?, ?)""",
                 (
                     run_id,
                     source["room_id"],
@@ -4707,7 +4969,9 @@ class GroupStore:
         room = connection.execute(
             """SELECT id, name, cwd, max_reply_rounds, created_at, updated_at, archived,
             (SELECT COUNT(*) FROM group_agents WHERE room_id = group_rooms.id)
-                AS agent_count
+                AS agent_count,
+            (SELECT COUNT(*) FROM group_topics WHERE room_id = group_rooms.id)
+                AS topic_count
             FROM group_rooms WHERE id = ? AND archived = 0""",
             (room_id,),
         ).fetchone()
@@ -4896,6 +5160,61 @@ class GroupStore:
         if agent is None:
             raise GroupNotFoundError("Agent not found in room")
         return agent
+
+    @staticmethod
+    def _room_host(
+        connection: sqlite3.Connection, room_id: str
+    ) -> sqlite3.Row:
+        host = connection.execute(
+            "SELECT * FROM group_agents WHERE room_id = ? AND is_host = 1",
+            (room_id,),
+        ).fetchone()
+        if host is None:
+            raise GroupStoreError("Room host is missing")
+        return host
+
+    @staticmethod
+    def _first_enabled_host_candidate(
+        connection: sqlite3.Connection,
+        room_id: str,
+        *,
+        exclude_agent_id: str,
+    ) -> sqlite3.Row | None:
+        return connection.execute(
+            """SELECT * FROM group_agents
+            WHERE room_id = ? AND enabled = 1 AND id != ?
+            ORDER BY created_at ASC, id ASC LIMIT 1""",
+            (room_id, exclude_agent_id),
+        ).fetchone()
+
+    def _switch_host(
+        self,
+        connection: sqlite3.Connection,
+        room_id: str,
+        agent_id: str,
+        *,
+        now: float,
+    ) -> tuple[dict[str, object], dict[str, object]] | None:
+        current = self._room_host(connection, room_id)
+        if current["id"] == agent_id:
+            return None
+        replacement = self._owned_agent(connection, room_id, agent_id)
+        if not replacement["enabled"]:
+            raise GroupConflictError("Host Agent must be enabled")
+        connection.execute(
+            """UPDATE group_agents SET is_host = 0, updated_at = ?
+            WHERE id = ? AND room_id = ?""",
+            (now, current["id"], room_id),
+        )
+        connection.execute(
+            """UPDATE group_agents SET is_host = 1, updated_at = ?
+            WHERE id = ? AND room_id = ?""",
+            (now, replacement["id"], room_id),
+        )
+        return (
+            self._agent_detail(connection, room_id, str(current["id"])),
+            self._agent_detail(connection, room_id, str(replacement["id"])),
+        )
 
     def _enabled_agent(
         self, connection: sqlite3.Connection, room_id: str, agent_id: str
@@ -5394,6 +5713,11 @@ class GroupStore:
             raise GroupConflictError("Agent profile must be unique within a room")
         if len(display_keys) != len(set(display_keys)):
             raise GroupConflictError("Agent display name must be unique within a room")
+        host_count = sum(bool(agent["is_host"]) for agent in agents)
+        if host_count > 1:
+            raise GroupConflictError("Room may contain only one host Agent")
+        if host_count == 0:
+            agents[0]["is_host"] = True
         return agents
 
     def _new_agent(self, command: object) -> dict[str, object]:
@@ -5401,6 +5725,7 @@ class GroupStore:
             command,
             {
                 "profile", "displayName", "description", "replyWithoutMention",
+                "isHost",
                 "model", "provider", "reasoningEffort", "fastMode",
             },
         )
@@ -5417,6 +5742,9 @@ class GroupStore:
         reply_without_mention = command.get("replyWithoutMention", False)
         if not isinstance(reply_without_mention, bool):
             raise ValueError("replyWithoutMention must be a boolean")
+        is_host = command.get("isHost", False)
+        if not isinstance(is_host, bool):
+            raise ValueError("isHost must be a boolean")
         fast_mode = command.get("fastMode")
         if fast_mode is not None and not isinstance(fast_mode, bool):
             raise ValueError("fastMode must be a boolean or null")
@@ -5428,6 +5756,7 @@ class GroupStore:
             "display_name_key": display_name_key,
             "description": self._description(command.get("description", "")),
             "reply_without_mention": reply_without_mention,
+            "is_host": is_host,
             "model_override": self._agent_configuration_value(
                 command.get("model"), "model"
             ),
@@ -5477,9 +5806,9 @@ class GroupStore:
         connection.execute(
             """INSERT INTO group_agents
             (id, room_id, profile, display_name, display_name_key, description,
-             reply_without_mention, model_override, provider_override,
+             reply_without_mention, is_host, model_override, provider_override,
              reasoning_effort_override, fast_mode_override, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 agent_id,
                 room_id,
@@ -5488,6 +5817,7 @@ class GroupStore:
                 agent["display_name_key"],
                 agent["description"],
                 int(bool(agent["reply_without_mention"])),
+                int(bool(agent["is_host"])),
                 agent["model_override"],
                 agent["provider_override"],
                 agent["reasoning_effort_override"],
@@ -5559,6 +5889,7 @@ class GroupStore:
             "updatedAt": row["updated_at"],
             "archived": False,
             "agentCount": row["agent_count"],
+            "topicCount": row["topic_count"],
         }
 
     @staticmethod
@@ -5586,6 +5917,7 @@ class GroupStore:
             "lastContextMessageSeq": row["last_context_message_seq"],
             "enabled": bool(row["enabled"]),
             "replyWithoutMention": bool(row["reply_without_mention"]),
+            "isHost": bool(row["is_host"]),
             "model": row["model_override"],
             "provider": row["provider_override"],
             "reasoningEffort": row["reasoning_effort_override"],

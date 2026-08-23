@@ -57,6 +57,9 @@ _CLAIM_RETRY_MAX_SECONDS = 1.0
 _WORK_DISABLED_RETRY_SECONDS = 1.0
 _NO_REPLY_TOKEN = "[[YAOYAO_NO_REPLY_V1]]"
 _NO_REPLY_RESERVED_PATTERN = re.compile(r"\[\[YAOYAO_[A-Z0-9_]*(?:\]\])?")
+_HOST_FALLBACK_REPLY = (
+    "我还不能确定你希望我处理什么，请补充具体目标、范围，或明确需要我协调的 Agent。"
+)
 
 
 def _is_no_reply_content(value: object) -> bool:
@@ -233,7 +236,9 @@ class _RuntimeState:
     through_seq: int
     profile: str = ""
     reply_mode: str = "mentioned"
+    required_reply: bool = False
     automatic_published: bool = False
+    had_visible_interaction: bool = False
     prompt_ready: asyncio.Event = field(default_factory=asyncio.Event)
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     terminal_info_received: asyncio.Event = field(default_factory=asyncio.Event)
@@ -302,6 +307,12 @@ def _required_nonnegative_int(value: object, field_name: str) -> int:
     return value
 
 
+def _required_bool(value: object, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise GroupOrchestratorError(f"{field_name} must be a boolean")
+    return value
+
+
 def _strict_json_copy(value: object, field_name: str) -> object:
     try:
         encoded = json.dumps(
@@ -364,6 +375,9 @@ def build_run_prompt(
             "replyMode": _required_string(
                 run.get("replyMode", "mentioned"), "projection.run.replyMode"
             ),
+            "requiredReply": _required_bool(
+                run.get("requiredReply", False), "projection.run.requiredReply"
+            ),
         },
         "throughSeq": _required_nonnegative_int(
             projection.get("throughSeq"), "projection.throughSeq"
@@ -392,7 +406,13 @@ def build_run_prompt(
         allow_nan=False,
     )
     automatic_rule = ""
-    if envelope["run"]["replyMode"] == "automatic":
+    if envelope["run"]["requiredReply"]:
+        automatic_rule = (
+            "你是本房间唯一主持人。该用户消息没有有效 @，你必须公开处理；"
+            "禁止保持静默，禁止输出任何 YAOYAO_NO_REPLY 标记。必须三选一："
+            "直接回答；使用成员列表中的精确 @显示名 转派；或发起澄清请求。"
+        )
+    elif envelope["run"]["replyMode"] == "automatic":
         automatic_rule = (
             f"若触发内容与自己的职责无关，禁止调用工具、禁止@成员，且完整答复只能是"
             f"{_NO_REPLY_TOKEN}；正常答复绝不能包含该标记。"
@@ -2011,6 +2031,13 @@ class GroupOrchestrator:
         reply_mode = _required_string(run.get("replyMode"), "projection.run.replyMode")
         if reply_mode not in {"mentioned", "automatic"}:
             raise GroupOrchestratorError("projection.run.replyMode is invalid")
+        required_reply = _required_bool(
+            run.get("requiredReply", False), "projection.run.requiredReply"
+        )
+        if required_reply and reply_mode != "automatic":
+            raise GroupOrchestratorError(
+                "projection.run.requiredReply requires automatic replyMode"
+            )
         display_name = _required_string(
             agent.get("displayName"), "projection.agent.displayName"
         )
@@ -2144,6 +2171,7 @@ class GroupOrchestrator:
                     through_seq=through_seq,
                     profile=profile,
                     reply_mode=reply_mode,
+                    required_reply=required_reply,
                 )
                 if self._closing:
                     state.prompt_ready.set()
@@ -2334,6 +2362,7 @@ class GroupOrchestrator:
         through_seq: int,
         profile: str,
         reply_mode: str,
+        required_reply: bool,
     ) -> _RuntimeState:
         with self._mapping_lock:
             if identity.runtime_id in self._runtime_states:
@@ -2353,6 +2382,8 @@ class GroupOrchestrator:
                 through_seq=through_seq,
                 profile=profile,
                 reply_mode=reply_mode,
+                required_reply=required_reply,
+                automatic_published=required_reply,
             )
             self._runtime_states[identity.runtime_id] = (
                 state.generation,
@@ -2623,6 +2654,13 @@ class GroupOrchestrator:
             if state.reply_mode == "automatic":
                 state.content = _sanitize_no_reply_text(state.content)
                 state.reasoning = _sanitize_no_reply_text(state.reasoning)
+            if (
+                state.required_reply
+                and outcome == "completed"
+                and not state.content.strip()
+                and not state.had_visible_interaction
+            ):
+                state.content = _HOST_FALLBACK_REPLY
             suppress_automatic = automatic_unpublished and (
                 outcome != "completed" or not state.content.strip()
             )
@@ -3193,6 +3231,7 @@ class GroupOrchestrator:
         if not isinstance(interaction, Mapping):
             raise GroupOrchestratorError("Stored approval is invalid")
         local_id = _required_string(interaction.get("id"), "interaction.id")
+        state.had_visible_interaction = True
         state.pending_interaction_ids.add(local_id)
 
     async def _persist_clarification(
@@ -3214,6 +3253,7 @@ class GroupOrchestrator:
         if not isinstance(interaction, Mapping):
             raise GroupOrchestratorError("Stored clarification is invalid")
         local_id = _required_string(interaction.get("id"), "interaction.id")
+        state.had_visible_interaction = True
         state.clarification_ids[request_id] = local_id
         state.pending_interaction_ids.add(local_id)
 

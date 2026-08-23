@@ -204,8 +204,8 @@ class GroupSettingsContractTests(unittest.TestCase):
                     store.get_room(room["id"])["agents"],
                 )
 
-    def test_protocol_v4_advertises_reply_round_contract(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 4)
+    def test_protocol_v5_advertises_reply_round_contract(self) -> None:
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 5)
         self.assertEqual(
             PROTOCOL.limits_payload()["defaultMaxReplyRounds"], 3
         )
@@ -226,6 +226,7 @@ class GroupSettingsContractTests(unittest.TestCase):
         self.assertEqual(create.max_reply_rounds, 3)
         self.assertIsNone(create.agents[0].display_name)
         self.assertFalse(create.agents[0].reply_without_mention)
+        self.assertFalse(create.agents[0].is_host)
         for invalid in (0, -2, 101, True, "3"):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 PROTOCOL.CreateRoomRequest.model_validate(
@@ -559,7 +560,7 @@ class GroupSettingsContractTests(unittest.TestCase):
                 }
             )
             by_profile = {agent["profile"]: agent for agent in room["agents"]}
-            planner, coder = by_profile["planner"], by_profile["coder"]
+            planner = by_profile["planner"]
             created = store.create_human_message(
                 room["id"],
                 request_id=request_id(),
@@ -568,7 +569,7 @@ class GroupSettingsContractTests(unittest.TestCase):
                 mention_agent_ids=[planner["id"]],
             )
             modes = {run["agentId"]: run["replyMode"] for run in created["runs"]}
-            self.assertEqual(modes, {planner["id"]: "mentioned", coder["id"]: "automatic"})
+            self.assertEqual(modes, {planner["id"]: "mentioned"})
             listed = store.list_messages(room["id"])
             self.assertEqual([message["senderId"] for message in listed], ["human", planner["id"]])
 
@@ -578,7 +579,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             self._create_v1_database(path)
             store = GroupStore(path)
             store.initialize()
-            self.assertEqual(store.schema_version(), 4)
+            self.assertEqual(store.schema_version(), 5)
             self.assertEqual(store.journal_epoch(), "11111111-1111-4111-8111-111111111111")
             with store.connection() as connection:
                 room = connection.execute("SELECT * FROM group_rooms").fetchone()
@@ -588,7 +589,9 @@ class GroupSettingsContractTests(unittest.TestCase):
                 ledger = connection.execute("SELECT * FROM group_idempotency").fetchone()
             self.assertEqual(room["max_reply_rounds"], 3)
             self.assertEqual(agent["reply_without_mention"], 0)
+            self.assertEqual(agent["is_host"], 1)
             self.assertEqual(run["reply_mode"], "mentioned")
+            self.assertEqual(run["required_reply"], 0)
             self.assertEqual(message["visible"], 1)
             self.assertEqual(ledger["response_json"], "{}")
 
@@ -807,10 +810,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             }
             self.assertEqual(
                 modes,
-                {
-                    agents["coder"]["id"]: "mentioned",
-                    agents["reviewer"]["id"]: "automatic",
-                },
+                {agents["coder"]["id"]: "mentioned"},
             )
 
     def test_round_limit_and_unlimited_mode(self) -> None:
@@ -1360,7 +1360,8 @@ class GroupSettingsContractTests(unittest.TestCase):
                     "name": "研发群",
                     "cwd": "",
                     "agents": [
-                        {"profile": "reviewer", "replyWithoutMention": True}
+                        {"profile": "host"},
+                        {"profile": "reviewer", "replyWithoutMention": True},
                     ],
                 }
             )
@@ -1371,7 +1372,12 @@ class GroupSettingsContractTests(unittest.TestCase):
                 content="普通消息",
                 mention_agent_ids=[],
             )
-            [run] = created["runs"]
+            reviewer = next(
+                agent for agent in room["agents"] if agent["profile"] == "reviewer"
+            )
+            run = next(
+                item for item in created["runs"] if item["agentId"] == reviewer["id"]
+            )
             before = store.latest_cursor()
             first = store.transition_run(run["id"], "failed", error="失败")
             second = store.transition_run(run["id"], "failed", error="失败")
@@ -1386,8 +1392,11 @@ class GroupSettingsContractTests(unittest.TestCase):
                 any(event["eventType"] == "message.upsert" for event in events)
             )
             self.assertEqual(
-                [message["senderKind"] for message in store.list_messages(room["id"])],
-                ["human"],
+                [message["senderId"] for message in store.list_messages(room["id"])],
+                [
+                    "human",
+                    next(agent["id"] for agent in room["agents"] if agent["isHost"]),
+                ],
             )
 
     def test_automatic_consumer_waits_without_zero_timeout_and_accepts_terminal(self) -> None:

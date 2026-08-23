@@ -118,7 +118,33 @@ test('uses a floating search dialog for group rooms', async ({ page }) => {
   await expect(searchDialog).toBeHidden()
 })
 
-test('edits every protocol v4 Agent setting with one inspector close control', async ({ page }) => {
+test('selects one protocol v5 host independently from no-mention replies', async ({ page }) => {
+  await page.getByRole('button', { name: '群聊' }).click()
+  await expect(page.locator('.group-host-chip')).toHaveText('主持人 夭夭')
+
+  await page.getByRole('button', { name: '新建群聊' }).click()
+  const createDialog = page.getByRole('dialog', { name: '新建群聊' })
+  await createDialog.getByRole('button', { name: /yaoer/ }).click()
+  await createDialog.getByLabel('主持人').selectOption('yaoer')
+  await expect(createDialog.getByLabel('所有成员无需 @ 也回复')).toBeChecked()
+  await createDialog.getByRole('button', { name: '关闭' }).click()
+
+  await page.getByRole('button', { name: '管理群聊' }).click()
+  const manager = page.locator('.group-manager')
+  await expect(manager.getByLabel('主持人')).toHaveValue('33333333-3333-4333-8333-333333333333')
+  const promoteRequest = page.waitForRequest(request => request.method() === 'PATCH' && request.url().endsWith('/agents/34343434-3434-4434-8434-343434343434'))
+  await manager.getByLabel('主持人').selectOption({ label: '瑶儿' })
+  expect((await promoteRequest).postDataJSON()).toMatchObject({ isHost: true })
+  await expect(manager.locator('article').filter({ hasText: '瑶儿' }).getByText('主持人', { exact: true })).toBeVisible()
+  await expect(page.locator('.group-host-chip')).toHaveText('主持人 瑶儿')
+
+  const restoreRequest = page.waitForRequest(request => request.method() === 'PATCH' && request.url().endsWith('/agents/33333333-3333-4333-8333-333333333333'))
+  await manager.getByLabel('主持人').selectOption({ label: '夭夭' })
+  expect((await restoreRequest).postDataJSON()).toMatchObject({ isHost: true })
+  await expect(page.locator('.group-host-chip')).toHaveText('主持人 夭夭')
+})
+
+test('edits every protocol v5 Agent setting with one inspector close control', async ({ page }) => {
   await page.getByRole('button', { name: '群聊' }).click()
   await expect(page.getByRole('heading', { name: '设计验收' })).toBeVisible()
   await page.getByRole('button', { name: '管理群聊' }).click()
@@ -149,7 +175,7 @@ test('edits every protocol v4 Agent setting with one inspector close control', a
   await editor.getByLabel('模型').selectOption(JSON.stringify(['openai', 'gpt-5.5']))
   await editor.getByLabel('推理强度').selectOption('xhigh')
   await editor.getByLabel('快速模式').selectOption('false')
-  await editor.getByLabel('自动回复').uncheck()
+  await editor.getByLabel('无需 @ 也回复').uncheck()
   const updateRequest = page.waitForRequest(request => request.method() === 'PATCH' && /\/api\/app\/groups\/rooms\/[^/]+\/agents\/[^/]+$/.test(new URL(request.url()).pathname))
   await editor.getByRole('button', { name: '保存 Agent 设置' }).click()
   expect((await updateRequest).postDataJSON()).toMatchObject({
@@ -160,7 +186,7 @@ test('edits every protocol v4 Agent setting with one inspector close control', a
   await editor.getByLabel('模型').selectOption(JSON.stringify(['openai', 'gpt-5.6']))
   await editor.getByLabel('推理强度').selectOption('high')
   await editor.getByLabel('快速模式').selectOption('true')
-  await editor.getByLabel('自动回复').check()
+  await editor.getByLabel('无需 @ 也回复').check()
   const restoreResponse = page.waitForResponse(response => response.request().method() === 'PATCH' && /\/api\/app\/groups\/rooms\/[^/]+\/agents\/[^/]+$/.test(new URL(response.url()).pathname))
   await editor.getByRole('button', { name: '保存 Agent 设置' }).click()
   expect((await restoreResponse).status()).toBe(200)

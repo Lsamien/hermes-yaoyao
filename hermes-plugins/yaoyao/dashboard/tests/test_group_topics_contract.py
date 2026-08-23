@@ -33,7 +33,7 @@ def new_id() -> str:
 
 class GroupTopicsContractTests(unittest.TestCase):
     def test_protocol_and_router_advertise_topics(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 4)
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 5)
         self.assertIn("topic.updated", PROTOCOL.EVENT_TYPES)
         request = PROTOCOL.SendMessageRequest.model_validate({
             "requestId": new_id(),
@@ -99,7 +99,13 @@ class GroupTopicsContractTests(unittest.TestCase):
             events = store.events_after(before, 10)
             self.assertEqual(
                 [event["eventType"] for event in events],
-                ["message.upsert", "topic.updated"],
+                [
+                    "message.upsert",
+                    "topic.updated",
+                    "message.upsert",
+                    "topic.updated",
+                    "run.updated",
+                ],
             )
             self.assertEqual(events[0]["payload"]["topicId"], topic_a)
             self.assertEqual(
@@ -157,10 +163,20 @@ class GroupTopicsContractTests(unittest.TestCase):
 
             topic_a_messages = store.list_messages(room["id"], topic_id=topic_a)
             self.assertEqual(
-                [message["id"] for message in topic_a_messages],
+                [
+                    message["id"]
+                    for message in topic_a_messages
+                    if message["senderKind"] == "human"
+                ],
                 [first["message"]["id"], second["message"]["id"]],
             )
-            self.assertEqual(len(store.list_messages(room["id"])), 5)
+            self.assertEqual(
+                sum(
+                    message["senderKind"] == "human"
+                    for message in store.list_messages(room["id"])
+                ),
+                5,
+            )
             page_one = store.list_topics(room["id"], limit=2, cursor=None)
             page_two = store.list_topics(
                 room["id"], limit=2, cursor=page_one.next_cursor
@@ -171,7 +187,7 @@ class GroupTopicsContractTests(unittest.TestCase):
             summary_a = next(item for item in summaries if item["id"] == topic_a)
             self.assertEqual(summary_a["title"], "第一个话题")
             self.assertEqual(summary_a["preview"], "第一个话题的后续")
-            self.assertEqual(summary_a["messageCount"], 2)
+            self.assertEqual(summary_a["messageCount"], 4)
 
             other_room = store.create_room({
                 "requestId": new_id(),
@@ -1146,7 +1162,7 @@ class GroupTopicsContractTests(unittest.TestCase):
 
             store = GroupStore(path)
             store.initialize()
-            self.assertEqual(store.schema_version(), 4)
+            self.assertEqual(store.schema_version(), 5)
             with store.connection() as migrated:
                 room = migrated.execute("SELECT * FROM group_rooms").fetchone()
                 agent = migrated.execute("SELECT * FROM group_agents").fetchone()
@@ -1172,7 +1188,7 @@ class GroupTopicsContractTests(unittest.TestCase):
                     ).fetchone()[0]
                 )
             self.assertEqual(dict(room), expected_room)
-            self.assertEqual(dict(agent), expected_agent)
+            self.assertEqual(dict(agent), {**expected_agent, "is_host": 1})
             self.assertEqual(
                 (room["name"], room["max_reply_rounds"], room["archived"]),
                 ("保留群", 7, 1),
@@ -1325,7 +1341,10 @@ class GroupTopicsContractTests(unittest.TestCase):
         )
         connection.execute(
             """INSERT INTO group_agent_runs_early_fixture
-            SELECT * FROM group_agent_runs"""
+            SELECT id, room_id, topic_id, agent_id, trigger_message_id,
+                   response_message_id, root_message_id, depth, reply_mode,
+                   status, runtime_session_id, error, created_at, updated_at
+            FROM group_agent_runs"""
         )
         connection.execute(
             """CREATE TABLE group_interactions_early_fixture (
@@ -1356,6 +1375,11 @@ class GroupTopicsContractTests(unittest.TestCase):
         )
         connection.execute(
             "ALTER TABLE group_interactions_early_fixture RENAME TO group_interactions"
+        )
+        connection.execute("DROP INDEX IF EXISTS idx_group_agents_room_host")
+        connection.execute("ALTER TABLE group_agents DROP COLUMN is_host")
+        connection.execute(
+            "UPDATE group_meta SET value = '4' WHERE key = 'schema_version'"
         )
 
     @staticmethod

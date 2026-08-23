@@ -5,6 +5,7 @@ const port = Number(process.env.FAKE_HERMES_PORT || 19119)
 const epoch = '11111111-1111-4111-8111-111111111111'
 const roomId = '22222222-2222-4222-8222-222222222222'
 const agentId = '33333333-3333-4333-8333-333333333333'
+const secondAgentId = '34343434-3434-4434-8434-343434343434'
 const topicId = '77777777-7777-4777-8777-777777777777'
 const releaseTopicId = '88888888-8888-4888-8888-888888888888'
 const now = () => Date.now() / 1000
@@ -68,7 +69,9 @@ const messages = [
   { id: 'message-delegation', role: 'user', content: '[ASYNC DELEGATION BATCH COMPLETE]\n后台子任务已经完成。', display_kind: 'async_delegation_complete', display_metadata: { task_count: 2, completed_count: 2, failed_count: 0, duration_seconds: 71 }, timestamp: now() - 140 },
   { id: 'message-system', role: 'user', content: '[System: The active model for this chat has changed to gpt-5.6-terra via provider openai.]', timestamp: now() - 130 },
 ]
-const groupAgent = { id: agentId, roomId, profile: 'yaoyao', displayName: '夭夭', description: '主 Agent', enabled: true, replyWithoutMention: true, model: 'gpt-5.6', provider: 'openai', reasoningEffort: 'high', fastMode: true, status: 'idle', createdAt: now() - 2000, updatedAt: now() }
+const groupAgent = { id: agentId, roomId, profile: 'yaoyao', displayName: '夭夭', description: '主 Agent', enabled: true, replyWithoutMention: true, isHost: true, model: 'gpt-5.6', provider: 'openai', reasoningEffort: 'high', fastMode: true, status: 'idle', createdAt: now() - 2000, updatedAt: now() }
+const secondGroupAgent = { id: secondAgentId, roomId, profile: 'yaoer', displayName: '瑶儿', description: '评审 Agent', enabled: true, replyWithoutMention: false, isHost: false, model: 'gpt-5.6', provider: 'openai', reasoningEffort: 'medium', fastMode: false, status: 'idle', createdAt: now() - 1900, updatedAt: now() }
+const groupAgents = [groupAgent, secondGroupAgent]
 const groupMessage = { seq: 1, id: '44444444-4444-4444-8444-444444444444', roomId, topicId, senderKind: 'human', senderId: 'demo-user', senderName: '验收用户', content: '大家好，检查一下群聊输入框。', status: 'completed', createdAt: now() - 120, updatedAt: now() - 120 }
 const groupAssistantMessage = { seq: 2, id: '55555555-5555-4555-8555-555555555555', roomId, topicId, senderKind: 'agent', senderId: agentId, senderName: '夭夭', content: '历史兼容：MEDIA:/brand/AppIcon-1024.png', status: 'completed', createdAt: now() - 100, updatedAt: now() - 100 }
 const releaseTopicMessage = { seq: 3, id: '99999999-9999-4999-8999-999999999999', roomId, topicId: releaseTopicId, senderKind: 'human', senderId: 'demo-user', senderName: '验收用户', content: '请核对发布话题的独立历史。', status: 'completed', createdAt: now() - 500, updatedAt: now() - 500 }
@@ -78,7 +81,7 @@ const groupTopics = [
   { id: releaseTopicId, roomId, title: '发布检查', preview: releaseTopicMessage.content, messageCount: 1, createdAt: now() - 500, updatedAt: now() - 500 },
 ]
 let nextGroupSeq = 4
-const room = { id: roomId, name: '设计与工程协作', cwd: '/tmp', createdAt: now() - 2000, updatedAt: now(), archived: false, agentCount: 1, maxReplyRounds: -1, lastMessage: groupAssistantMessage, unreadCount: 0 }
+const room = { id: roomId, name: '设计与工程协作', cwd: '/tmp', createdAt: now() - 2000, updatedAt: now(), archived: false, agentCount: groupAgents.length, maxReplyRounds: -1, lastMessage: groupAssistantMessage, unreadCount: 0 }
 const rpcRequests = []
 const previewPdf = Buffer.from('JVBERi0xLjQKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFnZXMgMiAwIFI+PgplbmRvYmoKMiAwIG9iago8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PgplbmRvYmoKMyAwIG9iago8PC9UeXBlL1BhZ2UvUGFyZW50IDIgMCBSL01lZGlhQm94WzAgMCAyMDAgMjAwXT4+CmVuZG9iagp4cmVmCjAgNAowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTAgMDAwMDAgbiAKMDAwMDAwMDA1MyAwMDAwMCBuIAowMDAwMDAwMTA1IDAwMDAwIG4gCnRyYWlsZXIKPDwvU2l6ZSA0L1Jvb3QgMSAwIFI+PgpzdGFydHhyZWYKMTY2CiUlRU9G', 'base64')
 
@@ -139,17 +142,35 @@ const server = createServer(async (request, response) => {
     return session ? json(response, 200, session) : json(response, 404, { detail: 'Not found' })
   }
   if (url.pathname === '/api/session-unread') return json(response, 200, { items: { 'session-demo': 0 } })
-  if (url.pathname === '/api/plugins/yaoyao/v1/capabilities') return json(response, 200, { protocolVersion: 4, journalEpoch: epoch, latestCursor: groupCursor, limits: { maxAgentsPerRoom: 8, maxMessageBytes: 65536, maxMessagePageSize: 100, defaultMaxReplyRounds: 3, unlimitedReplyRoundsValue: -1, maxAgentDisplayNameLength: 100 }, eventTypes: ['message.upsert', 'topic.updated', 'run.updated', 'agent.status'] })
+  if (url.pathname === '/api/plugins/yaoyao/v1/capabilities') return json(response, 200, { protocolVersion: 5, journalEpoch: epoch, latestCursor: groupCursor, limits: { maxAgentsPerRoom: 8, maxMessageBytes: 65536, maxMessagePageSize: 100, defaultMaxReplyRounds: 3, unlimitedReplyRoundsValue: -1, maxAgentDisplayNameLength: 100 }, eventTypes: ['message.upsert', 'topic.updated', 'run.updated', 'agent.status', 'agent.updated'] })
   if (url.pathname === '/api/plugins/yaoyao/v1/rooms') return json(response, 200, { items: [room], nextCursor: null })
-  if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}`) return json(response, 200, { ...room, agents: [groupAgent], runs: [], pendingInteractions: [], latestCursor: groupCursor })
-  if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/agents/${agentId}` && request.method === 'PATCH') {
+  if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}`) return json(response, 200, { ...room, agents: groupAgents, runs: [], pendingInteractions: [], latestCursor: groupCursor })
+  const agentPatchMatch = new RegExp(`^/api/plugins/yaoyao/v1/rooms/${roomId}/agents/([^/]+)$`).exec(url.pathname)
+  if (agentPatchMatch && request.method === 'PATCH') {
+    const target = groupAgents.find(agent => agent.id === decodeURIComponent(agentPatchMatch[1]))
+    if (!target) return json(response, 404, { detail: 'Agent not found' })
     const input = await body(request)
     if (input.displayName === '所有人') return json(response, 409, { detail: '成员名称不能使用“所有人”' })
-    for (const key of ['displayName', 'description', 'enabled', 'replyWithoutMention', 'model', 'provider', 'reasoningEffort', 'fastMode']) {
-      if (Object.prototype.hasOwnProperty.call(input, key)) groupAgent[key] = input[key]
+    const changed = []
+    if (input.isHost === true) {
+      for (const agent of groupAgents) {
+        if (agent.id !== target.id && agent.isHost) {
+          agent.isHost = false
+          agent.updatedAt = now()
+          changed.push(agent)
+        }
+      }
     }
-    groupAgent.updatedAt = now()
-    return json(response, 200, groupAgent)
+    for (const key of ['displayName', 'description', 'enabled', 'replyWithoutMention', 'isHost', 'model', 'provider', 'reasoningEffort', 'fastMode']) {
+      if (Object.prototype.hasOwnProperty.call(input, key)) target[key] = input[key]
+    }
+    target.updatedAt = now()
+    changed.push(target)
+    json(response, 200, target)
+    setTimeout(() => {
+      for (const agent of changed) broadcastGroup('agent.updated', agent)
+    }, 10)
+    return
   }
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/topics`) {
     return json(response, 200, { items: [...groupTopics].sort((a, b) => b.updatedAt - a.updatedAt), nextCursor: null })

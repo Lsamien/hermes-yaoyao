@@ -5,6 +5,7 @@ export type UiAgent = {
   enabled?: boolean
   status?: 'idle' | 'working' | 'offline' | 'error'
   autoReply?: boolean
+  isHost?: boolean
   replyRounds?: number
 }
 

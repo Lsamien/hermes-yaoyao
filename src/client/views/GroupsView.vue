@@ -44,6 +44,7 @@ const modelOptionsLoading = ref<Record<string, boolean>>({})
 const modelOptionsError = ref<Record<string, string>>({})
 const agentUpdateBusy = ref<Record<string, boolean>>({})
 const agentUpdateError = ref<Record<string, string>>({})
+const managerError = ref('')
 const roomActionMenu = ref<{ roomId: string; x: number; y: number } | null>(null)
 const expandedRoomIds = ref(new Set<string>())
 
@@ -90,6 +91,7 @@ const messages = computed(() => groups.messages.map(groupMessageToUi))
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
 const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
 const agents = computed(() => groups.agents.map(agentToUi))
+const hostAgent = computed(() => groups.hostProtocol ? groups.agents.find(agent => agent.isHost) : undefined)
 const connected = computed(() => ['connected', 'ready'].includes(groups.connectionState))
 const activeInteraction = computed(() => groupInteraction(groups.pendingInteractions[0]))
 const room = computed(() => groups.selectedRoom ? roomToUi(groups.selectedRoom) : null)
@@ -101,8 +103,18 @@ const reference = computed<ComposerReference | null>(() => quoted.value ? { id: 
 const mentionNames = computed(() => ['所有人', ...groups.agents.map(agent => agent.displayName || agent.profile)])
 const mentionOptions = computed<ComposerOption[]>(() => [
   { id: 'all', label: '所有人', detail: '通知房间内全部 Agent' },
-  ...groups.agents.map(agent => ({ id: agent.id, label: agent.displayName || agent.profile, detail: agent.profile, disabled: !agent.enabled })),
+  ...groups.agents.map(agent => ({
+    id: agent.id,
+    label: agent.displayName || agent.profile,
+    detail: groups.hostProtocol && agent.isHost ? `主持人 · ${agent.profile}` : agent.profile,
+    disabled: !agent.enabled,
+  })),
 ])
+const roomSubtitle = computed(() => {
+  if (!groups.selectedRoom) return '选择或新建一个群聊'
+  const host = hostAgent.value ? `主持人 ${hostAgent.value.displayName || hostAgent.value.profile} · ` : ''
+  return `${groups.selectedRoom.name} · ${host}${groups.agents.length} 个 Agent · 最多 ${groups.selectedRoom.maxReplyRounds} 轮回复`
+})
 const activeAgentIds = computed(() => {
   if (!groups.topicProtocol) {
     return new Set(groups.agents.filter(agent => ['queued', 'running'].includes(agent.status)).map(agent => agent.id))
@@ -247,10 +259,16 @@ async function startTopicFromRoomAction() {
   } catch { /* store publishes the error */ }
 }
 
-async function createRoom(payload: { name: string; profiles: string[]; autoReply: boolean; replyRounds: number }) {
+async function createRoom(payload: { name: string; profiles: string[]; autoReply: boolean; replyRounds: number; hostProfile?: string }) {
+  const hostProfile = payload.hostProfile || payload.profiles[0]
   const detail = await groups.createRoom({
     name: payload.name,
-    agents: payload.profiles.map(profile => ({ profile, displayName: auth.profiles.find(item => item.name === profile)?.agentName || auth.profiles.find(item => item.name === profile)?.displayName || profile, replyWithoutMention: payload.autoReply })),
+    agents: payload.profiles.map(profile => ({
+      profile,
+      displayName: auth.profiles.find(item => item.name === profile)?.agentName || auth.profiles.find(item => item.name === profile)?.displayName || profile,
+      replyWithoutMention: payload.autoReply,
+      ...(groups.hostProtocol ? { isHost: profile === hostProfile } : {}),
+    })),
     maxReplyRounds: payload.replyRounds,
   })
   createOpen.value = false
@@ -273,11 +291,16 @@ async function updateRoom(patch: { name?: string; replyRounds?: number }) {
 
 async function addAgent(profile: string) {
   if (!groups.selectedRoom) return
-  await groups.addAgent(groups.selectedRoom.id, { profile, displayName: auth.profiles.find(item => item.name === profile)?.agentName || auth.profiles.find(item => item.name === profile)?.displayName || profile, replyWithoutMention: true })
+  await groups.addAgent(groups.selectedRoom.id, {
+    profile,
+    displayName: auth.profiles.find(item => item.name === profile)?.agentName || auth.profiles.find(item => item.name === profile)?.displayName || profile,
+    replyWithoutMention: true,
+    ...(groups.hostProtocol ? { isHost: false } : {}),
+  })
 }
 
 type AgentSettingsPatch = Partial<Pick<GroupAgent,
-  'displayName' | 'description' | 'enabled' | 'replyWithoutMention' | 'model' | 'provider' | 'reasoningEffort' | 'fastMode'>>
+  'displayName' | 'description' | 'enabled' | 'replyWithoutMention' | 'isHost' | 'model' | 'provider' | 'reasoningEffort' | 'fastMode'>>
 
 async function loadAgentModels(profile: string) {
   if (modelOptionsLoading.value[profile] || Object.prototype.hasOwnProperty.call(modelOptionsByProfile.value, profile)) return
@@ -294,16 +317,31 @@ async function loadAgentModels(profile: string) {
 
 async function updateAgent(id: string, patch: AgentSettingsPatch) {
   if (!groups.selectedRoom) return
+  managerError.value = ''
   agentUpdateBusy.value = { ...agentUpdateBusy.value, [id]: true }
   agentUpdateError.value = { ...agentUpdateError.value, [id]: '' }
   try { await groups.updateAgent(groups.selectedRoom.id, id, patch) }
-  catch (cause) { agentUpdateError.value = { ...agentUpdateError.value, [id]: cause instanceof Error ? cause.message : 'Agent 设置保存失败' } }
+  catch (cause) {
+    const message = cause instanceof Error ? cause.message : 'Agent 设置保存失败'
+    agentUpdateError.value = { ...agentUpdateError.value, [id]: message }
+    managerError.value = message
+  }
+  finally { agentUpdateBusy.value = { ...agentUpdateBusy.value, [id]: false } }
+}
+
+async function removeAgent(id: string) {
+  if (!groups.selectedRoom) return
+  managerError.value = ''
+  agentUpdateBusy.value = { ...agentUpdateBusy.value, [id]: true }
+  try { await groups.removeAgent(groups.selectedRoom.id, id) }
+  catch (cause) { managerError.value = cause instanceof Error ? cause.message : '移除 Agent 失败' }
   finally { agentUpdateBusy.value = { ...agentUpdateBusy.value, [id]: false } }
 }
 
 function clearAgentError(id: string) {
   if (!agentUpdateError.value[id]) return
   agentUpdateError.value = { ...agentUpdateError.value, [id]: '' }
+  managerError.value = ''
 }
 
 async function archiveRoom() {
@@ -383,7 +421,11 @@ watch(() => [route.params.roomId, route.params.topicId] as const, async ([roomVa
     catch { if (groups.selectedRoomId && route.fullPath !== groupRoute()) await router.replace(groupRoute()) }
   }
 })
-watch(() => groups.selectedRoomId, roomId => { if (roomId) expandRoom(roomId) })
+watch(() => groups.selectedRoomId, roomId => {
+  if (roomId) expandRoom(roomId)
+  managerError.value = ''
+  agentUpdateError.value = {}
+})
 watch(() => groups.topicProtocol, supported => { if (supported && groups.selectedRoomId) expandRoom(groups.selectedRoomId) })
 watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThinking(profile) })
 </script>
@@ -419,7 +461,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
       <MessageTimeline
         :messages="messages"
         :title="groups.topicProtocol ? (groups.selectedTopic?.title || '新话题') : (groups.selectedRoom?.name || '群聊')"
-        :subtitle="groups.selectedRoom ? `${groups.selectedRoom.name} · ${groups.agents.length} 个 Agent · 最多 ${groups.selectedRoom.maxReplyRounds} 轮回复` : '选择或新建一个群聊'"
+        :subtitle="roomSubtitle"
         :loading="groups.isLoading"
         :has-older="groups.hasMoreBefore"
         :connected="connected"
@@ -438,7 +480,8 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
       >
         <template #header-actions>
           <div class="group-header-actions">
-            <div class="group-avatars" aria-label="群聊成员"><span v-for="agent in agents.slice(0, 4)" :key="agent.id" :title="agent.name">{{ agent.name.slice(0, 1).toUpperCase() }}</span><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
+            <span v-if="hostAgent" class="group-host-chip" :title="`用户未明确 @ 时由 ${hostAgent.displayName || hostAgent.profile} 负责回应`">主持人 {{ hostAgent.displayName || hostAgent.profile }}</span>
+            <div class="group-avatars" aria-label="群聊成员"><span v-for="agent in agents.slice(0, 4)" :key="agent.id" :title="agent.isHost ? `${agent.name} · 主持人` : agent.name" :class="{ host: agent.isHost }">{{ agent.name.slice(0, 1).toUpperCase() }}</span><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
             <button class="icon-button" type="button" title="管理群聊" aria-label="管理群聊" :disabled="!groups.selectedRoom" @click="managerOpen = true"><AppIcon name="dots" /></button>
           </div>
         </template>
@@ -469,18 +512,20 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         v-if="room && groups.selectedRoom"
         :room="room"
         :agents="groups.agents"
+        :host-enabled="groups.hostProtocol"
         :available-profiles="availableProfiles"
         :busy="managerBusy"
         :model-options-by-profile="modelOptionsByProfile"
         :model-options-loading="modelOptionsLoading"
         :model-options-error="modelOptionsError"
         :agent-update-error="agentUpdateError"
+        :manager-error="managerError"
         @update-room="updateRoom"
         @add-agent="addAgent"
         @load-models="loadAgentModels"
         @clear-agent-error="clearAgentError"
         @update-agent="updateAgent"
-        @remove-agent="groups.removeAgent(groups.selectedRoom.id, $event)"
+        @remove-agent="removeAgent"
         @interrupt-agent="groups.interruptAgent($event, groups.selectedRoom.id)"
         @archive-room="archiveRoom"
       />
@@ -488,7 +533,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
   </WorkspaceView>
 
   <FloatingResourceSearch section="groups" label="搜索群聊" :items="roomSidebarItems" @select="selectRoom" />
-  <CreateGroupDialog :open="createOpen" :profiles="profiles" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
+  <CreateGroupDialog :open="createOpen" :profiles="profiles" :host-enabled="groups.hostProtocol" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
   <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="addPreviewToComposer" @source="preview = null" />
   <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" :can-add="uploadsEnabled" @add="addMediaToComposer" />
 
@@ -510,8 +555,8 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 .sidebar-primary-action:hover, .sidebar-primary-action:focus-visible { background: var(--surface-hover); outline: 0; }
 .sidebar-primary-action:focus-visible { box-shadow: inset 0 0 0 1px var(--line-strong); }
 .sidebar-primary-action:disabled { cursor: not-allowed; opacity: .35; }
-.group-header-actions { display: flex; align-items: center; gap: 8px; }.group-avatars { display: flex; align-items: center; }.group-avatars span, .group-avatars em { display: grid; width: 24px; height: 24px; margin-left: -5px; place-items: center; border: 2px solid var(--canvas); border-radius: 8px; background: var(--accent); color: var(--text-on-solid); font-size: 8px; font-style: normal; font-weight: 650; }.group-avatars span:first-child { margin-left: 0; }.group-avatars em { background: var(--surface-hover); color: var(--text-secondary); }
+.group-header-actions { display: flex; align-items: center; gap: 8px; }.group-host-chip { max-width: 150px; overflow: hidden; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line)); border-radius: 999px; background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); font-size: 9px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.group-avatars { display: flex; align-items: center; }.group-avatars span, .group-avatars em { display: grid; width: 24px; height: 24px; margin-left: -5px; place-items: center; border: 2px solid var(--canvas); border-radius: 8px; background: var(--accent); color: var(--text-on-solid); font-size: 8px; font-style: normal; font-weight: 650; }.group-avatars span.host { box-shadow: 0 0 0 1px var(--accent); }.group-avatars span:first-child { margin-left: 0; }.group-avatars em { background: var(--surface-hover); color: var(--text-secondary); }
 .group-error { display: flex; width: min(760px, calc(100% - 32px)); margin: 0 auto 4px; align-items: center; gap: 6px; color: var(--danger); font-size: 9px; }
-@media (max-width: 480px) { .group-avatars { display: none; } }
+@media (max-width: 480px) { .group-avatars, .group-host-chip { display: none; } }
 @media (prefers-reduced-motion: reduce) { .sidebar-primary-action, .group-menu-enter-active, .group-menu-leave-active { transition: none; } }
 </style>

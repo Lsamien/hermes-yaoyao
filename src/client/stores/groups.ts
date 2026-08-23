@@ -14,7 +14,7 @@ import {
 import { GroupEventSocket } from '@/api/realtime'
 import { ScopedCache } from '@/utils/cache'
 import {
-  applyGroupEnvelope, snapshotGroupRoom, upsertGroupMessage, upsertGroupTopic, type GroupProtocolState,
+  applyGroupEnvelope, convergeGroupAgents, snapshotGroupRoom, upsertGroupMessage, upsertGroupTopic, type GroupProtocolState,
 } from '@/utils/groupProtocol'
 import { createUuid } from '@/utils/id'
 import { ApiError } from '@/api/client'
@@ -60,6 +60,7 @@ export const useGroupsStore = defineStore('groups', () => {
   const rooms = computed(() => protocol.value.rooms)
   const selectedRoom = computed(() => selectedRoomId.value ? protocol.value.roomDetails[selectedRoomId.value] : undefined)
   const topicProtocol = computed(() => (capabilities.value?.protocolVersion ?? 0) >= 4)
+  const hostProtocol = computed(() => (capabilities.value?.protocolVersion ?? 0) >= 5)
   const topics = computed(() => selectedRoomId.value ? protocol.value.topicsByRoom[selectedRoomId.value] ?? [] : [])
   const selectedTopic = computed(() => selectedTopicId.value ? topics.value.find(topic => topic.id === selectedTopicId.value) : undefined)
   const messages = computed(() => topicProtocol.value
@@ -451,13 +452,9 @@ export const useGroupsStore = defineStore('groups', () => {
   function publishAgent(roomId: string, agent: GroupAgent): void {
     const detail = protocol.value.roomDetails[roomId]
     if (!detail) return
-    const index = detail.agents.findIndex(item => item.id === agent.id)
-    const agents = [...detail.agents]
-    if (index < 0) agents.push(agent)
-    else agents[index] = agent
     protocol.value = {
       ...protocol.value,
-      roomDetails: { ...protocol.value.roomDetails, [roomId]: { ...detail, agents } },
+      roomDetails: { ...protocol.value.roomDetails, [roomId]: { ...detail, agents: convergeGroupAgents(detail.agents, agent) } },
     }
   }
 
@@ -483,17 +480,28 @@ export const useGroupsStore = defineStore('groups', () => {
   }
 
   async function updateAgent(roomId: string, agentId: string, input: Partial<Omit<AgentSeed, 'profile'>> & { enabled?: boolean }): Promise<GroupAgent> {
+    const disabledHost = input.enabled === false
+      && protocol.value.roomDetails[roomId]?.agents.some(agent => agent.id === agentId && agent.isHost) === true
     const agent = await updateAgentApi(roomId, agentId, input)
     publishAgent(roomId, agent)
+    if (disabledHost && selectedRoomId.value === roomId) {
+      await loadRoomSnapshot(roomId, generation, selectionGeneration, selectedTopicId.value)
+      await saveCache()
+    }
     return agent
   }
 
   async function removeAgent(roomId: string, agentId: string): Promise<void> {
+    const removedHost = protocol.value.roomDetails[roomId]?.agents.some(agent => agent.id === agentId && agent.isHost) === true
     await removeAgentApi(roomId, agentId)
     const detail = protocol.value.roomDetails[roomId]
     if (detail) protocol.value = {
       ...protocol.value,
       roomDetails: { ...protocol.value.roomDetails, [roomId]: { ...detail, agents: detail.agents.filter(agent => agent.id !== agentId) } },
+    }
+    if (removedHost && selectedRoomId.value === roomId) {
+      await loadRoomSnapshot(roomId, generation, selectionGeneration, selectedTopicId.value)
+      await saveCache()
     }
   }
 
@@ -654,7 +662,7 @@ export const useGroupsStore = defineStore('groups', () => {
   }
 
   return {
-    availability, capabilities, topicProtocol, rooms, selectedRoomId, selectedRoom, topics, topicsForRoom, loadRoomTopics, selectedTopicId, selectedTopic,
+    availability, capabilities, topicProtocol, hostProtocol, rooms, selectedRoomId, selectedRoom, topics, topicsForRoom, loadRoomTopics, selectedTopicId, selectedTopic,
     messages, agents, pendingInteractions,
     connectionState, isLoading, isSending, error, hasMoreBefore,
     start, stop, refresh, selectRoom, selectTopic, startNewTopic, createRoom, updateRoom, archiveRoom, addAgent, updateAgent,

@@ -45,6 +45,7 @@ export interface AgentSeed {
   displayName: string
   description?: string
   replyWithoutMention?: boolean
+  isHost?: boolean
   model?: string | null
   provider?: string | null
   reasoningEffort?: string | null

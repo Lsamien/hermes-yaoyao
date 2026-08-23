@@ -236,6 +236,7 @@ export function agentToUi(agent: GroupAgent): UiAgent {
     profile: agent.profile,
     enabled: agent.enabled,
     autoReply: agent.replyWithoutMention,
+    isHost: agent.isHost,
     status: agent.status === 'running' || agent.status === 'queued' ? 'working' : agent.status === 'unknown' ? 'offline' : 'idle',
   }
 }

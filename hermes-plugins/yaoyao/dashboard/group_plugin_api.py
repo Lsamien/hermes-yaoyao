@@ -879,6 +879,8 @@ def _create_room_command(request: CreateRoomRequest) -> dict[str, object]:
                 and "reply_without_mention" not in seed.model_fields_set
             ):
                 item.pop("replyWithoutMention", None)
+            if isinstance(item, dict) and "is_host" not in seed.model_fields_set:
+                item.pop("isHost", None)
             if isinstance(item, dict):
                 for field, alias in (
                     ("model", "model"),
@@ -895,6 +897,8 @@ def _add_agent_command(request: AddAgentRequest) -> dict[str, object]:
     command = _command(request)
     if "reply_without_mention" not in request.model_fields_set:
         command.pop("replyWithoutMention", None)
+    if "is_host" not in request.model_fields_set:
+        command.pop("isHost", None)
     for field, alias in (
         ("model", "model"),
         ("provider", "provider"),

@@ -5,7 +5,7 @@ import AppIcon from '@/components/common/AppIcon.vue'
 import type { UiRoom } from './types'
 
 type AgentSettingsPatch = Partial<Pick<GroupAgent,
-  'displayName' | 'description' | 'enabled' | 'replyWithoutMention' | 'model' | 'provider' | 'reasoningEffort' | 'fastMode'>>
+  'displayName' | 'description' | 'enabled' | 'replyWithoutMention' | 'isHost' | 'model' | 'provider' | 'reasoningEffort' | 'fastMode'>>
 
 type FastModeDraft = '' | 'true' | 'false'
 
@@ -31,16 +31,18 @@ const REASONING_OPTIONS = [
   { value: 'ultra', label: 'Ultra' },
 ]
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   room: UiRoom
   agents: GroupAgent[]
+  hostEnabled?: boolean
   availableProfiles?: string[]
   modelOptionsByProfile?: Record<string, ModelOption[]>
   modelOptionsLoading?: Record<string, boolean>
   modelOptionsError?: Record<string, string>
   agentUpdateError?: Record<string, string>
+  managerError?: string
   busy?: boolean
-}>()
+}>(), { hostEnabled: false, busy: false })
 
 const emit = defineEmits<{
   updateRoom: [patch: Partial<UiRoom>]
@@ -58,6 +60,7 @@ const expandedAgentId = ref('')
 const agentDrafts = reactive<Record<string, AgentDraft>>({})
 const dirtyAgents = reactive(new Set<string>())
 const selectedAgent = computed(() => props.agents.find(agent => agent.id === expandedAgentId.value))
+const hostAgent = computed(() => props.agents.find(agent => agent.isHost))
 
 function modelKey(provider?: string | null, model?: string | null): string {
   return provider && model ? JSON.stringify([provider, model]) : ''
@@ -111,6 +114,22 @@ function saveRoom() {
     name: form.name.trim() || props.room.name,
     replyRounds: replyRounds === -1 ? -1 : Math.min(100, Math.max(1, replyRounds || 1)),
   })
+}
+
+function selectHost(event: Event) {
+  const id = (event.target as HTMLSelectElement).value
+  if (!id || id === hostAgent.value?.id) return
+  emit('updateAgent', id, { isHost: true })
+}
+
+function canRemoveAgent(agent: GroupAgent): boolean {
+  if (props.agents.length <= 1) return false
+  if (!props.hostEnabled || !agent.isHost) return true
+  return props.agents.some(candidate => candidate.id !== agent.id && candidate.enabled)
+}
+
+function removeAgentTitle(agent: GroupAgent): string {
+  return canRemoveAgent(agent) ? '移除' : agent.isHost ? '需要另一位已启用成员才能移除主持人' : '房间必须保留至少一位成员'
 }
 
 function openAgentSettings(agent: GroupAgent) {
@@ -192,13 +211,20 @@ function statusLabel(status: GroupAgent['status']): string {
 
     <section>
       <div class="section-heading"><h3>成员 <em>{{ agents.length }}/8</em></h3></div>
+      <label v-if="hostEnabled" class="host-selector">
+        <span>主持人<small>用户没有明确 @ 时始终负责回应；“无需 @ 也回复”仍独立生效。</small></span>
+        <select :value="hostAgent?.id || ''" aria-label="主持人" :disabled="busy" @change="selectHost">
+          <option v-for="agent in agents" :key="agent.id" :value="agent.id" :disabled="!agent.enabled && !agent.isHost">{{ agent.displayName }}</option>
+        </select>
+      </label>
+      <p v-if="managerError" class="agent-save-error" role="alert">{{ managerError }}</p>
       <div class="agent-list">
         <article v-for="agent in agents" :key="agent.id">
           <span class="agent-avatar">{{ agent.displayName.slice(0, 1).toUpperCase() }}<i :class="`status-${agent.status}`" /></span>
-          <span class="agent-copy"><strong>{{ agent.displayName }}</strong><small>{{ agent.profile }} · {{ statusLabel(agent.status) }}</small></span>
+          <span class="agent-copy"><span class="agent-name-line"><strong>{{ agent.displayName }}</strong><em v-if="hostEnabled && agent.isHost" class="host-badge">主持人</em></span><small>{{ agent.profile }} · {{ statusLabel(agent.status) }}</small></span>
           <button class="agent-action" type="button" :title="`设置 ${agent.displayName}`" :aria-label="`设置${agent.displayName}`" @click="openAgentSettings(agent)"><AppIcon name="settings" :size="14" /></button>
           <button v-if="agent.status === 'running' || agent.status === 'queued'" class="agent-action" type="button" title="中断" @click="emit('interruptAgent', agent.id)"><AppIcon name="stop" :size="13" /></button>
-          <button class="agent-action danger" type="button" title="移除" :disabled="agents.length <= 1" @click="emit('removeAgent', agent.id)"><AppIcon name="trash" :size="14" /></button>
+          <button class="agent-action danger" type="button" :title="removeAgentTitle(agent)" :aria-label="`移除${agent.displayName}`" :disabled="!canRemoveAgent(agent) || busy" @click="emit('removeAgent', agent.id)"><AppIcon name="trash" :size="14" /></button>
         </article>
       </div>
 
@@ -222,7 +248,7 @@ function statusLabel(status: GroupAgent['status']): string {
         <header>
           <span>
             <small>Agent 设置</small>
-            <strong>{{ selectedAgent.displayName }}</strong>
+            <strong class="settings-agent-name">{{ selectedAgent.displayName }}<em v-if="hostEnabled && selectedAgent.isHost" class="host-badge">主持人</em></strong>
           </span>
           <button class="agent-settings-close" type="button" aria-label="关闭 Agent 设置" title="关闭 Agent 设置" @click="closeAgentSettings"><AppIcon name="close" :size="17" /></button>
         </header>
@@ -257,8 +283,9 @@ function statusLabel(status: GroupAgent['status']): string {
           </div>
           <div class="editor-toggles">
             <label><input v-model="agentDrafts[selectedAgent.id].enabled" type="checkbox" aria-label="启用" @change="markDirty(selectedAgent.id)" />启用</label>
-            <label><input v-model="agentDrafts[selectedAgent.id].replyWithoutMention" type="checkbox" aria-label="自动回复" @change="markDirty(selectedAgent.id)" />自动回复</label>
+            <label><input v-model="agentDrafts[selectedAgent.id].replyWithoutMention" type="checkbox" :aria-label="hostEnabled ? '无需 @ 也回复' : '自动回复'" @change="markDirty(selectedAgent.id)" />{{ hostEnabled ? '无需 @ 也回复' : '自动回复' }}</label>
           </div>
+          <p v-if="hostEnabled" class="host-explanation">{{ selectedAgent.isHost ? '主持人始终处理用户无 @ 消息；此开关仅决定是否自动参与 Agent 发出的无 @ 消息。' : '开启后，该成员会自动参与未明确 @ 的消息；用户无 @ 消息仍由主持人兜底。' }}</p>
           <p v-if="agentUpdateError?.[selectedAgent.id]" class="agent-save-error" role="alert">{{ agentUpdateError[selectedAgent.id] }}</p>
           <div class="editor-actions">
             <button class="quiet-button" type="button" :disabled="busy || !hasAgentChanges(selectedAgent)" @click="resetAgent(selectedAgent)">取消更改</button>
@@ -279,12 +306,14 @@ h3 { margin: 0 0 13px; color: var(--text-secondary); font-size: 10px; font-weigh
 label { display: flex; flex-direction: column; gap: 5px; margin: 0 0 11px; color: var(--text-muted); font-size: 10px; }
 input, textarea, select { width: 100%; padding: 8px 9px; border: 1px solid var(--line); border-radius: 9px; outline: 0; resize: vertical; background: var(--surface-soft); color: var(--text-primary); font-size: 11px; } input:focus, textarea:focus, select:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }
 .rounds { flex-direction: row; align-items: center; justify-content: space-between; }.rounds > span { display: flex; flex-direction: column; gap: 2px; }.rounds small { color: var(--text-muted); font-size: 9px; }.rounds input { width: 62px; text-align: center; }
+.host-selector { display: grid; grid-template-columns: minmax(0, 1fr) 128px; align-items: center; gap: 10px; margin-bottom: 10px; padding: 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }.host-selector > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; color: var(--text-secondary); font-weight: 650; }.host-selector small { color: var(--text-muted); font-size: 9px; font-weight: 400; line-height: 1.4; }.host-selector select { padding: 7px 8px; background: var(--surface); }
 .agent-list { display: flex; flex-direction: column; gap: 7px; }.agent-list article { display: grid; grid-template-columns: 32px minmax(0,1fr) repeat(3, 28px); align-items: center; gap: 7px; padding: 8px; border: 1px solid transparent; border-radius: 10px; background: var(--surface-soft); }
 .agent-avatar { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--accent); color: var(--text-on-solid); font-size: 10px; font-weight: 700; }.agent-avatar i { position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; border: 2px solid var(--surface-soft); border-radius: 50%; background: var(--text-muted); }.agent-avatar .status-running, .agent-avatar .status-queued { background: var(--warning); }.agent-avatar .status-idle { background: var(--success); }.agent-avatar .status-awaiting_input { background: var(--warning); }
-.agent-copy { display: flex; min-width: 0; flex-direction: column; }.agent-copy strong, .agent-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.agent-copy strong { font-size: 11px; }.agent-copy small { margin-top: 2px; color: var(--text-muted); font-size: 9px; }
+.agent-copy { display: flex; min-width: 0; flex-direction: column; }.agent-name-line, .settings-agent-name { display: flex; min-width: 0; align-items: center; gap: 5px; }.agent-copy strong, .agent-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.agent-copy strong { min-width: 0; font-size: 11px; }.agent-copy small { margin-top: 2px; color: var(--text-muted); font-size: 9px; }.host-badge { flex: 0 0 auto; padding: 2px 5px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 999px; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--accent); font-size: 8px; font-style: normal; font-weight: 650; line-height: 1.2; }
 .agent-action { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; }.agent-action:hover { background: var(--surface-hover); color: var(--text-primary); }.agent-action.danger:hover { color: var(--danger); }.agent-action:disabled { cursor: not-allowed; opacity: .25; }
 .agent-settings-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--text-primary) 24%, transparent); }.agent-settings-dialog { width: min(100%, 520px); max-height: min(720px, calc(100vh - 48px)); overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: 0 24px 72px color-mix(in srgb, var(--text-primary) 24%, transparent); }.agent-settings-dialog header { min-height: 68px; padding: 0 20px; border-bottom: 1px solid var(--line); border-radius: 16px 16px 0 0; }.agent-settings-close { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }.agent-settings-close:hover { background: var(--surface-hover); color: var(--text-primary); }.agent-editor { display: block; min-width: 0; margin: 0; padding: 20px; border: 0; }.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }.editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }.editor-grid > label:nth-child(1), .editor-grid > label:nth-child(2) { grid-column: 1 / -1; }.editor-grid label:last-child { margin-bottom: 7px; }.editor-note { margin: -1px 2px 0; color: var(--text-muted); font-size: 9px; }.editor-note.error { color: var(--danger); }
 .editor-toggles { display: flex; align-items: center; gap: 16px; padding: 3px 0 12px; }.editor-toggles label { display: flex; flex-direction: row; align-items: center; gap: 5px; margin: 0; color: var(--text-secondary); }.editor-toggles input { width: auto; margin: 0; accent-color: var(--accent); }
+.host-explanation { margin: -4px 0 12px; color: var(--text-muted); font-size: 9px; line-height: 1.5; }
 .agent-save-error { margin: 0 0 10px; color: var(--danger); font-size: 9px; line-height: 1.45; }
 .editor-actions { display: flex; justify-content: flex-end; gap: 7px; }.editor-actions button { min-height: 30px; padding: 0 10px; border-radius: 8px; cursor: pointer; font-size: 10px; }.editor-actions button:disabled { cursor: not-allowed; opacity: .35; }.save-agent { border: 1px solid var(--accent); background: var(--accent); color: var(--text-on-solid); }
 .add-agent { margin-top: 8px; }.add-agent select { cursor: pointer; }
