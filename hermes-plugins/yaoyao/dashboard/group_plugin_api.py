@@ -117,6 +117,8 @@ RequestIDRequest = _protocol.RequestIDRequest
 SendMessageRequest = _protocol.SendMessageRequest
 UpdateAgentRequest = _protocol.UpdateAgentRequest
 UpdateRoomRequest = _protocol.UpdateRoomRequest
+UpdateTopicRequest = _protocol.UpdateTopicRequest
+MarkTopicReadRequest = _protocol.MarkTopicReadRequest
 
 GroupStore = _store_module.GroupStore
 GroupStoreError = _store_module.GroupStoreError
@@ -1059,6 +1061,28 @@ async def list_topics(
     return {"items": page.items, "nextCursor": page.next_cursor}
 
 
+async def update_topic(
+    room_id: UUID, topic_id: UUID, request: UpdateTopicRequest
+) -> dict[str, object]:
+    return await _runtime_call(
+        "update_topic",
+        room_id=str(room_id),
+        topic_id=str(topic_id),
+        command=_command(request, exclude_unset=True),
+    )
+
+
+async def mark_topic_read(
+    room_id: UUID, topic_id: UUID, request: MarkTopicReadRequest
+) -> dict[str, object]:
+    return await _runtime_call(
+        "mark_topic_read",
+        room_id=str(room_id),
+        topic_id=str(topic_id),
+        command=_command(request, exclude_unset=True),
+    )
+
+
 async def create_room(request: CreateRoomRequest) -> dict[str, object]:
     return await _runtime_call("create_room", command=_create_room_command(request))
 
@@ -1253,6 +1277,14 @@ def _build_router() -> APIRouter:
         methods=["POST"],
     )
     built.add_api_route("/rooms/{room_id}/topics", list_topics, methods=["GET"])
+    built.add_api_route(
+        "/rooms/{room_id}/topics/{topic_id}", update_topic, methods=["PATCH"]
+    )
+    built.add_api_route(
+        "/rooms/{room_id}/topics/{topic_id}/read",
+        mark_topic_read,
+        methods=["PATCH"],
+    )
     built.add_api_route(
         "/rooms/{room_id}/uploads", upload_group_files, methods=["POST"]
     )

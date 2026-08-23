@@ -18,7 +18,7 @@ from pydantic import (
 )
 
 
-PROTOCOL_VERSION = 7
+PROTOCOL_VERSION = 8
 MAX_AGENTS_PER_ROOM = 8
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_TOOL_STATE_BYTES = 256 * 1024
@@ -57,6 +57,7 @@ EVENT_TYPES = frozenset({
     "agent.status",
     "message.upsert",
     "topic.updated",
+    "room.activity",
     "interaction.requested",
     "interaction.resolved",
     "run.updated",
@@ -170,6 +171,24 @@ class UpdateRoomRequest(GroupModel):
     @classmethod
     def validate_max_reply_rounds(cls, value: int | None) -> int | None:
         return None if value is None else normalize_max_reply_rounds(value)
+
+
+class UpdateTopicRequest(GroupModel):
+    request_id: UUID = Field(alias="requestId")
+    title: str = Field(min_length=1, max_length=120)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        normalized = " ".join(value.split()).strip()
+        if not normalized:
+            raise ValueError("title must not be blank")
+        return normalized
+
+
+class MarkTopicReadRequest(GroupModel):
+    request_id: UUID = Field(alias="requestId")
+    through_seq: StrictInt = Field(alias="throughSeq", ge=0)
 
 
 class AddAgentRequest(GroupModel):

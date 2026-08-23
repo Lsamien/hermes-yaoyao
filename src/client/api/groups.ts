@@ -1,5 +1,5 @@
 import type {
-  GroupAgent, GroupCapabilities, GroupInteraction, GroupMessagePage, GroupRoomDetail, GroupRoomPage, GroupRun, GroupTopicPage, JsonValue, UploadReference,
+  GroupAgent, GroupCapabilities, GroupInteraction, GroupMessagePage, GroupRoomDetail, GroupRoomPage, GroupRun, GroupTopicPage, GroupTopicSummary, JsonValue, UploadReference,
 } from '@shared/types'
 import { apiRequest, apiUrl, unwrapData } from './client'
 import {
@@ -38,6 +38,12 @@ export async function getGroupTopics(roomId: string, cursor?: string, limit = 50
     items: values(source.items ?? source.topics ?? payload).map(normalizeGroupTopic).filter(topic => topic.id && topic.roomId),
     nextCursor: typeof source.nextCursor === 'string' ? source.nextCursor : typeof source.next_cursor === 'string' ? source.next_cursor : null,
   }
+}
+
+export async function updateGroupTopic(roomId: string, topicId: string, input: { title: string }): Promise<GroupTopicSummary> {
+  return normalizeGroupTopic(unwrapData(await apiRequest<unknown>(`${BASE}/rooms/${encodeURIComponent(roomId)}/topics/${encodeURIComponent(topicId)}`, {
+    method: 'PATCH', body: { requestId: requestId(), ...input } as JsonValue,
+  })))
 }
 
 export interface AgentSeed {

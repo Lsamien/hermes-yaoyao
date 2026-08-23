@@ -137,6 +137,14 @@ class _Store(Protocol):
         self, room_id: str, command: Mapping[str, object]
     ) -> dict[str, object]: ...
 
+    def update_topic(
+        self, room_id: str, topic_id: str, command: Mapping[str, object]
+    ) -> dict[str, object]: ...
+
+    def mark_topic_read(
+        self, room_id: str, topic_id: str, command: Mapping[str, object]
+    ) -> dict[str, object]: ...
+
     def add_agent(
         self, room_id: str, command: Mapping[str, object]
     ) -> dict[str, object]: ...
@@ -746,6 +754,56 @@ class GroupOrchestrator:
             result = await asyncio.to_thread(self.store.update_room, room_id, command)
             if not isinstance(result, Mapping):
                 raise GroupOrchestratorError("Updated room is invalid")
+            self.wake()
+            return dict(result)
+
+    async def update_topic(
+        self, *, room_id: str, topic_id: str, command: Mapping[str, object]
+    ) -> dict[str, object]:
+        _required_string(room_id, "roomId")
+        _required_string(topic_id, "topicId")
+        safe_command = self._public_command(command)
+        request_id = str(safe_command["requestId"])
+        return await self._tracked_control(
+            lambda: self._update_topic(room_id, topic_id, safe_command),
+            task_name=f"yaoyao-group-update-topic-{request_id}",
+            failure_message="YaoYao group topic update failed",
+        )
+
+    async def _update_topic(
+        self, room_id: str, topic_id: str, command: Mapping[str, object]
+    ) -> dict[str, object]:
+        async with self._room_serial(room_id):
+            result = await asyncio.to_thread(
+                self.store.update_topic, room_id, topic_id, command
+            )
+            if not isinstance(result, Mapping):
+                raise GroupOrchestratorError("Updated topic is invalid")
+            self.wake()
+            return dict(result)
+
+    async def mark_topic_read(
+        self, *, room_id: str, topic_id: str, command: Mapping[str, object]
+    ) -> dict[str, object]:
+        _required_string(room_id, "roomId")
+        _required_string(topic_id, "topicId")
+        safe_command = self._public_command(command)
+        request_id = str(safe_command["requestId"])
+        return await self._tracked_control(
+            lambda: self._mark_topic_read(room_id, topic_id, safe_command),
+            task_name=f"yaoyao-group-mark-topic-read-{request_id}",
+            failure_message="YaoYao group topic read update failed",
+        )
+
+    async def _mark_topic_read(
+        self, room_id: str, topic_id: str, command: Mapping[str, object]
+    ) -> dict[str, object]:
+        async with self._room_serial(room_id):
+            result = await asyncio.to_thread(
+                self.store.mark_topic_read, room_id, topic_id, command
+            )
+            if not isinstance(result, Mapping):
+                raise GroupOrchestratorError("Topic read response is invalid")
             self.wake()
             return dict(result)
 

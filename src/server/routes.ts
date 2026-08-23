@@ -674,6 +674,18 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       search: searchFrom(ctx, ['limit', 'cursor']),
     })
   })
+  router.patch('/api/app/groups/rooms/:roomID/topics/:topicID', async (ctx) => {
+    const topicID = canonicalUUID(ctx.params.topicID, 'topic ID')
+    await proxy(ctx, dependencies.upstream, groupPath(ctx, `/topics/${topicID}`), {
+      method: 'PATCH', requestBody: body(ctx),
+    })
+  })
+  router.patch('/api/app/groups/rooms/:roomID/topics/:topicID/read', async (ctx) => {
+    const topicID = canonicalUUID(ctx.params.topicID, 'topic ID')
+    await proxy(ctx, dependencies.upstream, groupPath(ctx, `/topics/${topicID}/read`), {
+      method: 'PATCH', requestBody: body(ctx),
+    })
+  })
   router.get('/api/app/groups/rooms/:roomID/messages', async (ctx) => {
     await proxy(ctx, dependencies.upstream, groupPath(ctx, '/messages'), {
       search: searchFrom(ctx, ['topicId', 'beforeSeq', 'afterSeq', 'limit']),

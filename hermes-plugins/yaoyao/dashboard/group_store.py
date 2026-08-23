@@ -41,7 +41,7 @@ from .group_protocol import (
 )
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 _WAL_RETRY_DELAYS = (0.01, 0.02, 0.04, 0.08)
 EVENT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MIN_RETAINED_EVENTS = 100_000
@@ -120,6 +120,7 @@ _SCHEMA_STATEMENTS = (
         id TEXT PRIMARY KEY,
         room_id TEXT NOT NULL REFERENCES group_rooms(id) ON DELETE CASCADE,
         title TEXT NOT NULL,
+        last_read_message_seq INTEGER NOT NULL DEFAULT 0,
         created_at REAL NOT NULL,
         updated_at REAL NOT NULL,
         UNIQUE(room_id, id)
@@ -475,13 +476,16 @@ class GroupStore:
             raw_version = "6"
         if raw_version == "6":
             self._migrate_v6_to_v7(connection)
+            raw_version = "7"
+        if raw_version == "7":
+            self._migrate_v7_to_v8(connection)
         self._validated_schema_version(
             self._metadata_value_from_connection(connection, "schema_version")
         )
         self._validated_epoch(
             self._metadata_value_from_connection(connection, "journal_epoch")
         )
-        self._validate_v7_columns(connection)
+        self._validate_v8_columns(connection)
         self._validate_v7_values(connection)
 
     @staticmethod
@@ -1128,11 +1132,27 @@ class GroupStore:
         )
 
     @staticmethod
-    def _validate_v7_columns(connection: sqlite3.Connection) -> None:
+    def _migrate_v7_to_v8(connection: sqlite3.Connection) -> None:
+        """Add one monotonic human-read watermark to every topic."""
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(group_topics)")
+        }
+        if "last_read_message_seq" not in columns:
+            connection.execute(
+                """ALTER TABLE group_topics ADD COLUMN
+                last_read_message_seq INTEGER NOT NULL DEFAULT 0"""
+            )
+        connection.execute(
+            "UPDATE group_meta SET value = '8' WHERE key = 'schema_version'"
+        )
+
+    @staticmethod
+    def _validate_v8_columns(connection: sqlite3.Connection) -> None:
         expected_columns = {
             "group_meta": {"key", "value"},
             "group_rooms": {"id", "name", "cwd", "max_reply_rounds", "created_at", "updated_at", "archived"},
-            "group_topics": {"id", "room_id", "title", "created_at", "updated_at"},
+            "group_topics": {"id", "room_id", "title", "last_read_message_seq", "created_at", "updated_at"},
             "group_agents": {"id", "room_id", "profile", "display_name", "display_name_key", "description", "stored_session_id", "last_context_message_seq", "enabled", "reply_without_mention", "is_host", "model_override", "provider_override", "reasoning_effort_override", "fast_mode_override", "session_config_json", "created_at", "updated_at"},
             "group_agent_topic_state": {"agent_id", "topic_id", "last_context_message_seq", "created_at", "updated_at"},
             "group_messages": {"seq", "id", "room_id", "topic_id", "sender_kind", "sender_id", "sender_name", "root_message_id", "reply_to_message_id", "client_message_id", "content", "reasoning", "tool_state_json", "status", "error", "visible", "created_at", "updated_at"},
@@ -1152,6 +1172,7 @@ class GroupStore:
             ("group_agent_runs", "topic_id"): ("TEXT", 1, None),
             ("group_interactions", "topic_id"): ("TEXT", 1, None),
             ("group_agent_topic_state", "last_context_message_seq"): ("INTEGER", 1, "0"),
+            ("group_topics", "last_read_message_seq"): ("INTEGER", 1, "0"),
         }
         for table, required in expected_columns.items():
             rows = list(connection.execute(f"PRAGMA table_info({table})"))
@@ -1251,6 +1272,15 @@ class GroupStore:
             """SELECT 1 FROM group_agent_topic_state
                 WHERE typeof(last_context_message_seq) != 'integer'
                    OR last_context_message_seq < 0
+                LIMIT 1""",
+            """SELECT 1 FROM group_topics AS topic
+                WHERE typeof(topic.last_read_message_seq) != 'integer'
+                   OR topic.last_read_message_seq < 0
+                   OR topic.last_read_message_seq > COALESCE((
+                       SELECT MAX(message.seq) FROM group_messages AS message
+                       WHERE message.topic_id = topic.id
+                         AND message.visible = 1
+                   ), 0)
                 LIMIT 1""",
             """SELECT 1 FROM group_messages AS message
                 LEFT JOIN group_topics AS topic ON topic.id = message.topic_id
@@ -1663,8 +1693,19 @@ class GroupStore:
         params.append(limit + 1)
         with self.connection() as connection:
             rows = connection.execute(query, params).fetchall()
+            items = []
+            for row in rows[:limit]:
+                summary = self._room_summary(row)
+                activity = self._room_activity_from_connection(
+                    connection, str(row["id"])
+                )
+                summary.update({
+                    "activeRunCount": activity["activeRunCount"],
+                    "unreadCount": activity["unreadCount"],
+                    "lastMessage": activity["lastMessage"],
+                })
+                items.append(summary)
         has_more = len(rows) > limit
-        items = [self._room_summary(row) for row in rows[:limit]]
         next_cursor = None
         if has_more and items:
             last = rows[limit - 1]
@@ -1696,7 +1737,16 @@ class GroupStore:
              FROM group_messages AS latest
              WHERE latest.topic_id = topic.id AND latest.visible = 1
                AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
-             ORDER BY latest.seq DESC LIMIT 1), '') AS preview
+             ORDER BY latest.seq DESC LIMIT 1), '') AS preview,
+            (SELECT COUNT(*) FROM group_messages AS unread
+             WHERE unread.topic_id = topic.id AND unread.visible = 1
+               AND unread.sender_kind = 'agent'
+               AND (TRIM(unread.content) != '' OR TRIM(unread.error) != '')
+               AND unread.seq > topic.last_read_message_seq) AS unread_count,
+            COALESCE((SELECT MAX(visible_message.seq)
+             FROM group_messages AS visible_message
+             WHERE visible_message.topic_id = topic.id
+               AND visible_message.visible = 1), 0) AS latest_message_seq
             FROM group_topics AS topic WHERE topic.room_id = ?"""
         params: list[object] = [canonical_room_id]
         if cursor_values is not None:
@@ -1716,6 +1766,48 @@ class GroupStore:
                 canonical_room_id, last["updated_at"], last["id"]
             )
         return CursorPage(items=items, next_cursor=next_cursor)
+
+    def room_activity(self, room_id: str) -> dict[str, object]:
+        canonical_room_id = self._canonical_uuid(room_id, "roomId")
+        with self.read_transaction() as connection:
+            self._room_detail(connection, canonical_room_id, include_archived=True)
+            return self._room_activity_from_connection(connection, canonical_room_id)
+
+    def _room_activity_from_connection(
+        self, connection: sqlite3.Connection, room_id: str
+    ) -> dict[str, object]:
+        counts = connection.execute(
+            """SELECT
+              (SELECT COUNT(*) FROM group_agent_runs AS run
+               WHERE run.room_id = ?
+                 AND run.status IN ('queued', 'running', 'awaiting_input'))
+                AS active_run_count,
+              (SELECT COUNT(*) FROM group_messages AS message
+               JOIN group_topics AS topic ON topic.id = message.topic_id
+               WHERE message.room_id = ? AND message.visible = 1
+                 AND message.sender_kind = 'agent'
+                 AND (TRIM(message.content) != '' OR TRIM(message.error) != '')
+                 AND message.seq > topic.last_read_message_seq)
+                AS unread_count""",
+            (room_id, room_id),
+        ).fetchone()
+        latest = connection.execute(
+            """SELECT id FROM group_messages
+            WHERE room_id = ? AND visible = 1
+            ORDER BY seq DESC LIMIT 1""",
+            (room_id,),
+        ).fetchone()
+        last_message = None
+        if latest is not None:
+            last_message = self._message_wire(
+                self._message_with_execution_row(connection, latest["id"])
+            )
+        return {
+            "roomId": room_id,
+            "activeRunCount": int(counts["active_run_count"]),
+            "unreadCount": int(counts["unread_count"]),
+            "lastMessage": last_message,
+        }
 
     def update_room(
         self, room_id: str, command: Mapping[str, object]
@@ -1759,6 +1851,93 @@ class GroupStore:
             "room.updated",
             request_id,
             self._scoped_payload(command, canonical_room_id),
+            action,
+        )
+
+    def update_topic(
+        self, room_id: str, topic_id: str, command: Mapping[str, object]
+    ) -> dict[str, object]:
+        canonical_room_id = self._canonical_uuid(room_id, "roomId")
+        canonical_topic_id = self._canonical_uuid(topic_id, "topicId")
+        command = self._command(command, {"requestId", "title"})
+        request_id = self._command_request_id(command)
+        title = self._topic_title(self._string(command, "title"))
+
+        def action(connection: sqlite3.Connection) -> dict[str, object]:
+            self._active_room(connection, canonical_room_id)
+            self._topic_row(connection, canonical_room_id, canonical_topic_id)
+            now = self._now()
+            connection.execute(
+                """UPDATE group_topics SET title = ?, updated_at = ?
+                WHERE id = ? AND room_id = ?""",
+                (title, now, canonical_topic_id, canonical_room_id),
+            )
+            topic = self._topic_summary_by_id(
+                connection, canonical_room_id, canonical_topic_id
+            )
+            self._append_event(
+                connection, canonical_room_id, "topic.updated", topic,
+                created_at=now,
+            )
+            return topic
+
+        return self.execute_idempotent(
+            "topic.updated",
+            request_id,
+            self._scoped_payload(command, canonical_room_id, canonical_topic_id),
+            action,
+        )
+
+    def mark_topic_read(
+        self, room_id: str, topic_id: str, command: Mapping[str, object]
+    ) -> dict[str, object]:
+        canonical_room_id = self._canonical_uuid(room_id, "roomId")
+        canonical_topic_id = self._canonical_uuid(topic_id, "topicId")
+        command = self._command(command, {"requestId", "throughSeq"})
+        request_id = self._command_request_id(command)
+        through_seq = self._nonnegative_int(command.get("throughSeq"), "throughSeq")
+
+        def action(connection: sqlite3.Connection) -> dict[str, object]:
+            self._active_room(connection, canonical_room_id)
+            topic_row = self._topic_row(
+                connection, canonical_room_id, canonical_topic_id
+            )
+            maximum = int(connection.execute(
+                """SELECT COALESCE(MAX(seq), 0) FROM group_messages
+                WHERE room_id = ? AND topic_id = ? AND visible = 1""",
+                (canonical_room_id, canonical_topic_id),
+            ).fetchone()[0])
+            if through_seq > maximum:
+                raise ValueError("throughSeq exceeds the latest visible message")
+            changed = through_seq > int(topic_row["last_read_message_seq"])
+            if changed:
+                connection.execute(
+                    """UPDATE group_topics SET last_read_message_seq = ?
+                    WHERE id = ? AND room_id = ?""",
+                    (through_seq, canonical_topic_id, canonical_room_id),
+                )
+            topic = self._topic_summary_by_id(
+                connection, canonical_room_id, canonical_topic_id
+            )
+            room = self._room_activity_from_connection(
+                connection, canonical_room_id
+            )
+            if changed:
+                now = self._now()
+                self._append_event(
+                    connection, canonical_room_id, "topic.updated", topic,
+                    created_at=now,
+                )
+                self._append_event(
+                    connection, canonical_room_id, "room.activity", room,
+                    created_at=now,
+                )
+            return {"topic": topic, "room": room}
+
+        return self.execute_idempotent(
+            "topic.read",
+            request_id,
+            self._scoped_payload(command, canonical_room_id, canonical_topic_id),
             action,
         )
 
@@ -5102,6 +5281,14 @@ class GroupStore:
                 VALUES (?, ?, 'topic.updated', ?, ?)""",
                 (epoch, room_id, self._canonical_json(topic), event_time),
             )
+        if event_type in {"message.upsert", "run.updated"}:
+            activity = self._room_activity_from_connection(connection, room_id)
+            connection.execute(
+                """INSERT INTO group_events
+                (epoch, room_id, event_type, payload_json, created_at)
+                VALUES (?, ?, 'room.activity', ?, ?)""",
+                (epoch, room_id, self._canonical_json(activity), event_time),
+            )
         return int(cursor)
 
     def _append_room_updated_summary(
@@ -5236,7 +5423,16 @@ class GroupStore:
              FROM group_messages AS latest
              WHERE latest.topic_id = topic.id AND latest.visible = 1
                AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
-             ORDER BY latest.seq DESC LIMIT 1), '') AS preview
+             ORDER BY latest.seq DESC LIMIT 1), '') AS preview,
+            (SELECT COUNT(*) FROM group_messages AS unread
+             WHERE unread.topic_id = topic.id AND unread.visible = 1
+               AND unread.sender_kind = 'agent'
+               AND (TRIM(unread.content) != '' OR TRIM(unread.error) != '')
+               AND unread.seq > topic.last_read_message_seq) AS unread_count,
+            COALESCE((SELECT MAX(visible_message.seq)
+             FROM group_messages AS visible_message
+             WHERE visible_message.topic_id = topic.id
+               AND visible_message.visible = 1), 0) AS latest_message_seq
             FROM group_topics AS topic
             WHERE topic.id = ? AND topic.room_id = ?""",
             (topic_id, room_id),
@@ -6122,6 +6318,8 @@ class GroupStore:
             "title": row["title"],
             "preview": preview[:_TOPIC_PREVIEW_LENGTH],
             "messageCount": int(row["message_count"]),
+            "unreadCount": int(row["unread_count"]),
+            "latestMessageSeq": int(row["latest_message_seq"]),
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }

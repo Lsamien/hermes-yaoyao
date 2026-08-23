@@ -37,8 +37,9 @@ def new_id() -> str:
 
 class GroupTopicsContractTests(unittest.TestCase):
     def test_protocol_and_router_advertise_topics(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 7)
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 8)
         self.assertIn("topic.updated", PROTOCOL.EVENT_TYPES)
+        self.assertIn("room.activity", PROTOCOL.EVENT_TYPES)
         request = PROTOCOL.SendMessageRequest.model_validate({
             "requestId": new_id(),
             "clientMessageId": new_id(),
@@ -53,6 +54,19 @@ class GroupTopicsContractTests(unittest.TestCase):
             if hasattr(route, "methods")
         }
         self.assertIn(("/v1/rooms/{room_id}/topics", ("GET",)), route_methods)
+        self.assertIn(
+            ("/v1/rooms/{room_id}/topics/{topic_id}", ("PATCH",)),
+            route_methods,
+        )
+        self.assertIn(
+            ("/v1/rooms/{room_id}/topics/{topic_id}/read", ("PATCH",)),
+            route_methods,
+        )
+        read_request = PROTOCOL.MarkTopicReadRequest.model_validate({
+            "requestId": new_id(),
+            "throughSeq": 12,
+        })
+        self.assertEqual(read_request.through_seq, 12)
         self.assertIn(
             ("/v1/rooms/{room_id}/uploads", ("POST",)), route_methods
         )
@@ -169,6 +183,219 @@ class GroupTopicsContractTests(unittest.TestCase):
             self.assertEqual(updated["maxReplyRounds"], 5)
             self.assertEqual(updated["agents"], [before_agent])
 
+    def test_topic_title_update_is_idempotent_and_emits_topic_event(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room({
+                "requestId": new_id(),
+                "name": "话题群",
+                "cwd": "",
+                "agents": [{"profile": "default"}],
+            })
+            created = store.create_human_message(
+                room["id"],
+                request_id=new_id(),
+                client_message_id=new_id(),
+                topic_id=new_id(),
+                content="原始标题",
+                mention_agent_ids=[],
+            )
+            topic_id = created["message"]["topicId"]
+            request_id = new_id()
+            before = store.latest_cursor()
+
+            renamed = store.update_topic(
+                room["id"],
+                topic_id,
+                {"requestId": request_id, "title": "  新的\n话题标题  "},
+            )
+            repeated = store.update_topic(
+                room["id"],
+                topic_id,
+                {"requestId": request_id, "title": "  新的\n话题标题  "},
+            )
+
+            self.assertEqual(renamed["title"], "新的 话题标题")
+            self.assertEqual(repeated, renamed)
+            events = store.events_after(before, 10)
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["eventType"], "topic.updated")
+            self.assertEqual(events[0]["payload"]["title"], "新的 话题标题")
+
+    def test_schema_v7_migrates_topic_read_position_without_data_loss(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "group.db"
+            store = GroupStore(path)
+            store.initialize()
+            room = store.create_room({
+                "requestId": new_id(),
+                "name": "迁移群",
+                "cwd": "",
+                "agents": [{"profile": "default"}],
+            })
+            created = store.create_human_message(
+                room["id"],
+                request_id=new_id(),
+                client_message_id=new_id(),
+                topic_id=new_id(),
+                content="保留消息",
+                mention_agent_ids=[],
+            )
+            topic_id = created["message"]["topicId"]
+            with store.connection() as connection:
+                original_message_count = connection.execute(
+                    "SELECT COUNT(*) FROM group_messages"
+                ).fetchone()[0]
+            with store.write_transaction() as connection:
+                columns = {
+                    row["name"]
+                    for row in connection.execute("PRAGMA table_info(group_topics)")
+                }
+                if "last_read_message_seq" in columns:
+                    connection.execute(
+                        "ALTER TABLE group_topics DROP COLUMN last_read_message_seq"
+                    )
+                connection.execute(
+                    "UPDATE group_meta SET value = '7' WHERE key = 'schema_version'"
+                )
+
+            migrated = GroupStore(path)
+            migrated.initialize()
+
+            self.assertEqual(migrated.schema_version(), 8)
+            with migrated.connection() as connection:
+                topic = connection.execute(
+                    "SELECT * FROM group_topics WHERE id = ?", (topic_id,)
+                ).fetchone()
+                message_count = connection.execute(
+                    "SELECT COUNT(*) FROM group_messages"
+                ).fetchone()[0]
+            self.assertEqual(topic["last_read_message_seq"], 0)
+            self.assertEqual(message_count, original_message_count)
+
+    def test_room_activity_counts_active_runs_and_unread_agent_messages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room({
+                "requestId": new_id(),
+                "name": "活动群",
+                "cwd": "",
+                "agents": [{"profile": "default"}],
+            })
+            agent = room["agents"][0]
+            topic_id = new_id()
+            created = store.create_human_message(
+                room["id"],
+                request_id=new_id(),
+                client_message_id=new_id(),
+                topic_id=topic_id,
+                content="用户问题",
+                mention_agent_ids=[agent["id"]],
+            )
+            trigger = created["message"]
+            run = created["runs"][0]
+            with store.write_transaction() as connection:
+                connection.execute(
+                    "UPDATE group_agent_runs SET status = 'running' WHERE id = ?",
+                    (run["id"],),
+                )
+                visible_ids = [new_id(), new_id()]
+                for index, message_id in enumerate(visible_ids, start=2):
+                    connection.execute(
+                        """INSERT INTO group_messages
+                        (id, room_id, topic_id, sender_kind, sender_id, sender_name,
+                         root_message_id, content, status, visible, created_at, updated_at)
+                        VALUES (?, ?, ?, 'agent', ?, '夭夭', ?, ?, 'completed', 1, ?, ?)""",
+                        (
+                            message_id,
+                            room["id"],
+                            topic_id,
+                            agent["id"],
+                            trigger["rootMessageId"],
+                            f"回复 {index}",
+                            index,
+                            index,
+                        ),
+                    )
+                connection.execute(
+                    """INSERT INTO group_messages
+                    (id, room_id, topic_id, sender_kind, sender_id, sender_name,
+                     root_message_id, content, status, visible, created_at, updated_at)
+                    VALUES (?, ?, ?, 'agent', ?, '夭夭', ?, '隐藏', 'completed', 0, 4, 4)""",
+                    (
+                        new_id(), room["id"], topic_id, agent["id"],
+                        trigger["rootMessageId"],
+                    ),
+                )
+
+            activity = store.room_activity(room["id"])
+
+            self.assertEqual(activity["activeRunCount"], 1)
+            self.assertEqual(activity["unreadCount"], 2)
+            self.assertEqual(activity["lastMessage"]["id"], visible_ids[-1])
+
+    def test_mark_topic_read_is_monotonic_idempotent_and_emits_activity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room({
+                "requestId": new_id(),
+                "name": "已读群",
+                "cwd": "",
+                "agents": [{"profile": "default"}],
+            })
+            agent = room["agents"][0]
+            topic_id = new_id()
+            trigger = store.create_human_message(
+                room["id"], request_id=new_id(), client_message_id=new_id(),
+                topic_id=topic_id, content="问题", mention_agent_ids=[],
+            )["message"]
+            with store.write_transaction() as connection:
+                connection.execute(
+                    """INSERT INTO group_messages
+                    (id, room_id, topic_id, sender_kind, sender_id, sender_name,
+                     root_message_id, content, status, visible, created_at, updated_at)
+                    VALUES (?, ?, ?, 'agent', ?, '夭夭', ?, '回复', 'completed', 1, 2, 2)""",
+                    (
+                        new_id(), room["id"], topic_id, agent["id"],
+                        trigger["rootMessageId"],
+                    ),
+                )
+                through_seq = connection.execute(
+                    "SELECT MAX(seq) FROM group_messages WHERE topic_id = ?",
+                    (topic_id,),
+                ).fetchone()[0]
+            request_id = new_id()
+            before = store.latest_cursor()
+
+            first = store.mark_topic_read(
+                room["id"], topic_id,
+                {"requestId": request_id, "throughSeq": through_seq},
+            )
+            repeated = store.mark_topic_read(
+                room["id"], topic_id,
+                {"requestId": request_id, "throughSeq": through_seq},
+            )
+            stale = store.mark_topic_read(
+                room["id"], topic_id,
+                {"requestId": new_id(), "throughSeq": through_seq - 1},
+            )
+
+            self.assertEqual(first, repeated)
+            self.assertEqual(stale["room"]["unreadCount"], 0)
+            events = store.events_after(before, 10)
+            self.assertEqual(
+                [event["eventType"] for event in events],
+                ["topic.updated", "room.activity"],
+            )
+            with self.assertRaises(ValueError):
+                store.mark_topic_read(
+                    room["id"], topic_id,
+                    {"requestId": new_id(), "throughSeq": through_seq + 100},
+                )
+
     def test_topics_page_filter_compatibility_and_event_order(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = GroupStore(Path(directory) / "group.db")
@@ -197,9 +424,12 @@ class GroupTopicsContractTests(unittest.TestCase):
                 [
                     "message.upsert",
                     "topic.updated",
+                    "room.activity",
                     "message.upsert",
                     "topic.updated",
+                    "room.activity",
                     "run.updated",
+                    "room.activity",
                 ],
             )
             self.assertEqual(events[0]["payload"]["topicId"], topic_a)
@@ -211,11 +441,16 @@ class GroupTopicsContractTests(unittest.TestCase):
                     "title",
                     "preview",
                     "messageCount",
+                    "unreadCount",
+                    "latestMessageSeq",
                     "createdAt",
                     "updatedAt",
                 },
             )
             self.assertEqual(events[1]["payload"]["id"], topic_a)
+            self.assertEqual(events[2]["payload"]["roomId"], room["id"])
+            self.assertEqual(events[2]["payload"]["activeRunCount"], 0)
+            self.assertEqual(events[-1]["payload"]["activeRunCount"], 1)
 
             second = store.create_human_message(
                 room["id"],
@@ -1257,7 +1492,7 @@ class GroupTopicsContractTests(unittest.TestCase):
 
             store = GroupStore(path)
             store.initialize()
-            self.assertEqual(store.schema_version(), 7)
+            self.assertEqual(store.schema_version(), 8)
             with store.connection() as migrated:
                 room = migrated.execute("SELECT * FROM group_rooms").fetchone()
                 agent = migrated.execute("SELECT * FROM group_agents").fetchone()
