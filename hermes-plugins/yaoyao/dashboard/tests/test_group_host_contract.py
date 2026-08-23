@@ -34,7 +34,7 @@ def new_id() -> str:
 
 class GroupHostContractTests(unittest.TestCase):
     def test_protocol_v5_host_fields_are_independent_and_compatible(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 7)
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 8)
         legacy = PROTOCOL.CreateRoomRequest.model_validate({
             "requestId": new_id(),
             "name": "兼容群",
@@ -491,7 +491,7 @@ class GroupHostContractTests(unittest.TestCase):
 
             migrated = GroupStore(path)
             migrated.initialize()
-            self.assertEqual(migrated.schema_version(), 7)
+            self.assertEqual(migrated.schema_version(), 8)
             with migrated.connection() as connection:
                 after_counts = {
                     table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]

@@ -337,7 +337,7 @@ class GroupSettingsContractTests(unittest.TestCase):
                 )
 
     def test_protocol_v5_advertises_reply_round_contract(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 7)
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 8)
         self.assertEqual(
             PROTOCOL.limits_payload()["defaultMaxReplyRounds"], 3
         )
@@ -586,10 +586,10 @@ class GroupSettingsContractTests(unittest.TestCase):
                 agent for agent in refreshed["agents"] if agent["profile"] == "planner"
             )
             self.assertEqual(events[0]["payload"], planner)
-            self.assertEqual(
-                events[1]["payload"],
-                current.list_rooms(limit=100, cursor=None).items[0],
-            )
+            summary = current.list_rooms(limit=100, cursor=None).items[0]
+            for key in ("activeRunCount", "unreadCount", "lastMessage"):
+                summary.pop(key)
+            self.assertEqual(events[1]["payload"], summary)
 
             after_first_initialize = current.latest_cursor()
             current.initialize()
@@ -711,7 +711,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             self._create_v1_database(path)
             store = GroupStore(path)
             store.initialize()
-            self.assertEqual(store.schema_version(), 7)
+            self.assertEqual(store.schema_version(), 8)
             self.assertEqual(store.journal_epoch(), "11111111-1111-4111-8111-111111111111")
             with store.connection() as connection:
                 room = connection.execute("SELECT * FROM group_rooms").fetchone()

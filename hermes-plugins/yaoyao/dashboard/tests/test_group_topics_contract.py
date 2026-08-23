@@ -384,6 +384,7 @@ class GroupTopicsContractTests(unittest.TestCase):
             )
 
             self.assertEqual(first, repeated)
+            self.assertEqual(first["topic"]["lastReadMessageSeq"], through_seq)
             self.assertEqual(stale["room"]["unreadCount"], 0)
             events = store.events_after(before, 10)
             self.assertEqual(
@@ -443,6 +444,7 @@ class GroupTopicsContractTests(unittest.TestCase):
                     "messageCount",
                     "unreadCount",
                     "latestMessageSeq",
+                    "lastReadMessageSeq",
                     "createdAt",
                     "updatedAt",
                 },

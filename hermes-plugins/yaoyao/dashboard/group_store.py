@@ -6320,6 +6320,7 @@ class GroupStore:
             "messageCount": int(row["message_count"]),
             "unreadCount": int(row["unread_count"]),
             "latestMessageSeq": int(row["latest_message_seq"]),
+            "lastReadMessageSeq": int(row["last_read_message_seq"]),
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }
