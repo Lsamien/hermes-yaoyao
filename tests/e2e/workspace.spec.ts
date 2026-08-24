@@ -544,11 +544,9 @@ test('selects existing group topics and creates a new protocol v4 topic on first
   const sidebar = page.locator('.desktop-sidebar')
   const roomItem = sidebar.locator(`[data-sidebar-id="${roomId}"]`)
   const existingTopic = sidebar.locator(`[data-sidebar-id="${existingTopicSidebarId}"]`)
+  await roomItem.click()
   await expect(existingTopic).toContainText('发布检查')
-  await roomItem.getByRole('button', { name: '收起 设计与工程协作 的话题' }).click()
-  await expect(existingTopic).toHaveCount(0)
-  await roomItem.getByRole('button', { name: '展开 设计与工程协作 的话题' }).click()
-  await expect(existingTopic).toContainText('发布检查')
+  await expect(existingTopic).toHaveClass(/sidebar-item--topic/)
 
   const existingTopicRequest = page.waitForRequest(request => {
     const url = new URL(request.url())
@@ -569,10 +567,11 @@ test('selects existing group topics and creates a new protocol v4 topic on first
   await expect(timeline.getByText('请核对发布话题的独立历史。', { exact: true })).toBeVisible()
   await expect(timeline.getByText('大家好，检查一下群聊输入框。', { exact: true })).toHaveCount(0)
 
+  await sidebar.locator(`[data-sidebar-id="group-list"]`).click()
   await roomItem.click({ button: 'right' })
   const roomActions = page.getByRole('menu', { name: '群聊房间操作' })
   await roomActions.getByRole('menuitem', { name: '新建话题' }).click()
-  const draftTopic = sidebar.locator('.sidebar-item--nested').filter({ hasText: '新话题' })
+  const draftTopic = sidebar.locator('.sidebar-item--topic').filter({ hasText: '新话题' })
   await expect(draftTopic).toBeVisible()
   const draftSidebarId = await draftTopic.getAttribute('data-sidebar-id')
   const newTopicId = draftSidebarId?.split(':').at(-1) || ''

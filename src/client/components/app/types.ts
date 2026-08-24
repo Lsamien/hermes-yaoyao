@@ -8,9 +8,10 @@ export type SidebarItem = {
   unread?: number
   pinned?: boolean
   nested?: boolean
+  topic?: boolean
   showMore?: boolean
   expandable?: boolean
   expanded?: boolean
   status?: 'online' | 'working' | 'offline'
-  icon?: 'chat' | 'groups' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'artifacts' | 'branch'
+  icon?: 'chat' | 'groups' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'artifacts' | 'branch' | 'topic' | 'chevron-left'
 }

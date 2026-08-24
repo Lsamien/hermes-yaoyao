@@ -477,6 +477,7 @@ export const useGroupsStore = defineStore('groups', () => {
     const topic = await archiveTopicApi(roomId, topicId)
     const current = protocol.value.topicsByRoom[roomId] ?? []
     protocol.value = { ...protocol.value, topicsByRoom: { ...protocol.value.topicsByRoom, [roomId]: current.map(item => item.id === topic.id ? topic : item) } }
+    pinnedTopics.value = pinnedTopics.value.filter(item => item.id !== topic.id)
     if (selectedRoomId.value === roomId && selectedTopicId.value === topicId) {
       selectedTopicId.value = current.find(item => item.id !== topicId && !item.archived)?.id
     }
@@ -490,6 +491,15 @@ export const useGroupsStore = defineStore('groups', () => {
     pinnedTopics.value = pinned
       ? upsertGroupTopic(pinnedTopics.value, topic)
       : pinnedTopics.value.filter(item => item.id !== topic.id)
+    await saveCache()
+    return topic
+  }
+
+  async function renameTopic(roomId: string, topicId: string, title: string): Promise<GroupTopicSummary> {
+    const topic = await updateTopicApi(roomId, topicId, { title })
+    const current = protocol.value.topicsByRoom[roomId] ?? []
+    protocol.value = { ...protocol.value, topicsByRoom: { ...protocol.value.topicsByRoom, [roomId]: upsertGroupTopic(current, topic) } }
+    if (topic.pinned) pinnedTopics.value = upsertGroupTopic(pinnedTopics.value, topic)
     await saveCache()
     return topic
   }
@@ -733,7 +743,7 @@ export const useGroupsStore = defineStore('groups', () => {
     availability, capabilities, topicProtocol, hostProtocol, activityProtocol, rooms, selectedRoomId, selectedRoom, topics, topicsForRoom, loadRoomTopics, selectedTopicId, selectedTopic,
     messages, agents, pendingInteractions,
     connectionState, isLoading, isSending, error, hasMoreBefore,
-    pinnedTopics, start, stop, refresh, selectRoom, selectTopic, startNewTopic, createRoom, updateRoom, archiveRoom, restoreRoom, archiveTopic, restoreTopic, setTopicPinned, loadPinnedTopics, archivedRooms, archivedTopics, addAgent, updateAgent,
+    pinnedTopics, start, stop, refresh, selectRoom, selectTopic, startNewTopic, createRoom, updateRoom, archiveRoom, restoreRoom, archiveTopic, restoreTopic, setTopicPinned, renameTopic, loadPinnedTopics, archivedRooms, archivedTopics, addAgent, updateAgent,
     removeAgent, sendMessage, loadOlder, interruptAgent, approveInteraction, clarifyInteraction,
   }
 })

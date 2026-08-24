@@ -46,42 +46,69 @@ const agentUpdateBusy = ref<Record<string, boolean>>({})
 const agentUpdateError = ref<Record<string, string>>({})
 const managerError = ref('')
 const roomActionMenu = ref<{ roomId: string; topicId?: string; x: number; y: number } | null>(null)
-const expandedRoomIds = ref(new Set<string>())
+const topicActionRenaming = ref(false)
+const topicActionRenameValue = ref('')
+const topicListRoomId = ref<string | null>(null)
 const archivedOverlayOpen = ref(false)
 const archivedRoomList = ref<GroupRoomSummary[]>([])
 const archivedTopicList = ref<GroupTopicSummary[]>([])
-const pinnedTopicsExpanded = ref(true)
 
 const activeRooms = computed(() => groups.rooms.filter(room => !room.archived))
 const roomSidebarItems = computed(() => activeRooms.value.map(roomSidebarItem))
 const pinnedTopics = computed(() => groups.pinnedTopics.filter(topic => !topic.archived).sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id)))
+const topicListRoom = computed(() => topicListRoomId.value ? activeRooms.value.find(room => room.id === topicListRoomId.value) : undefined)
+const sidebarSubtitle = computed(() => topicListRoom.value
+  ? `${topicListRoom.value.agentCount} 个 Agent`
+  : groups.availability === 'available' ? `${activeRooms.value.length} 个活跃房间` : `9119 群聊 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}`)
+const GROUP_LIST_BACK_ID = 'group-list'
 function topicSidebarItemId(roomId: string, topicId: string): string { return `topic:${roomId}:${topicId}` }
 function topicFromSidebarItemId(id: string): { roomId: string; topicId: string } | undefined {
   const match = /^topic:([^:]+):([^:]+)$/.exec(id)
   return match ? { roomId: match[1]!, topicId: match[2]! } : undefined
 }
+function topicTimeSection(updatedAt: number): string {
+  const timestamp = updatedAt < 10_000_000_000 ? updatedAt * 1000 : updatedAt
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (timestamp >= today.getTime()) return '今天'
+  if (timestamp >= yesterday.getTime()) return '昨天'
+  return '更早'
+}
 const sidebarItems = computed<SidebarItem[]>(() => {
-  const pinned: SidebarItem[] = pinnedTopics.value.length ? [{
-    id: 'pinned-topics', title: '话题置顶', subtitle: `${pinnedTopics.value.length} 个置顶话题`, section: '话题置顶', icon: 'branch', expandable: true, expanded: pinnedTopicsExpanded.value, showMore: false,
-  }, ...(!pinnedTopicsExpanded.value ? [] : pinnedTopics.value.map(topic => ({
-    id: topicSidebarItemId(topic.roomId, topic.id), title: topic.title, subtitle: activeRooms.value.find(room => room.id === topic.roomId)?.name || topic.preview, meta: '已置顶', section: '话题置顶', icon: 'branch' as const, nested: true, showMore: false, active: topic.id === groups.selectedTopicId,
-  })))] : []
-  return [...pinned, ...activeRooms.value.flatMap(room => {
-  const roomItem = roomSidebarItem(room)
-  const expanded = groups.topicProtocol && expandedRoomIds.value.has(room.id)
-  roomItem.expandable = groups.topicProtocol
-  roomItem.expanded = expanded
-  const items: SidebarItem[] = [roomItem]
-  if (!expanded) return items
-  items.push(...groups.topicsForRoom(room.id).map(topic => ({
+  const room = topicListRoom.value
+  if (!room) return activeRooms.value.map(item => ({ ...roomSidebarItem(item), section: undefined }))
+  const items: SidebarItem[] = [{
+    id: GROUP_LIST_BACK_ID,
+    title: '返回群聊记录',
+    section: room.name,
+    icon: 'chevron-left',
+    showMore: false,
+  }]
+  const roomTopics = groups.topicsForRoom(room.id)
+  items.push(...roomTopics.filter(topic => topic.pinned).map(topic => ({
     id: topicSidebarItemId(room.id, topic.id),
     title: topic.title,
     subtitle: topic.preview || `${topic.messageCount} 条消息`,
     meta: topic.unreadCount ? `${topic.unreadCount} 未读` : `${topic.messageCount} 条`,
     unread: topic.unreadCount,
-    section: roomItem.section,
-    icon: 'branch' as const,
-    nested: true,
+    pinned: true,
+    section: '话题置顶',
+    icon: 'topic' as const,
+    topic: true,
+    showMore: false,
+    active: topic.id === groups.selectedTopicId,
+  })))
+  items.push(...roomTopics.filter(topic => !topic.pinned).map(topic => ({
+    id: topicSidebarItemId(room.id, topic.id),
+    title: topic.title,
+    subtitle: topic.preview || `${topic.messageCount} 条消息`,
+    meta: topic.unreadCount ? `${topic.unreadCount} 未读` : `${topic.messageCount} 条`,
+    unread: topic.unreadCount,
+    section: topicTimeSection(topic.updatedAt),
+    icon: 'topic' as const,
+    topic: true,
     showMore: false,
     active: topic.id === groups.selectedTopicId,
   })))
@@ -90,15 +117,14 @@ const sidebarItems = computed<SidebarItem[]>(() => {
       id: topicSidebarItemId(room.id, groups.selectedTopicId),
       title: '新话题',
       subtitle: '发送第一条消息以创建',
-      section: roomItem.section,
-      icon: 'branch',
-      nested: true,
+      section: '今天',
+      icon: 'topic',
+      topic: true,
       showMore: false,
       active: true,
     })
   }
-    return items
-  })]
+  return items
 })
 const messages = computed(() => groups.messages.map(groupMessageToUi))
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
@@ -162,6 +188,12 @@ function groupRoute(roomId = groups.selectedRoomId, topicId = groups.selectedTop
 const roomActionMenuStyle = computed(() => roomActionMenu.value
   ? { left: `${roomActionMenu.value.x}px`, top: `${roomActionMenu.value.y}px` }
   : {})
+const actionTopic = computed(() => {
+  const action = roomActionMenu.value
+  if (!action?.topicId) return undefined
+  return groups.topicsForRoom(action.roomId).find(item => item.id === action.topicId)
+    || groups.pinnedTopics.find(item => item.id === action.topicId)
+})
 
 function restoreShowThinking(profile = auth.activeProfile?.name || 'default') {
   showThinking.value = readAgentShowThinking(auth.user?.id ?? 'local', profile)
@@ -179,7 +211,7 @@ function stopActiveTopic() {
 async function selectRoom(id: string) {
   try { await groups.selectRoom(id) }
   catch { return }
-  expandRoom(id)
+  topicListRoomId.value = id
   await router.push(groupRoute())
   quoted.value = null
 }
@@ -193,13 +225,16 @@ async function selectTopic(id: string) {
 }
 
 async function selectSidebarItem(id: string) {
-  if (id === 'pinned-topics') return
+  if (id === GROUP_LIST_BACK_ID) {
+    topicListRoomId.value = null
+    return
+  }
   const topic = topicFromSidebarItemId(id)
   if (topic) {
     if (topic.roomId !== groups.selectedRoomId) {
       try { await groups.selectRoom(topic.roomId, topic.topicId) }
       catch { return }
-      expandRoom(topic.roomId)
+      topicListRoomId.value = topic.roomId
       await router.push(groupRoute())
       quoted.value = null
       return
@@ -208,25 +243,6 @@ async function selectSidebarItem(id: string) {
     return
   }
   await selectRoom(id)
-}
-
-function expandRoom(roomId: string) {
-  if (!groups.topicProtocol || expandedRoomIds.value.has(roomId)) return
-  expandedRoomIds.value = new Set([...expandedRoomIds.value, roomId])
-}
-
-async function toggleRoomTopics(roomId: string) {
-  if (roomId === 'pinned-topics') { pinnedTopicsExpanded.value = !pinnedTopicsExpanded.value; return }
-  if (!groups.topicProtocol) return
-  if (expandedRoomIds.value.has(roomId)) {
-    const next = new Set(expandedRoomIds.value)
-    next.delete(roomId)
-    expandedRoomIds.value = next
-    return
-  }
-  expandRoom(roomId)
-  try { await groups.loadRoomTopics(roomId) }
-  catch { /* store-level request errors are surfaced when the room is opened */ }
 }
 
 async function openRoomManager(id: string) {
@@ -241,6 +257,10 @@ function openRoomActions(roomId: string, event: MouseEvent) {
   const height = topic ? 80 : 80
   const inset = 8
   if (topic) {
+    topicActionRenaming.value = false
+    topicActionRenameValue.value = groups.topicsForRoom(topic.roomId).find(item => item.id === topic.topicId)?.title
+      || groups.pinnedTopics.find(item => item.id === topic.topicId)?.title
+      || ''
     roomActionMenu.value = {
       roomId: topic.roomId,
       topicId: topic.topicId,
@@ -257,7 +277,15 @@ function openRoomActions(roomId: string, event: MouseEvent) {
   }
 }
 
-function closeRoomActions() { roomActionMenu.value = null }
+function openTopicActions(roomId: string, topicId: string, event: MouseEvent) {
+  openRoomActions(topicSidebarItemId(roomId, topicId), event)
+}
+
+function closeRoomActions() {
+  roomActionMenu.value = null
+  topicActionRenaming.value = false
+  topicActionRenameValue.value = ''
+}
 
 function handleRoomActionPointer(event: PointerEvent) {
   if (!roomActionMenu.value || (event.target as HTMLElement).closest('.group-room-actions')) return
@@ -275,7 +303,7 @@ async function startTopicFromRoomAction() {
   if (!roomId) return
   try {
     await groups.selectRoom(roomId)
-    expandRoom(roomId)
+    topicListRoomId.value = roomId
     const topicId = await groups.startNewTopic()
     if (!topicId) return
     await router.push(groupRoute(roomId, topicId))
@@ -399,10 +427,18 @@ async function archiveTopicFromAction() {
 
 async function toggleTopicPinnedFromAction() {
   const action = roomActionMenu.value
+  const topic = actionTopic.value
   closeRoomActions()
   if (!action?.topicId) return
-  const topic = groups.topicsForRoom(action.roomId).find(item => item.id === action.topicId)
   await groups.setTopicPinned(action.roomId, action.topicId, !topic?.pinned)
+}
+
+async function renameTopicFromAction() {
+  const action = roomActionMenu.value
+  const title = topicActionRenameValue.value.trim()
+  if (!action?.topicId || !title) return
+  await groups.renameTopic(action.roomId, action.topicId, title)
+  closeRoomActions()
 }
 
 async function archiveRoomFromAction() {
@@ -470,7 +506,6 @@ onMounted(async () => {
       }
     }
     if (groups.selectedRoomId) {
-      expandRoom(groups.selectedRoomId)
       if (route.fullPath !== groupRoute()) await router.replace(groupRoute())
     }
   } catch { /* availability state renders the error */ }
@@ -490,17 +525,15 @@ watch(() => [route.params.roomId, route.params.topicId] as const, async ([roomVa
     catch { if (groups.selectedRoomId && route.fullPath !== groupRoute()) await router.replace(groupRoute()) }
   }
 })
-watch(() => groups.selectedRoomId, roomId => {
-  if (roomId) expandRoom(roomId)
+watch(() => groups.selectedRoomId, () => {
   managerError.value = ''
   agentUpdateError.value = {}
 })
-watch(() => groups.topicProtocol, supported => { if (supported && groups.selectedRoomId) expandRoom(groups.selectedRoomId) })
 watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThinking(profile) })
 </script>
 
 <template>
-  <WorkspaceView sidebar-title="群聊" :sidebar-subtitle="groups.availability === 'available' ? `${activeRooms.length} 个活跃房间` : `9119 群聊 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}`" :inspector-open="managerOpen && !!room" inspector-close-label="关闭群聊管理" @close-inspector="managerOpen = false">
+  <WorkspaceView sidebar-title="群聊" :sidebar-context-title="topicListRoom?.name" :sidebar-subtitle="sidebarSubtitle" :inspector-open="managerOpen && !!room" inspector-close-label="关闭群聊管理" @close-inspector="managerOpen = false">
     <template #sidebar-action>
       <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" title="新建群聊" aria-label="新建群聊" @click="createOpen = true">
         <YaoYaoSidebarIcon name="add" />
@@ -510,6 +543,16 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         <AppIcon name="archive" :size="15" />
         <span>已归档</span>
       </button>
+    </template>
+    <template #sidebar-before-heading>
+      <section v-if="pinnedTopics.length && !topicListRoom" class="pinned-topic-list" aria-label="话题置顶">
+        <header class="pinned-topic-list__heading"><strong>话题置顶</strong><span>{{ pinnedTopics.length }} 个置顶话题</span></header>
+        <button v-for="topic in pinnedTopics" :key="topic.id" class="pinned-topic-list__item" type="button" :class="{ active: topic.id === groups.selectedTopicId }" @click="selectSidebarItem(topicSidebarItemId(topic.roomId, topic.id))" @contextmenu.prevent.stop="openTopicActions(topic.roomId, topic.id, $event)">
+          <AppIcon name="topic" :size="14" />
+          <span>{{ topic.title }}</span>
+          <small>{{ activeRooms.find(room => room.id === topic.roomId)?.name || topic.preview }}</small>
+        </button>
+      </section>
     </template>
     <template #sidebar>
       <ResourceSidebar
@@ -523,7 +566,6 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         @select="selectSidebarItem"
         @more="openRoomManager"
         @context-menu="openRoomActions"
-        @toggle="toggleRoomTopics"
       />
     </template>
 
@@ -614,8 +656,15 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
     <Transition name="group-menu">
       <section v-if="roomActionMenu" class="group-room-actions" :style="roomActionMenuStyle" role="menu" aria-label="群聊房间操作" @contextmenu.prevent>
         <template v-if="roomActionMenu.topicId">
-          <button class="group-action-row" role="menuitem" type="button" @click="toggleTopicPinnedFromAction"><AppIcon name="branch" :size="14" />{{ groups.topicsForRoom(roomActionMenu!.roomId).find(item => item.id === roomActionMenu!.topicId)?.pinned ? '取消置顶' : '置顶话题' }}</button>
-          <button class="group-action-row danger" role="menuitem" type="button" @click="archiveTopicFromAction"><AppIcon name="archive" :size="14" />归档话题</button>
+          <template v-if="topicActionRenaming">
+            <label class="group-topic-rename">话题名称<input v-model="topicActionRenameValue" maxlength="120" autofocus @keydown.enter="renameTopicFromAction" /></label>
+            <div class="group-topic-rename__actions"><button class="quiet-button" type="button" @click="topicActionRenaming = false">取消</button><button class="solid-button" type="button" @click="renameTopicFromAction">保存</button></div>
+          </template>
+          <template v-else>
+            <button class="group-action-row" role="menuitem" type="button" @click="toggleTopicPinnedFromAction"><AppIcon :name="actionTopic?.pinned ? 'pin-off' : 'pin'" :size="14" />{{ actionTopic?.pinned ? '取消置顶' : '置顶话题' }}</button>
+            <button class="group-action-row" role="menuitem" type="button" @click="topicActionRenaming = true"><AppIcon name="edit" :size="14" />重命名</button>
+            <button class="group-action-row danger" role="menuitem" type="button" @click="archiveTopicFromAction"><AppIcon name="archive" :size="14" />归档话题</button>
+          </template>
         </template>
         <template v-else>
           <button class="group-action-row" role="menuitem" type="button" @click="startTopicFromRoomAction"><AppIcon name="plus" :size="14" />新建话题</button>
@@ -643,11 +692,16 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 .group-room-actions { position: fixed; z-index: 205; width: 174px; box-sizing: border-box; padding: 6px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-raised); box-shadow: 0 12px 34px rgba(0,0,0,.16); }
 .group-action-row { display: flex; width: 100%; min-height: 34px; align-items: center; gap: 8px; padding: 0 9px; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 11px; text-align: left; }.group-action-row:hover, .group-action-row:focus-visible { outline: 0; background: var(--surface-soft); color: var(--text-primary); }
 .group-action-row.danger:hover, .group-action-row.danger:focus-visible { color: var(--danger); }
+.group-topic-rename { display: grid; gap: 6px; padding: 6px 8px; color: var(--text-secondary); font-size: 10px; }.group-topic-rename input { width: 100%; min-height: 30px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; outline: 0; background: var(--surface-soft); color: var(--text-primary); font: inherit; }.group-topic-rename input:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }.group-topic-rename__actions { display: flex; justify-content: flex-end; gap: 6px; padding: 2px 8px 5px; }.group-topic-rename__actions button { min-height: 28px; padding: 0 8px; font-size: 10px; }
 .group-menu-enter-active, .group-menu-leave-active { transition: opacity 100ms ease, transform 120ms var(--ease-out); transform-origin: top right; }.group-menu-enter-from, .group-menu-leave-to { opacity: 0; transform: translateY(-3px) scale(.98); }
 .sidebar-primary-action { display: flex; width: 100%; min-height: 40px; align-items: center; gap: 10px; padding: 0 11px; border: 0; border-radius: 9px; background: transparent; color: var(--text-primary); cursor: pointer; font-size: 12px; font-weight: 610; text-align: left; transition: background-color 120ms ease; }
 .sidebar-primary-action:hover, .sidebar-primary-action:focus-visible { background: var(--surface-hover); outline: 0; }
 .sidebar-primary-action:focus-visible { box-shadow: inset 0 0 0 1px var(--line-strong); }
 .sidebar-primary-action:disabled { cursor: not-allowed; opacity: .35; }
+.pinned-topic-list { max-height: 154px; overflow: auto; padding: 0 10px 4px; border-bottom: 1px solid var(--line); }
+.pinned-topic-list__heading { display: flex; min-height: 35px; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 11px 5px; }
+.pinned-topic-list__heading strong { font-size: 12px; font-weight: 680; }.pinned-topic-list__heading span { overflow: hidden; color: var(--text-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.pinned-topic-list__item { display: flex; width: 100%; min-height: 32px; align-items: center; gap: 7px; padding: 1px 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }.pinned-topic-list__item:hover, .pinned-topic-list__item.active { background: var(--surface-hover); }.pinned-topic-list__item :deep(.app-icon) { flex: 0 0 auto; color: var(--text-muted); }.pinned-topic-list__item > span { min-width: 0; overflow: hidden; font-size: 10.5px; font-weight: 450; text-overflow: ellipsis; white-space: nowrap; }.pinned-topic-list__item small { margin-left: auto; overflow: hidden; color: var(--text-muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
 .archived-overlay-backdrop { position: fixed; z-index: 220; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(0,0,0,.36); }.archived-overlay { width: min(460px, 100%); max-height: min(620px, calc(100vh - 40px)); overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); box-shadow: 0 24px 70px rgba(0,0,0,.28); }.archived-overlay header { display: flex; align-items: center; justify-content: space-between; padding: 18px 18px 14px; border-bottom: 1px solid var(--line); }.archived-overlay header small { display: block; color: var(--text-secondary); font-size: 10px; }.archived-overlay header strong { font-size: 15px; }.archived-overlay header button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); cursor: pointer; }.archived-section { display: grid; gap: 8px; padding: 16px 18px; }.archived-section + .archived-section { border-top: 1px solid var(--line); }.archived-section h3 { margin: 0; font-size: 12px; }.archived-section p { margin: 0; color: var(--text-secondary); font-size: 12px; }.archived-section article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; }.archived-section article span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.archived-section article button { border: 0; border-radius: 7px; background: var(--surface-hover); color: var(--text-primary); cursor: pointer; padding: 5px 9px; }
 .group-header-actions { display: flex; align-items: center; gap: 8px; }.group-host-chip { max-width: 150px; overflow: hidden; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line)); border-radius: 999px; background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); font-size: 9px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.group-avatars { display: flex; align-items: center; }.group-avatars span, .group-avatars em { display: grid; width: 24px; height: 24px; margin-left: -5px; place-items: center; border: 2px solid var(--canvas); border-radius: 8px; background: var(--accent); color: var(--text-on-solid); font-size: 8px; font-style: normal; font-weight: 650; }.group-avatars span.host { box-shadow: 0 0 0 1px var(--accent); }.group-avatars span:first-child { margin-left: 0; }.group-avatars em { background: var(--surface-hover); color: var(--text-secondary); }
 .group-error { display: flex; width: min(760px, calc(100% - 32px)); margin: 0 auto 4px; align-items: center; gap: 6px; color: var(--danger); font-size: 9px; }

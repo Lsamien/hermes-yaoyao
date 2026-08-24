@@ -7,9 +7,10 @@ import { useThemeStore } from '@/stores/theme'
 withDefaults(defineProps<{
   sidebarTitle: string
   sidebarSubtitle?: string
+  sidebarContextTitle?: string
   inspectorOpen?: boolean
   inspectorCloseLabel?: string
-}>(), { sidebarSubtitle: '', inspectorOpen: false, inspectorCloseLabel: '关闭预览' })
+}>(), { sidebarSubtitle: '', sidebarContextTitle: '', inspectorOpen: false, inspectorCloseLabel: '关闭预览' })
 
 const emit = defineEmits<{ closeInspector: [] }>()
 const auth = useAuthStore()
@@ -33,6 +34,7 @@ function selectProfile(label: string) { auth.selectProfile(profileNameMap.value.
     :insecure-transport="auth.insecureLan"
     :sidebar-title="sidebarTitle"
     :sidebar-subtitle="sidebarSubtitle"
+    :sidebar-context-title="sidebarContextTitle"
     :inspector-open="inspectorOpen"
     :inspector-close-label="inspectorCloseLabel"
     @logout="logout"
@@ -41,6 +43,7 @@ function selectProfile(label: string) { auth.selectProfile(profileNameMap.value.
     @close-inspector="emit('closeInspector')"
   >
     <template #sidebar-action><slot name="sidebar-action" /></template>
+    <template #sidebar-before-heading><slot name="sidebar-before-heading" /></template>
     <template #sidebar><slot name="sidebar" /></template>
     <template #mobile-sidebar><slot name="sidebar" /></template>
     <template #default><slot /></template>

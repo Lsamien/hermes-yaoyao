@@ -24,6 +24,7 @@ const props = withDefaults(defineProps<{
   insecureTransport?: boolean
   sidebarTitle?: string
   sidebarSubtitle?: string
+  sidebarContextTitle?: string
   inspectorOpen?: boolean
   inspectorCloseLabel?: string
 }>(), {
@@ -34,6 +35,7 @@ const props = withDefaults(defineProps<{
   insecureTransport: false,
   sidebarTitle: '',
   sidebarSubtitle: '',
+  sidebarContextTitle: '',
   inspectorOpen: false,
   inspectorCloseLabel: '关闭预览',
 })
@@ -232,8 +234,9 @@ onBeforeUnmount(() => {
         @input.capture="handleSidebarInput"
         @focusout.capture="handleSidebarFocusout"
       >
+        <slot name="sidebar-before-heading" />
         <header class="sidebar-context__heading">
-          <strong>{{ contextHeading }}</strong>
+          <strong>{{ sidebarContextTitle || contextHeading }}</strong>
           <span v-if="sidebarSubtitle">{{ sidebarSubtitle }}</span>
         </header>
         <div class="sidebar-context__body">
@@ -337,8 +340,9 @@ onBeforeUnmount(() => {
         @input.capture="handleSidebarInput"
         @focusout.capture="handleSidebarFocusout"
       >
+        <slot name="sidebar-before-heading" />
         <header class="sidebar-context__heading">
-          <strong>{{ contextHeading }}</strong>
+          <strong>{{ sidebarContextTitle || contextHeading }}</strong>
           <span v-if="sidebarSubtitle">{{ sidebarSubtitle }}</span>
         </header>
         <div class="sidebar-context__body">
@@ -528,6 +532,9 @@ onBeforeUnmount(() => {
 .sidebar-context__body :deep(.sidebar-item__icon) { width: 25px; height: 25px; flex-basis: 25px; border: 0; border-radius: 7px; background: transparent; }
 .sidebar-context__body :deep(.sidebar-item__icon--avatar) { background: var(--surface-soft); color: var(--text-secondary); }
 .sidebar-context__body :deep(.sidebar-item__row strong) { font-size: 12px; }
+.sidebar-context__body :deep(.sidebar-item.sidebar-item--topic) { min-height: 28px; padding-block: 0; }
+.sidebar-context__body :deep(.sidebar-item.sidebar-item--topic .sidebar-item__icon) { width: 17px; height: 17px; flex-basis: 17px; }
+.sidebar-context__body :deep(.sidebar-item.sidebar-item--topic .sidebar-item__row strong) { font-size: 10.5px; font-weight: 450; }
 .sidebar-context__body :deep(.library-sidebar) { padding-top: 1px; }
 .sidebar-context__body :deep(.library-sidebar section) { margin-top: 2px; }
 

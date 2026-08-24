@@ -126,7 +126,7 @@ defineExpose({ focusSearch })
           <div v-if="row.section" class="sidebar-section-label" :class="{ 'sidebar-section-label--pinned': row.section === '已置顶' }" role="presentation"><span>{{ row.sectionLabel }}</span></div>
           <div
             class="sidebar-item"
-            :class="{ active: row.item.id === activeId || row.item.active, 'sidebar-item--single-line': singleLine, 'sidebar-item--nested': row.item.nested, 'sidebar-item--expandable': row.item.expandable }"
+            :class="{ active: row.item.id === activeId || row.item.active, 'sidebar-item--single-line': singleLine, 'sidebar-item--nested': row.item.nested, 'sidebar-item--topic': row.item.topic, 'sidebar-item--expandable': row.item.expandable }"
             role="option"
             tabindex="0"
             :aria-selected="row.item.id === activeId || row.item.active"
@@ -207,6 +207,12 @@ defineExpose({ focusSearch })
 .sidebar-item--nested .sidebar-item__row strong { font-size: 10.5px; font-weight: 500; }
 .sidebar-item--nested .sidebar-item__row--secondary { display: none; }
 .sidebar-item--nested .sidebar-item__more { display: none; }
+.sidebar-item--topic { min-height: 32px; padding-block: 1px; }
+.sidebar-item--topic .sidebar-item__icon { width: 19px; height: 19px; flex-basis: 19px; border-radius: 6px; color: var(--text-muted); }
+.sidebar-item--topic .sidebar-item__row { min-height: 25px; }
+.sidebar-item--topic .sidebar-item__row strong { font-size: 10.5px; font-weight: 450; }
+.sidebar-item--topic .sidebar-item__row--secondary { display: none; }
+.sidebar-item--topic .sidebar-item__more { display: none; }
 .sidebar-item__expand { display: grid; width: 18px; height: 24px; flex: 0 0 18px; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); cursor: pointer; }.sidebar-item__expand:hover, .sidebar-item__expand:focus-visible { outline: 0; background: var(--surface-hover); color: var(--text-primary); }.sidebar-item__expand :deep(.app-icon) { transition: transform 120ms ease; }.sidebar-item__expand--collapsed :deep(.app-icon) { transform: rotate(-90deg); }
 .sidebar-item__icon { position: relative; display: grid; place-items: center; width: 23px; height: 23px; flex: 0 0 23px; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; }
 .sidebar-item.active .sidebar-item__icon, .sidebar-item:hover .sidebar-item__icon { color: var(--text-secondary); }

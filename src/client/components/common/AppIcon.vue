@@ -36,6 +36,7 @@ type IconName =
   | 'alert'
   | 'copy'
   | 'branch'
+  | 'topic'
   | 'archive'
   | 'trash'
   | 'edit'
@@ -107,6 +108,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 18 })
     <template v-else-if="name === 'alert'"><path d="M12 3 2 21h20zM12 9v4M12 17h.01" /></template>
     <template v-else-if="name === 'copy'"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" /></template>
     <template v-else-if="name === 'branch'"><circle cx="6" cy="5" r="2" /><circle cx="18" cy="6" r="2" /><circle cx="6" cy="19" r="2" /><path d="M6 7v10M8 7c6 0 4 6 8 6h2" /></template>
+    <template v-else-if="name === 'topic'"><path d="M5 9h14M5 15h14M9 5 7 19M17 5l-2 14" /></template>
     <template v-else-if="name === 'archive'"><path d="M3 6h18M5 6v14h14V6M3 3h18v3H3zM9 10h6" /></template>
     <template v-else-if="name === 'trash'"><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v5M14 11v5" /></template>
     <template v-else-if="name === 'edit'"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z" /></template>
