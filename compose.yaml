@@ -1,0 +1,35 @@
+name: hermes-yaoyao
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hermes-yaoyao:local
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "${HERMES_YAOYAO_BIND_ADDRESS:-127.0.0.1}:${HERMES_YAOYAO_PUBLISHED_PORT:-8800}:8800"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      NODE_ENV: production
+      HERMES_YAOYAO_HOST: 0.0.0.0
+      HERMES_YAOYAO_PORT: 8800
+      HERMES_YAOYAO_UPSTREAM: "${HERMES_YAOYAO_UPSTREAM:-http://host.docker.internal:9119}"
+      HERMES_YAOYAO_ALLOWED_HOSTS: "${HERMES_YAOYAO_ALLOWED_HOSTS:-}"
+      HERMES_YAOYAO_ALLOW_INSECURE_LAN: "1"
+      HERMES_YAOYAO_SUPERVISE_DASHBOARD: "0"
+      HERMES_YAOYAO_HOME: /var/lib/hermes-yaoyao
+    volumes:
+      - yaoyao-data:/var/lib/hermes-yaoyao
+    tmpfs:
+      - /tmp:mode=1777
+
+volumes:
+  yaoyao-data:

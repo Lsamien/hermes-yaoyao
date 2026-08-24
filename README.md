@@ -145,6 +145,50 @@ node bin/hermes-yaoyao.mjs service uninstall
 
 运行数据默认位于 `~/.hermes-yaoyao`。卸载 LaunchAgent 不会删除运行数据。
 
+## Docker 部署（仅夭夭 Web 8800）
+
+Docker 镜像只包含本项目的夭夭 Web，不包含、安装或监督 Hermes Dashboard。`9119` 必须已经由项目外部的 Hermes 实例提供；Compose 会强制关闭 `HERMES_YAOYAO_SUPERVISE_DASHBOARD`，因此启动、停止或重建容器都不会操作 9119。
+
+复制 Docker 环境示例并启动：
+
+```bash
+cp docker.env.example docker.env
+docker compose --env-file docker.env up -d --build
+```
+
+默认行为：
+
+- 只把容器的 `8800` 发布到宿主机 `127.0.0.1:8800`；
+- 通过 `http://host.docker.internal:9119` 连接宿主机已有的 Dashboard；
+- 将 CSRF 密钥、设备配对信息和上传索引保存在命名卷 `hermes-yaoyao_yaoyao-data`；
+- 以非 root 用户和只读根文件系统运行容器。
+
+查看状态与日志：
+
+```bash
+docker compose --env-file docker.env ps
+docker compose --env-file docker.env logs -f web
+curl --fail --silent http://127.0.0.1:8800/healthz
+curl --fail --silent http://127.0.0.1:8800/readyz
+```
+
+`/healthz` 只检查 8800 自身，`/readyz` 还会检查配置的 9119 是否可达。若 Dashboard 在另一台机器或另一个容器中，请在 `docker.env` 中把 `HERMES_YAOYAO_UPSTREAM` 改为容器可访问的 `http://主机:9119`；不要把账号密码写进该 URL。
+
+Docker Desktop 会把 `host.docker.internal` 转发到宿主机。Linux 上的 `host-gateway` 只负责解析宿主机地址：如果外部 9119 仍只监听宿主机 `127.0.0.1`，桥接网络中的容器无法连接它。此时应让现有 Dashboard 在有认证和防火墙保护的前提下监听容器可达的宿主机地址，或由部署方改用经过评估的 host 网络方案；Compose 本身不会更改 9119 的监听配置。
+
+如需经可信局域网或反向代理访问，可将 `HERMES_YAOYAO_BIND_ADDRESS` 改为 `0.0.0.0`。使用域名时还需配置 `HERMES_YAOYAO_ALLOWED_HOSTS`。Compose 内部的 8800 使用 HTTP；对非可信网络发布时，应在容器前配置 HTTPS 反向代理，不要直接把 8800 暴露到公网。
+
+停止或升级不会删除运行数据：
+
+```bash
+docker compose --env-file docker.env down
+docker compose --env-file docker.env up -d --build
+```
+
+只有显式执行 `docker compose down --volumes` 才会删除夭夭 Web 的命名卷。Dashboard 插件仍需按前文或 [Agent 安装手册](docs/agent-install.md) 独立安装到外部 Hermes 数据目录。
+
+注意：当前安全边界要求群聊上传和宿主机绝对路径媒体只用于回环地址的 Hermes 上游。默认桥接网络中的 `host.docker.internal` 不属于容器回环地址，因此这两类本地文件功能会返回明确的不可用错误；普通聊天、群聊消息、文件库 API 和产物代理不受此限制。不要通过关闭该检查来让不同机器共享本地文件路径。
+
 ## 受管服务操作与验收
 
 `service install` 会写入并启动 `com.samien.hermes-yaoyao` LaunchAgent；它默认监督本机 `9119`。已安装服务的环境变量写入 plist，因此改变监听地址、TLS 或监督开关后需要再次执行 `service install`，仅执行 `service start` 不会刷新这些配置。
