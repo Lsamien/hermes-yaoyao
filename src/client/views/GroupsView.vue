@@ -61,6 +61,7 @@ const sidebarSubtitle = computed(() => topicListRoom.value
   ? `${topicListRoom.value.agentCount} 个 Agent`
   : groups.availability === 'available' ? `${activeRooms.value.length} 个活跃房间` : `9119 群聊 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}`)
 const GROUP_LIST_BACK_ID = 'group-list'
+const NEW_TOPIC_ID = 'new-topic'
 function topicSidebarItemId(roomId: string, topicId: string): string { return `topic:${roomId}:${topicId}` }
 function topicFromSidebarItemId(id: string): { roomId: string; topicId: string } | undefined {
   const match = /^topic:([^:]+):([^:]+)$/.exec(id)
@@ -84,6 +85,11 @@ const sidebarItems = computed<SidebarItem[]>(() => {
     title: '返回群聊记录',
     section: room.name,
     icon: 'chevron-left',
+    showMore: false,
+  }, {
+    id: NEW_TOPIC_ID,
+    title: '新建话题',
+    icon: 'plus',
     showMore: false,
   }]
   const roomTopics = groups.topicsForRoom(room.id)
@@ -230,6 +236,10 @@ async function selectSidebarItem(id: string) {
     topicListRoomId.value = null
     return
   }
+  if (id === NEW_TOPIC_ID && topicListRoom.value) {
+    await startTopic(topicListRoom.value.id)
+    return
+  }
   const topic = topicFromSidebarItemId(id)
   if (topic) {
     if (topic.roomId !== groups.selectedRoomId) {
@@ -302,6 +312,10 @@ async function startTopicFromRoomAction() {
   if (roomActionMenu.value?.topicId) return
   closeRoomActions()
   if (!roomId) return
+  await startTopic(roomId)
+}
+
+async function startTopic(roomId: string) {
   try {
     await groups.selectRoom(roomId)
     topicListRoomId.value = roomId

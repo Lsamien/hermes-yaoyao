@@ -13,5 +13,5 @@ export type SidebarItem = {
   expandable?: boolean
   expanded?: boolean
   status?: 'online' | 'working' | 'offline'
-  icon?: 'chat' | 'groups' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'artifacts' | 'branch' | 'topic' | 'chevron-left'
+  icon?: 'chat' | 'groups' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'artifacts' | 'branch' | 'topic' | 'chevron-left' | 'plus'
 }
