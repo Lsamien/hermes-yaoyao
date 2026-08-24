@@ -2332,6 +2332,8 @@ class GroupStore:
             {
                 "requestId",
                 "profile",
+                "nodeId",
+                "nodeLabel",
                 "displayName",
                 "description",
                 "replyWithoutMention",
@@ -2359,6 +2361,8 @@ class GroupStore:
                     key: command[key]
                     for key in (
                         "profile",
+                        "nodeId",
+                        "nodeLabel",
                         "displayName",
                         "description",
                         "replyWithoutMention",

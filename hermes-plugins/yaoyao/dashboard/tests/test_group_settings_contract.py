@@ -83,6 +83,44 @@ class GroupSettingsContractTests(unittest.TestCase):
             self.assertNotEqual(stored[0]["profile"], stored[1]["profile"])
             self.assertIn("default", {row["execution_profile"] for row in stored})
 
+    def test_add_agent_accepts_and_replays_paired_node_identity(self) -> None:
+        node_id = request_id()
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room({
+                "requestId": request_id(),
+                "name": "跨节点增员",
+                "cwd": "",
+                "agents": [{"profile": "default", "displayName": "本机"}],
+            })
+            request = PROTOCOL.AddAgentRequest.model_validate({
+                "requestId": request_id(),
+                "profile": "default",
+                "nodeId": node_id,
+                "nodeLabel": "Remote Mac",
+                "displayName": "远端 Agent",
+            })
+            command = group_plugin_api._add_agent_command(request)
+
+            created = store.add_agent(room["id"], command)
+            replayed = store.add_agent(room["id"], command)
+
+            self.assertEqual(replayed, created)
+            self.assertEqual(created["nodeId"], node_id)
+            self.assertEqual(created["nodeLabel"], "Remote Mac")
+            self.assertEqual(created["profile"], "default")
+            with store.connection() as connection:
+                stored = connection.execute(
+                    "SELECT profile, node_id, node_label, execution_profile "
+                    "FROM group_agents WHERE id = ?",
+                    (created["id"],),
+                ).fetchone()
+            self.assertEqual(stored["node_id"], node_id)
+            self.assertEqual(stored["node_label"], "Remote Mac")
+            self.assertEqual(stored["execution_profile"], "default")
+            self.assertEqual(stored["profile"], f"node:{node_id}:default")
+
     def test_paired_node_registry_encrypts_token_and_router_scopes_runtime(self) -> None:
         node_id = request_id()
         with tempfile.TemporaryDirectory() as directory:
