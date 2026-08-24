@@ -36,6 +36,80 @@ def request_id() -> str:
 
 
 class GroupSettingsContractTests(unittest.TestCase):
+    def test_room_instructions_round_trip_into_agent_prompt(self) -> None:
+        create = PROTOCOL.CreateRoomRequest.model_validate({
+            "requestId": request_id(),
+            "name": "规则群",
+            "instructions": "  先核对事实。\r\n结论使用中文。  ",
+            "agents": [{"profile": "default"}],
+        })
+        self.assertEqual(create.instructions, "先核对事实。\n结论使用中文。")
+        self.assertEqual(
+            PROTOCOL.limits_payload()["maxRoomInstructionsLength"], 4_000
+        )
+        with self.assertRaises(ValueError):
+            PROTOCOL.UpdateRoomRequest.model_validate({
+                "requestId": request_id(),
+                "instructions": "x" * 4_001,
+            })
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room({
+                "requestId": request_id(),
+                "name": "规则群",
+                "cwd": "",
+                "instructions": create.instructions,
+                "agents": [{"profile": "default"}],
+            })
+            self.assertEqual(room["instructions"], create.instructions)
+            [agent] = room["agents"]
+            created = store.create_human_message(
+                room["id"],
+                request_id=request_id(),
+                client_message_id=request_id(),
+                content="请执行",
+                mention_agent_ids=[agent["id"]],
+            )
+            claimed = store.claim_next_runnable_run()
+            self.assertEqual(claimed["id"], created["runs"][0]["id"])
+            projection = store.read_run_projection(claimed["id"])
+            self.assertEqual(
+                projection["room"]["instructions"], create.instructions
+            )
+            prompt = ORCHESTRATOR.build_run_prompt(projection, room["agents"])
+            self.assertIn("长期说明、协作规则和形式准则", prompt)
+            self.assertIn("先核对事实", prompt)
+
+            updated = store.update_room(
+                room["id"],
+                {"requestId": request_id(), "instructions": ""},
+            )
+            self.assertEqual(updated["instructions"], "")
+
+    def test_v11_database_migrates_empty_room_instructions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "group.db"
+            store = GroupStore(path)
+            store.initialize()
+            room = store.create_room({
+                "requestId": request_id(),
+                "name": "旧房间",
+                "cwd": "",
+                "agents": [{"profile": "default"}],
+            })
+            with store.connection() as connection:
+                connection.execute("ALTER TABLE group_rooms DROP COLUMN instructions")
+                connection.execute(
+                    "UPDATE group_meta SET value = '11' WHERE key = 'schema_version'"
+                )
+
+            migrated = GroupStore(path)
+            migrated.initialize()
+            self.assertEqual(migrated.schema_version(), 12)
+            self.assertEqual(migrated.get_room(room["id"])["instructions"], "")
+
     def test_terminal_session_info_captures_effective_model_for_settlement(self) -> None:
         async def exercise() -> tuple[object, dict[str, object]]:
             orchestrator = ORCHESTRATOR.GroupOrchestrator(object())
@@ -712,7 +786,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             self._create_v1_database(path)
             store = GroupStore(path)
             store.initialize()
-            self.assertEqual(store.schema_version(), 11)
+            self.assertEqual(store.schema_version(), 12)
             self.assertEqual(store.journal_epoch(), "11111111-1111-4111-8111-111111111111")
             with store.connection() as connection:
                 room = connection.execute("SELECT * FROM group_rooms").fetchone()

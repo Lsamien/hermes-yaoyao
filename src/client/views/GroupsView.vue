@@ -328,10 +328,11 @@ async function startTopic(roomId: string) {
   } catch { /* store publishes the error */ }
 }
 
-async function createRoom(payload: { name: string; profiles: string[]; autoReply: boolean; replyRounds: number; hostProfile?: string; orchestrationMode?: 'free' | 'host' }) {
+async function createRoom(payload: { name: string; profiles: string[]; autoReply: boolean; replyRounds: number; instructions?: string; hostProfile?: string; orchestrationMode?: 'free' | 'host' }) {
   const hostProfile = payload.hostProfile || payload.profiles[0]
   const detail = await groups.createRoom({
     name: payload.name,
+    ...(groups.roomInstructionsProtocol ? { instructions: payload.instructions ?? '' } : {}),
     agents: payload.profiles.map(profile => ({
       profile,
       displayName: auth.profiles.find(item => item.name === profile)?.agentName || auth.profiles.find(item => item.name === profile)?.displayName || profile,
@@ -354,10 +355,11 @@ async function send(payload: ComposerSubmit) {
   } catch { /* store publishes the error */ }
 }
 
-async function updateRoom(patch: { name?: string; replyRounds?: number; orchestrationMode?: 'free' | 'host' }) {
+async function updateRoom(patch: { name?: string; instructions?: string; replyRounds?: number; orchestrationMode?: 'free' | 'host' }) {
   if (!groups.selectedRoom) return
   await groups.updateRoom(groups.selectedRoom.id, {
     name: patch.name,
+    ...(groups.roomInstructionsProtocol ? { instructions: patch.instructions } : {}),
     maxReplyRounds: patch.replyRounds,
     ...(groups.hostFlowProtocol ? { orchestrationMode: patch.orchestrationMode } : {}),
   })
@@ -649,6 +651,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :agents="groups.agents"
         :host-enabled="groups.hostProtocol"
         :host-flow-enabled="groups.hostFlowProtocol"
+        :room-instructions-enabled="groups.roomInstructionsProtocol"
         :available-profiles="availableProfiles"
         :busy="managerBusy"
         :model-options-by-profile="modelOptionsByProfile"
@@ -669,7 +672,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
   </WorkspaceView>
 
   <FloatingResourceSearch section="groups" label="搜索群聊" :items="roomSidebarItems" @select="selectRoom" />
-  <CreateGroupDialog :open="createOpen" :profiles="profiles" :host-enabled="groups.hostProtocol" :host-flow-enabled="groups.hostFlowProtocol" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
+  <CreateGroupDialog :open="createOpen" :profiles="profiles" :host-enabled="groups.hostProtocol" :host-flow-enabled="groups.hostFlowProtocol" :room-instructions-enabled="groups.roomInstructionsProtocol" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
   <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="addPreviewToComposer" @source="preview = null" />
   <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" :can-add="uploadsEnabled" @add="addMediaToComposer" />
 

@@ -31,6 +31,7 @@ DEFAULT_MAX_REPLY_ROUNDS = 3
 UNLIMITED_REPLY_ROUNDS = -1
 MAX_FINITE_REPLY_ROUNDS = 100
 MAX_AGENT_DISPLAY_NAME_LENGTH = 100
+MAX_ROOM_INSTRUCTIONS_LENGTH = 4_000
 MAX_ROOM_CONCURRENCY = 3
 MAX_PLUGIN_CONCURRENCY = 4
 INITIAL_CONTEXT_MESSAGE_LIMIT = 50
@@ -82,6 +83,7 @@ def limits_payload() -> dict[str, int]:
         "defaultMaxReplyRounds": DEFAULT_MAX_REPLY_ROUNDS,
         "unlimitedReplyRoundsValue": UNLIMITED_REPLY_ROUNDS,
         "maxAgentDisplayNameLength": MAX_AGENT_DISPLAY_NAME_LENGTH,
+        "maxRoomInstructionsLength": MAX_ROOM_INSTRUCTIONS_LENGTH,
         "maxRoomConcurrency": MAX_ROOM_CONCURRENCY,
         "maxPluginConcurrency": MAX_PLUGIN_CONCURRENCY,
     }
@@ -135,6 +137,7 @@ class CreateRoomRequest(GroupModel):
     request_id: UUID = Field(alias="requestId")
     name: str = Field(min_length=1, max_length=100)
     cwd: str = Field(default="", max_length=4096)
+    instructions: str = Field(default="", max_length=MAX_ROOM_INSTRUCTIONS_LENGTH)
     max_reply_rounds: StrictInt = Field(
         default=DEFAULT_MAX_REPLY_ROUNDS, alias="maxReplyRounds"
     )
@@ -148,6 +151,11 @@ class CreateRoomRequest(GroupModel):
     def validate_max_reply_rounds(cls, value: int) -> int:
         return normalize_max_reply_rounds(value)
 
+    @field_validator("instructions")
+    @classmethod
+    def normalize_instructions(cls, value: str) -> str:
+        return normalize_room_instructions(value)
+
     @model_validator(mode="after")
     def validate_unique_host(self) -> "CreateRoomRequest":
         if sum(agent.is_host for agent in self.agents) > 1:
@@ -159,13 +167,17 @@ class UpdateRoomRequest(GroupModel):
     request_id: UUID = Field(alias="requestId")
     name: str | None = Field(default=None, min_length=1, max_length=100)
     cwd: str | None = Field(default=None, max_length=4096)
+    instructions: str | None = Field(
+        default=None, max_length=MAX_ROOM_INSTRUCTIONS_LENGTH
+    )
     max_reply_rounds: StrictInt | None = Field(default=None, alias="maxReplyRounds")
     orchestration_mode: Literal["free", "host"] | None = Field(
         default=None, alias="orchestrationMode"
     )
 
     @field_validator(
-        "name", "cwd", "max_reply_rounds", "orchestration_mode", mode="before"
+        "name", "cwd", "instructions", "max_reply_rounds", "orchestration_mode",
+        mode="before"
     )
     @classmethod
     def reject_explicit_null(cls, value: Any) -> Any:
@@ -176,13 +188,18 @@ class UpdateRoomRequest(GroupModel):
     @model_validator(mode="after")
     def require_change(self) -> "UpdateRoomRequest":
         if not (
-            {"name", "cwd", "max_reply_rounds", "orchestration_mode"}
+            {"name", "cwd", "instructions", "max_reply_rounds", "orchestration_mode"}
             & self.model_fields_set
         ):
             raise ValueError(
-                "Room update requires name, cwd, maxReplyRounds, or orchestrationMode"
+                "Room update requires name, cwd, instructions, maxReplyRounds, or orchestrationMode"
             )
         return self
+
+    @field_validator("instructions")
+    @classmethod
+    def normalize_instructions(cls, value: str | None) -> str | None:
+        return None if value is None else normalize_room_instructions(value)
 
     @field_validator("max_reply_rounds")
     @classmethod
@@ -402,6 +419,23 @@ def normalize_room_name(value: str) -> str:
     normalized = value.strip()
     if not 1 <= len(normalized) <= 100:
         raise ValueError("Room name must contain 1 to 100 characters")
+    return normalized
+
+
+def normalize_room_instructions(value: str) -> str:
+    """Normalize optional multiline room rules without changing their structure."""
+    if not isinstance(value, str):
+        raise ValueError("Room instructions must be a string")
+    normalized = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if len(normalized) > MAX_ROOM_INSTRUCTIONS_LENGTH:
+        raise ValueError(
+            f"Room instructions must contain at most {MAX_ROOM_INSTRUCTIONS_LENGTH} characters"
+        )
+    if any(
+        unicodedata.category(character) == "Cc" and character not in {"\n", "\t"}
+        for character in normalized
+    ):
+        raise ValueError("Room instructions contain unsupported control characters")
     return normalized
 
 

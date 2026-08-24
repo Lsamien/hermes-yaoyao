@@ -63,6 +63,7 @@ export const useGroupsStore = defineStore('groups', () => {
   const topicProtocol = computed(() => (capabilities.value?.protocolVersion ?? 0) >= 4)
   const hostProtocol = computed(() => (capabilities.value?.protocolVersion ?? 0) >= 5)
   const hostFlowProtocol = computed(() => capabilities.value?.features?.includes('hostFlow') ?? false)
+  const roomInstructionsProtocol = computed(() => capabilities.value?.features?.includes('roomInstructions') ?? false)
   const activityProtocol = computed(() => (capabilities.value?.protocolVersion ?? 0) >= 8)
   const topics = computed(() => selectedRoomId.value ? protocol.value.topicsByRoom[selectedRoomId.value] ?? [] : [])
   const selectedTopic = computed(() => selectedTopicId.value ? topics.value.find(topic => topic.id === selectedTopicId.value) : undefined)
@@ -436,7 +437,7 @@ export const useGroupsStore = defineStore('groups', () => {
 
   async function refresh(): Promise<void> { await rebuildSnapshot() }
 
-  async function createRoom(input: { name: string; cwd?: string; agents: AgentSeed[]; maxReplyRounds?: number; orchestrationMode?: 'free' | 'host' }): Promise<GroupRoomDetail> {
+  async function createRoom(input: { name: string; cwd?: string; instructions?: string; agents: AgentSeed[]; maxReplyRounds?: number; orchestrationMode?: 'free' | 'host' }): Promise<GroupRoomDetail> {
     const detail = await createApi(input)
     protocol.value = snapshotGroupRoom(protocol.value, detail, [], topicProtocol.value ? { topics: [] } : {})
     selectedRoomId.value = detail.id
@@ -446,7 +447,7 @@ export const useGroupsStore = defineStore('groups', () => {
     return detail
   }
 
-  async function updateRoom(roomId: string, input: { name?: string; cwd?: string; maxReplyRounds?: number; orchestrationMode?: 'free' | 'host' }): Promise<GroupRoomDetail> {
+  async function updateRoom(roomId: string, input: { name?: string; cwd?: string; instructions?: string; maxReplyRounds?: number; orchestrationMode?: 'free' | 'host' }): Promise<GroupRoomDetail> {
     const detail = await updateRoomApi(roomId, input)
     const topicId = topicProtocol.value && selectedRoomId.value === roomId ? selectedTopicId.value : undefined
     const roomMessages = topicId ? protocol.value.messagesByTopic[topicId] ?? [] : protocol.value.messagesByRoom[roomId] ?? []
@@ -741,7 +742,7 @@ export const useGroupsStore = defineStore('groups', () => {
   }
 
   return {
-    availability, capabilities, topicProtocol, hostProtocol, hostFlowProtocol, activityProtocol, rooms, selectedRoomId, selectedRoom, topics, topicsForRoom, loadRoomTopics, selectedTopicId, selectedTopic,
+    availability, capabilities, topicProtocol, hostProtocol, hostFlowProtocol, roomInstructionsProtocol, activityProtocol, rooms, selectedRoomId, selectedRoom, topics, topicsForRoom, loadRoomTopics, selectedTopicId, selectedTopic,
     messages, agents, pendingInteractions,
     connectionState, isLoading, isSending, error, hasMoreBefore,
     pinnedTopics, start, stop, refresh, selectRoom, selectTopic, startNewTopic, createRoom, updateRoom, archiveRoom, restoreRoom, archiveTopic, restoreTopic, setTopicPinned, renameTopic, loadPinnedTopics, archivedRooms, archivedTopics, addAgent, updateAgent,

@@ -344,6 +344,7 @@ export interface GroupRoomSummary {
   id: string
   name: string
   cwd: string
+  instructions?: string
   createdAt: number
   updatedAt: number
   archived: boolean

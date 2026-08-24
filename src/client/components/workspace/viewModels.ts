@@ -252,6 +252,7 @@ export function roomToUi(room: GroupRoomDetail): UiRoom {
     id: room.id,
     name: room.name,
     archived: room.archived,
+    instructions: room.instructions,
     memberIds: room.agents.map(agent => agent.id),
     replyRounds: room.maxReplyRounds,
     orchestrationMode: room.orchestrationMode,

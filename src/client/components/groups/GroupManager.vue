@@ -36,6 +36,7 @@ const props = withDefaults(defineProps<{
   agents: GroupAgent[]
   hostEnabled?: boolean
   hostFlowEnabled?: boolean
+  roomInstructionsEnabled?: boolean
   availableProfiles?: string[]
   modelOptionsByProfile?: Record<string, ModelOption[]>
   modelOptionsLoading?: Record<string, boolean>
@@ -43,7 +44,7 @@ const props = withDefaults(defineProps<{
   agentUpdateError?: Record<string, string>
   managerError?: string
   busy?: boolean
-}>(), { hostEnabled: false, hostFlowEnabled: false, busy: false })
+}>(), { hostEnabled: false, hostFlowEnabled: false, roomInstructionsEnabled: false, busy: false })
 
 const emit = defineEmits<{
   updateRoom: [patch: Partial<UiRoom>]
@@ -58,6 +59,7 @@ const emit = defineEmits<{
 
 const form = reactive({
   name: props.room.name,
+  instructions: props.room.instructions ?? '',
   replyRounds: props.room.replyRounds ?? 3,
   orchestrationMode: props.room.orchestrationMode ?? 'free' as 'free' | 'host',
 })
@@ -97,6 +99,7 @@ function draftFrom(agent: GroupAgent): AgentDraft {
 
 watch(() => props.room, room => {
   form.name = room.name
+  form.instructions = room.instructions ?? ''
   form.replyRounds = room.replyRounds ?? 3
   form.orchestrationMode = room.orchestrationMode ?? 'free'
 }, { deep: true })
@@ -119,6 +122,7 @@ function saveRoom() {
   const replyRounds = Number(form.replyRounds)
   emit('updateRoom', {
     name: form.name.trim() || props.room.name,
+    ...(props.roomInstructionsEnabled ? { instructions: form.instructions.trim() } : {}),
     replyRounds: replyRounds === -1 ? -1 : Math.min(100, Math.max(1, replyRounds || 1)),
     ...(props.hostFlowEnabled ? { orchestrationMode: form.orchestrationMode } : {}),
   })
@@ -214,6 +218,7 @@ function statusLabel(status: GroupAgent['status']): string {
     <section>
       <h3>房间</h3>
       <label><span>名称</span><input v-model="form.name" maxlength="80" @change="saveRoom" /></label>
+      <label v-if="roomInstructionsEnabled"><span>说明<small>所有 Agent 都会在回复前查阅，可填写协作规则和形式准则。</small></span><textarea v-model="form.instructions" maxlength="4000" rows="5" aria-label="房间说明" placeholder="例如：先核对事实；结论使用中文；发布前等待确认。" @change="saveRoom" /></label>
       <label class="rounds"><span>最多回复轮数<small>-1 表示无限</small></span><input v-model.number="form.replyRounds" type="number" min="-1" max="100" aria-label="最多回复轮数" @change="saveRoom" /></label>
       <label v-if="hostFlowEnabled" class="flow-mode">
         <span>协作模式<small>主持人可按依赖逐步调度，也可一次 @ 多人并列执行。</small></span>

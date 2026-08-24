@@ -432,7 +432,7 @@ export function normalizeGroupRoom(value: unknown): GroupRoomSummary {
   const rawAgents = source.agents
   const orchestrationMode = string(pick(source, 'orchestrationMode', 'orchestration_mode'))
   return {
-    id: string(source.id), name: string(source.name, '未命名群聊'), cwd: string(source.cwd),
+    id: string(source.id), name: string(source.name, '未命名群聊'), cwd: string(source.cwd), instructions: string(source.instructions),
     createdAt: number(pick(source, 'createdAt', 'created_at')), updatedAt: number(pick(source, 'updatedAt', 'updated_at')),
     archived: bool(source.archived), agentCount: Array.isArray(rawAgents) ? rawAgents.length : number(pick(source, 'agentCount', 'agent_count')),
     lastMessage: source.lastMessage || source.last_message ? normalizeGroupMessage(pick(source, 'lastMessage', 'last_message')) : null,
@@ -458,7 +458,7 @@ export function normalizeGroupRoomDetail(value: unknown): GroupRoomDetail {
   const source = record(value)
   const summary = normalizeGroupRoom(source)
   return {
-    id: summary.id, name: summary.name, cwd: summary.cwd, createdAt: summary.createdAt, updatedAt: summary.updatedAt,
+    id: summary.id, name: summary.name, cwd: summary.cwd, instructions: summary.instructions, createdAt: summary.createdAt, updatedAt: summary.updatedAt,
     archived: summary.archived, maxReplyRounds: summary.maxReplyRounds, orchestrationMode: summary.orchestrationMode,
     agents: values(source.agents).map(normalizeGroupAgent), runs: values(source.runs).map(normalizeGroupRun),
     pendingInteractions: values(pick(source, 'pendingInteractions', 'pending_interactions')).map(normalizeGroupInteraction),

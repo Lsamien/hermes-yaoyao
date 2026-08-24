@@ -13,6 +13,7 @@ export type UiRoom = {
   id: string
   name: string
   description?: string
+  instructions?: string
   archived?: boolean
   memberIds?: string[]
   autoReply?: boolean

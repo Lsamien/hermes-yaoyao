@@ -385,6 +385,9 @@ def build_run_prompt(
         "room": {
             "id": _required_string(room.get("id"), "projection.room.id"),
             "name": _required_string(room.get("name"), "projection.room.name"),
+            "instructions": _required_string_allowing_empty(
+                room.get("instructions", ""), "projection.room.instructions"
+            ),
             "maxReplyRounds": room.get("maxReplyRounds", 3),
             "orchestrationMode": _required_string(
                 room.get("orchestrationMode", "free"),
@@ -466,9 +469,16 @@ def build_run_prompt(
         if host_flow
         else "仅在确实需要成员协作时，使用成员列表中的精确 @显示名 或 @all 发起下一轮。"
     )
+    instructions_rule = (
+        "GROUP_CONTEXT_JSON.room.instructions 是本房间的长期说明、协作规则和形式准则；"
+        "必须在本次答复和工具使用中遵守。\n"
+        if envelope["room"]["instructions"]
+        else ""
+    )
     return (
         "你正在 Hermes 多设备群聊中回复。只输出要发送到公共房间的答复；"
         f"{collaboration_rule}\n"
+        f"{instructions_rule}"
         f"{automatic_rule}\n"
         f"runId={envelope['run']['id']} roomId={envelope['room']['id']} "
         f"agentId={envelope['agent']['id']}\n"

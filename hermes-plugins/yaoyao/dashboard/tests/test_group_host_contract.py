@@ -496,7 +496,7 @@ class GroupHostContractTests(unittest.TestCase):
 
             migrated = GroupStore(path)
             migrated.initialize()
-            self.assertEqual(migrated.schema_version(), 11)
+            self.assertEqual(migrated.schema_version(), 12)
             self.assertTrue(
                 all(
                     room["orchestrationMode"] == "free"
@@ -881,7 +881,7 @@ class GroupHostContractTests(unittest.TestCase):
 
             migrated = GroupStore(path)
             migrated.initialize()
-            self.assertEqual(migrated.schema_version(), 11)
+            self.assertEqual(migrated.schema_version(), 12)
             self.assertEqual(
                 migrated.get_room(room["id"])["orchestrationMode"], "free"
             )

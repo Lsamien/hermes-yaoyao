@@ -31,6 +31,7 @@ from .group_protocol import (
     MAX_MESSAGE_PAGE_SIZE,
     MAX_PLUGIN_CONCURRENCY,
     MAX_ROOM_CONCURRENCY,
+    MAX_ROOM_INSTRUCTIONS_LENGTH,
     MAX_TOOL_STATE_BYTES,
     ORCHESTRATION_MODES,
     is_reserved_mention_alias,
@@ -38,11 +39,12 @@ from .group_protocol import (
     normalize_interaction_id,
     normalize_max_reply_rounds,
     normalize_room_cwd,
+    normalize_room_instructions,
     normalize_room_name,
 )
 
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 _WAL_RETRY_DELAYS = (0.01, 0.02, 0.04, 0.08)
 EVENT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MIN_RETAINED_EVENTS = 100_000
@@ -113,6 +115,7 @@ _SCHEMA_STATEMENTS = (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         cwd TEXT NOT NULL DEFAULT '',
+        instructions TEXT NOT NULL DEFAULT '',
         max_reply_rounds INTEGER NOT NULL DEFAULT 3,
         orchestration_mode TEXT NOT NULL DEFAULT 'free',
         created_at REAL NOT NULL,
@@ -493,6 +496,9 @@ class GroupStore:
             raw_version = "10"
         if raw_version == "10":
             self._migrate_v10_to_v11(connection)
+            raw_version = "11"
+        if raw_version == "11":
+            self._migrate_v11_to_v12(connection)
         self._validated_schema_version(
             self._metadata_value_from_connection(connection, "schema_version")
         )
@@ -1224,10 +1230,25 @@ class GroupStore:
         )
 
     @staticmethod
+    def _migrate_v11_to_v12(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(group_rooms)")
+        }
+        if "instructions" not in columns:
+            connection.execute(
+                "ALTER TABLE group_rooms ADD COLUMN instructions "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+        connection.execute(
+            "UPDATE group_meta SET value = '12' WHERE key = 'schema_version'"
+        )
+
+    @staticmethod
     def _validate_v8_columns(connection: sqlite3.Connection) -> None:
         expected_columns = {
             "group_meta": {"key", "value"},
-            "group_rooms": {"id", "name", "cwd", "max_reply_rounds", "orchestration_mode", "created_at", "updated_at", "archived"},
+            "group_rooms": {"id", "name", "cwd", "instructions", "max_reply_rounds", "orchestration_mode", "created_at", "updated_at", "archived"},
             "group_topics": {"id", "room_id", "title", "last_read_message_seq", "created_at", "updated_at", "archived", "pinned"},
             "group_agents": {"id", "room_id", "profile", "display_name", "display_name_key", "description", "stored_session_id", "last_context_message_seq", "enabled", "reply_without_mention", "is_host", "model_override", "provider_override", "reasoning_effort_override", "fast_mode_override", "session_config_json", "created_at", "updated_at"},
             "group_agent_topic_state": {"agent_id", "topic_id", "last_context_message_seq", "created_at", "updated_at"},
@@ -1240,6 +1261,7 @@ class GroupStore:
         exact_specs = {
             ("group_rooms", "max_reply_rounds"): ("INTEGER", 1, "3"),
             ("group_rooms", "orchestration_mode"): ("TEXT", 1, "'free'"),
+            ("group_rooms", "instructions"): ("TEXT", 1, "''"),
             ("group_agents", "reply_without_mention"): ("INTEGER", 1, "0"),
             ("group_agents", "is_host"): ("INTEGER", 1, "0"),
             ("group_messages", "visible"): ("INTEGER", 1, "1"),
@@ -1281,6 +1303,11 @@ class GroupStore:
             """SELECT 1 FROM group_rooms
                 WHERE typeof(orchestration_mode) != 'text'
                    OR orchestration_mode NOT IN ('free', 'host')
+                LIMIT 1""",
+            f"""SELECT 1 FROM group_rooms
+                WHERE typeof(instructions) != 'text'
+                   OR length(instructions) > {MAX_ROOM_INSTRUCTIONS_LENGTH}
+                   OR instr(instructions, char(13)) > 0
                 LIMIT 1""",
             """SELECT 1 FROM group_agents
                 WHERE typeof(reply_without_mention) != 'integer'
@@ -1680,6 +1707,7 @@ class GroupStore:
                 "requestId",
                 "name",
                 "cwd",
+                "instructions",
                 "maxReplyRounds",
                 "orchestrationMode",
                 "agents",
@@ -1690,6 +1718,9 @@ class GroupStore:
         def action(connection: sqlite3.Connection) -> dict[str, object]:
             name = normalize_room_name(self._string(command, "name"))
             cwd = normalize_room_cwd(self._string(command, "cwd"))
+            instructions = normalize_room_instructions(
+                command.get("instructions", "")
+            )
             max_reply_rounds = normalize_max_reply_rounds(
                 command.get("maxReplyRounds", DEFAULT_MAX_REPLY_ROUNDS)
             )
@@ -1701,10 +1732,13 @@ class GroupStore:
             room_id = str(uuid.uuid4())
             connection.execute(
                 """INSERT INTO group_rooms
-                (id, name, cwd, max_reply_rounds, orchestration_mode,
+                (id, name, cwd, instructions, max_reply_rounds, orchestration_mode,
                  created_at, updated_at, archived)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0)""",
-                (room_id, name, cwd, max_reply_rounds, orchestration_mode, now, now),
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+                (
+                    room_id, name, cwd, instructions, max_reply_rounds,
+                    orchestration_mode, now, now,
+                ),
             )
             for agent in agents:
                 self._insert_agent(connection, room_id, agent, now)
@@ -1778,7 +1812,7 @@ class GroupStore:
         ):
             raise ValueError("limit must be an integer from 1 to 100")
         cursor_values = self._decode_cursor(cursor) if cursor is not None else None
-        query = """SELECT id, name, cwd, max_reply_rounds, orchestration_mode,
+        query = """SELECT id, name, cwd, instructions, max_reply_rounds, orchestration_mode,
             created_at, updated_at, archived,
             (SELECT COUNT(*) FROM group_agents WHERE room_id = group_rooms.id) AS agent_count,
             (SELECT COUNT(*) FROM group_topics WHERE room_id = group_rooms.id) AS topic_count
@@ -1929,17 +1963,22 @@ class GroupStore:
         canonical_room_id = self._canonical_uuid(room_id, "roomId")
         command = self._command(
             command,
-            {"requestId", "name", "cwd", "maxReplyRounds", "orchestrationMode"},
+            {
+                "requestId", "name", "cwd", "instructions",
+                "maxReplyRounds", "orchestrationMode",
+            },
         )
         request_id = self._command_request_id(command)
         changes = {
             key
-            for key in ("name", "cwd", "maxReplyRounds", "orchestrationMode")
+            for key in (
+                "name", "cwd", "instructions", "maxReplyRounds", "orchestrationMode"
+            )
             if key in command
         }
         if not changes:
             raise ValueError(
-                "Room update requires name, cwd, maxReplyRounds, or orchestrationMode"
+                "Room update requires name, cwd, instructions, maxReplyRounds, or orchestrationMode"
             )
 
         def action(connection: sqlite3.Connection) -> dict[str, object]:
@@ -1952,6 +1991,9 @@ class GroupStore:
             if "cwd" in changes:
                 assignments.append("cwd = ?")
                 values.append(normalize_room_cwd(self._string(command, "cwd")))
+            if "instructions" in changes:
+                assignments.append("instructions = ?")
+                values.append(normalize_room_instructions(command["instructions"]))
             if "maxReplyRounds" in changes:
                 assignments.append("max_reply_rounds = ?")
                 values.append(normalize_max_reply_rounds(command["maxReplyRounds"]))
@@ -5785,7 +5827,7 @@ class GroupStore:
         created_at: float,
     ) -> None:
         room = connection.execute(
-            """SELECT id, name, cwd, max_reply_rounds, orchestration_mode,
+            """SELECT id, name, cwd, instructions, max_reply_rounds, orchestration_mode,
             created_at, updated_at, archived,
             (SELECT COUNT(*) FROM group_agents WHERE room_id = group_rooms.id)
                 AS agent_count,
@@ -6792,6 +6834,7 @@ class GroupStore:
             "id": row["id"],
             "name": row["name"],
             "cwd": row["cwd"],
+            "instructions": row["instructions"],
             "maxReplyRounds": row["max_reply_rounds"],
             "orchestrationMode": row["orchestration_mode"],
             "createdAt": row["created_at"],
@@ -6805,6 +6848,7 @@ class GroupStore:
             "id": row["id"],
             "name": row["name"],
             "cwd": row["cwd"],
+            "instructions": row["instructions"],
             "maxReplyRounds": row["max_reply_rounds"],
             "orchestrationMode": row["orchestration_mode"],
             "createdAt": row["created_at"],

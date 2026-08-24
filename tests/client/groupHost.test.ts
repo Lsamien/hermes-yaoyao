@@ -53,6 +53,7 @@ describe('group host controls', () => {
     await wrapper.get('.solid-button').trigger('click')
     expect(wrapper.emitted('create')?.[0]?.[0]).not.toHaveProperty('hostProfile')
     expect(wrapper.emitted('create')?.[0]?.[0]).not.toHaveProperty('orchestrationMode')
+    expect(wrapper.emitted('create')?.[0]?.[0]).not.toHaveProperty('instructions')
     wrapper.unmount()
   })
 
@@ -64,14 +65,17 @@ describe('group host controls', () => {
         profiles: ['yaoyao', 'yaoer'],
         hostEnabled: true,
         hostFlowEnabled: true,
+        roomInstructionsEnabled: true,
       },
       global: { stubs: { teleport: true } },
     })
     await wrapper.get('input[placeholder="例如：产品评审"]').setValue('顺序协作')
+    await wrapper.get<HTMLTextAreaElement>('textarea').setValue('先核对事实，再输出中文结论。')
     await wrapper.get<HTMLSelectElement>('select[aria-label="协作模式"]').setValue('host')
     await wrapper.get('.solid-button').trigger('click')
     expect(wrapper.emitted('create')?.[0]?.[0]).toMatchObject({
       name: '顺序协作',
+      instructions: '先核对事实，再输出中文结论。',
       orchestrationMode: 'host',
     })
     wrapper.unmount()
@@ -136,6 +140,28 @@ describe('group host controls', () => {
       name: '群聊',
       replyRounds: 3,
       orchestrationMode: 'host',
+    })
+  })
+
+  it('edits room instructions when the capability is available', async () => {
+    const first = agent('agent-1', 'yaoyao', '夭夭', true, false)
+    const wrapper = mount(GroupManager, {
+      props: {
+        room: {
+          id: 'room-1', name: '群聊', memberIds: [first.id], replyRounds: 3,
+          orchestrationMode: 'free', instructions: '旧规则',
+        },
+        agents: [first],
+        hostEnabled: true,
+        hostFlowEnabled: true,
+        roomInstructionsEnabled: true,
+      },
+    })
+    const instructions = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="房间说明"]')
+    await instructions.setValue('新规则\n输出中文')
+    await instructions.trigger('change')
+    expect(wrapper.emitted('updateRoom')?.at(-1)?.[0]).toMatchObject({
+      instructions: '新规则\n输出中文',
     })
   })
 })
