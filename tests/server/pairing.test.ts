@@ -126,7 +126,7 @@ describe('Hermes node pairing', () => {
         return new Response(JSON.stringify({ profiles: [{ name: 'default', is_default: true }] }), { headers: responseHeaders })
       }
       if (url.pathname === '/api/plugins/yaoyao/profiles') {
-        return new Response(JSON.stringify({ profiles: [{ name: 'default', agentName: '夭夭' }] }), { headers: responseHeaders })
+        return new Response(JSON.stringify({ profiles: [{ name: 'default', botName: '竹儿', agentName: '旧插件名称' }] }), { headers: responseHeaders })
       }
       if (url.pathname === '/api/auth/providers') {
         return new Response(JSON.stringify({

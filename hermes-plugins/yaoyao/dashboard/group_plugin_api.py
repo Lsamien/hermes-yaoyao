@@ -928,7 +928,7 @@ def set_store_for_testing(store: object | None) -> None:
 
 
 def set_agent_name_resolver(resolver: Callable[[str], str]) -> None:
-    """Use the plugin's existing per-profile agentName setting."""
+    """Use the host-provided Hermes Bot display-name resolver."""
     global _agent_name_resolver
     _agent_name_resolver = resolver
 

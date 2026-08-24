@@ -44,6 +44,62 @@ import poller  # noqa: E402
 import voice_store  # noqa: E402
 
 
+def _profile_home(profile: Optional[str]) -> Path:
+    """Resolve the Hermes profile home without consulting YaoYao state."""
+    profile_name = str(profile or "default").strip() or "default"
+    try:
+        from hermes_constants import get_default_hermes_root  # type: ignore
+
+        root = Path(get_default_hermes_root())
+    except Exception:
+        configured = os.environ.get("HERMES_HOME", "").strip()
+        root = Path(configured) if configured else Path.home() / ".hermes"
+    if profile_name == "default":
+        return root
+    try:
+        from hermes_cli.profiles import get_profile_dir  # type: ignore
+
+        return Path(get_profile_dir(profile_name))
+    except Exception:
+        return root / "profiles" / profile_name
+
+
+def _hermes_bot_name(profile: Optional[str], profile_home: Optional[Path] = None) -> str:
+    """Read the Bot Mode title, then the core Hermes display name.
+
+    Agent identity no longer falls back to YaoYao's legacy agent_settings.json.
+    """
+    try:
+        import yaml  # type: ignore
+
+        path = (profile_home or _profile_home(profile)) / "profile.yaml"
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        if not isinstance(raw, dict):
+            return ""
+        ui_meta = raw.get("ui_meta")
+        bot_meta = ui_meta.get("hermes-bots") if isinstance(ui_meta, dict) else None
+        candidates = [
+            bot_meta.get("title") if isinstance(bot_meta, dict) else None,
+            raw.get("display_name"),
+        ]
+        for candidate in candidates:
+            if not isinstance(candidate, str):
+                continue
+            name = " ".join(candidate.split())
+            if (
+                name
+                and len(name) <= store.MAX_AGENT_NAME_LENGTH
+                and not any(ord(character) < 32 or ord(character) == 127 for character in name)
+                and not store.is_reserved_mention_alias(name)
+            ):
+                return name
+    except (OSError, TypeError, ValueError):
+        pass
+    except Exception as error:
+        log.warning("Hermes Bot name load failed for %s: %s", profile, error)
+    return ""
+
+
 def _load_group_plugin_api():
     module_path = Path(_THIS_DIR) / "group_plugin_api.py"
     module_name = (
@@ -72,7 +128,7 @@ def _load_group_plugin_api():
 
 group_plugin_api = _load_group_plugin_api()
 group_plugin_api.set_agent_name_resolver(
-    lambda profile: str(store.load_agent_settings(profile).get("agentName") or "")
+    lambda profile: _hermes_bot_name(profile)
 )
 
 
@@ -219,19 +275,22 @@ def _to_file_library_item(it: dict) -> dict:
 def list_profiles():
     """Profiles with an existing state.db (i.e. ones the poller watches).
 
-    Returns ``[{name, label, isDefault}]``. Used by the dashboard's profile
-    dropdown. ``default`` is always first when present.
+    Returns ``[{name, label, botName, isDefault}]``. ``botName`` comes from
+    Hermes Bot Mode (then the core profile display name), never YaoYao's
+    legacy Agent-name setting. ``default`` is always first when present.
     """
     pairs = poller._discover_profiles()
     out = []
     for name, home in pairs:
-        agent_settings = store.load_agent_settings(name)
-        agent_name = agent_settings["agentName"]
+        bot_name = _hermes_bot_name(name, Path(home))
         out.append(
             {
                 "name": name,
-                "label": agent_name or ("默认" if name == "default" else name),
-                "agentName": agent_name,
+                "label": bot_name or ("默认" if name == "default" else name),
+                "botName": bot_name,
+                # Compatibility alias for older YaoYao clients. Its value is
+                # still Hermes-owned Bot metadata, not agent_settings.json.
+                "agentName": bot_name,
                 "isDefault": name == "default",
             }
         )
@@ -414,10 +473,11 @@ def rescan():
 
 
 # ===========================================================================
-# Agent display-name settings
+# Legacy Agent display-name settings
 #
 # The profile id stays the stable routing key. ``agentName`` is an optional,
-# per-profile presentation value used by Dashboard and Yaoyao clients.
+# per-profile presentation value retained for older clients. Group Agent
+# identity and current clients use Hermes Bot metadata instead.
 #
 #   GET /agent/settings?profile=<profile>
 #   PUT /agent/settings?profile=<profile>  <- {"agentName": "..."}

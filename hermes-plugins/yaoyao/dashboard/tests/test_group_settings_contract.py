@@ -1215,18 +1215,26 @@ class GroupSettingsContractTests(unittest.TestCase):
                 group_plugin_api._add_agent_command(explicit_add)["replyWithoutMention"]
             )
 
-    def test_plugin_loader_injects_existing_agent_name_setting(self) -> None:
+    def test_plugin_loader_uses_hermes_bot_name_not_legacy_agent_setting(self) -> None:
         probe = textwrap.dedent(
             """
             import json
+            import os
             from pathlib import Path
             import sys
             import types
 
+            hermes_home = Path(os.environ["HERMES_HOME"])
+            hermes_home.mkdir(parents=True, exist_ok=True)
+            (hermes_home / "profile.yaml").write_text(
+                "ui_meta:\\n  hermes-bots:\\n    title: Hermes 名称\\n",
+                encoding="utf-8",
+            )
             dashboard = Path(sys.argv[1])
             sys.path.insert(0, str(dashboard))
             poller = types.ModuleType("poller")
             poller.start = lambda: None
+            poller._discover_profiles = lambda: [("default", hermes_home)]
             sys.modules["poller"] = poller
             import plugin_api
             plugin_api.store.load_agent_settings = lambda profile: {
@@ -1244,7 +1252,10 @@ class GroupSettingsContractTests(unittest.TestCase):
                 "cwd": "",
                 "agents": [{"profile": "default"}],
             })
-            print(json.dumps(room, ensure_ascii=False))
+            print(json.dumps({
+                "room": room,
+                "profiles": plugin_api.list_profiles()["profiles"],
+            }, ensure_ascii=False))
             """
         )
         with tempfile.TemporaryDirectory() as hermes_home:
@@ -1257,8 +1268,10 @@ class GroupSettingsContractTests(unittest.TestCase):
                 text=True,
                 env=environment,
             )
-        room = json.loads(result.stdout.strip().splitlines()[-1])
-        self.assertEqual(room["agents"][0]["displayName"], "现有名称")
+        payload = json.loads(result.stdout.strip().splitlines()[-1])
+        self.assertEqual(payload["room"]["agents"][0]["displayName"], "Hermes 名称")
+        self.assertEqual(payload["profiles"][0]["botName"], "Hermes 名称")
+        self.assertEqual(payload["profiles"][0]["agentName"], "Hermes 名称")
 
     def test_cascade_freezes_reply_modes_across_rename_and_setting_change(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

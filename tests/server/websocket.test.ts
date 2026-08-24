@@ -73,7 +73,7 @@ describe('WebSocket relay', () => {
         pairedCookie = request.headers.cookie ?? pairedCookie
         response.end(JSON.stringify({ profiles: [{ name: 'default', is_default: true }] }))
       } else if (request.url === '/api/plugins/yaoyao/profiles') {
-        response.end(JSON.stringify({ profiles: [{ name: 'default', agentName: '夭夭' }] }))
+        response.end(JSON.stringify({ profiles: [{ name: 'default', botName: '竹儿', agentName: '旧插件名称' }] }))
       } else if (request.url === '/api/auth/providers') {
         response.end(JSON.stringify({ providers: [{ name: 'basic', supports_password: true }] }))
       } else if (request.url === '/auth/password-login' && request.method === 'POST') {

@@ -115,8 +115,8 @@ const server = createServer(async (request, response) => {
   if (url.pathname === '/api/auth/ws-ticket' && request.method === 'POST') return json(response, 200, { ticket: 'fake-ticket' })
   if (url.pathname === '/api/profiles') return json(response, 200, { profiles })
   if (url.pathname === '/api/plugins/yaoyao/profiles') return json(response, 200, { profiles: [
-    { name: 'yaoyao', label: '夭夭', agentName: '夭夭', isDefault: true },
-    { name: 'yaoer', label: '瑶儿', agentName: '瑶儿', isDefault: false },
+    { name: 'yaoyao', label: '夭夭', botName: '夭夭', agentName: '旧夭夭名称', isDefault: true },
+    { name: 'yaoer', label: '瑶儿', botName: '瑶儿', agentName: '旧瑶儿名称', isDefault: false },
   ] })
   if (url.pathname === '/api/model/options') return json(response, 200, { model: 'gpt-5.6', provider: 'openai', providers: [{ slug: 'openai', name: 'OpenAI', models: ['gpt-5.6', 'gpt-5.5'] }] })
   if (url.pathname === '/api/profiles/sessions' || url.pathname === '/api/sessions') {

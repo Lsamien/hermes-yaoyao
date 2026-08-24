@@ -79,7 +79,7 @@ function fakeGateway(records: RecordedRequest[]): typeof fetch {
       case '/api/profiles':
         return jsonResponse({ profiles: [{ name: 'default', is_default: true }] })
       case '/api/plugins/yaoyao/profiles':
-        return jsonResponse({ profiles: [{ name: 'default', agentName: '夭夭', isDefault: true }] })
+        return jsonResponse({ profiles: [{ name: 'default', botName: '竹儿', agentName: '旧插件名称', isDefault: true }] })
       case '/api/auth/providers':
         return jsonResponse({ providers: [{ name: 'basic', supports_password: true }] })
       case '/auth/password-login':
@@ -180,7 +180,7 @@ describe('8800 BFF', () => {
       authRequired: true,
       authenticated: true,
       user: { user_id: 'user-1' },
-      profiles: [{ name: 'default', agentName: '夭夭' }],
+      profiles: [{ name: 'default', agentName: '竹儿' }],
       groupUploadsEnabled: true,
     })
     expect(response.body.csrfToken).toEqual(expect.any(String))
@@ -190,6 +190,23 @@ describe('8800 BFF', () => {
     })
     expect(JSON.stringify(response.body)).not.toContain('9119')
     expect(response.headers['content-security-policy']).toContain("default-src 'self'")
+  })
+
+  it('refreshes profiles from Hermes Bot names and ignores legacy plugin names', async () => {
+    const records: RecordedRequest[] = []
+    const runtime = createApplication({ config: makeConfig(), fetchImpl: fakeGateway(records) })
+    runtimes.push(runtime)
+    const response = await request(runtime.app.callback())
+      .get('/api/app/profiles')
+      .set('Host', '127.0.0.1:8800')
+      .expect(200)
+    expect(records.map(entry => entry.path)).toEqual([
+      '/api/profiles', '/api/plugins/yaoyao/profiles',
+    ])
+    expect(response.body.profiles).toEqual([
+      { name: 'default', is_default: true, agentName: '竹儿' },
+    ])
+    expect(JSON.stringify(response.body)).not.toContain('旧插件名称')
   })
 
   it('omits opener isolation on plaintext LAN origins but keeps it on loopback', async () => {

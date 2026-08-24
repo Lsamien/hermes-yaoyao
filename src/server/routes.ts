@@ -123,15 +123,15 @@ function normalizedProfiles(value: JsonObject): unknown[] {
   })
 }
 
-function profilesWithAgentNames(profiles: unknown[], pluginProfiles: JsonObject | undefined): unknown[] {
+function profilesWithHermesBotNames(profiles: unknown[], pluginProfiles: JsonObject | undefined): unknown[] {
   const items = Array.isArray(pluginProfiles?.profiles) ? pluginProfiles.profiles : []
   const names = new Map<string, string>()
   for (const entry of items) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
     const profile = entry as JsonObject
     const name = typeof profile.name === 'string' ? profile.name : ''
-    const agentName = typeof profile.agentName === 'string' ? profile.agentName.trim() : ''
-    if (name && agentName) names.set(name, agentName)
+    const botName = typeof profile.botName === 'string' ? profile.botName.trim() : ''
+    if (name && botName) names.set(name, botName)
   }
   return profiles.map(entry => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry
@@ -310,7 +310,7 @@ async function bootstrap(
     ? parseJson(identityResponse)
     : { user_id: 'local', display_name: '本机 Hermes', provider: 'local' }
   const pluginProfilesResponse = await dependencies.upstream.request('/api/plugins/yaoyao/profiles', jar)
-  const profiles = profilesWithAgentNames(
+  const profiles = profilesWithHermesBotNames(
     normalizedProfiles(parseJson(profilesResponse)),
     pluginProfilesResponse.status >= 200 && pluginProfilesResponse.status < 300 ? parseJson(pluginProfilesResponse) : undefined,
   )
@@ -850,7 +850,21 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   })
 
   router.get('/api/app/profiles', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, '/api/profiles')
+    await withJar(ctx, async (jar) => {
+      const profilesResponse = await dependencies.upstream.request('/api/profiles', jar)
+      if (profilesResponse.status < 200 || profilesResponse.status >= 300) {
+        sendUpstreamResponse(ctx, profilesResponse, jar)
+        return
+      }
+      const pluginProfilesResponse = await dependencies.upstream.request('/api/plugins/yaoyao/profiles', jar)
+      const profiles = profilesWithHermesBotNames(
+        normalizedProfiles(parseJson(profilesResponse)),
+        pluginProfilesResponse.status >= 200 && pluginProfilesResponse.status < 300
+          ? parseJson(pluginProfilesResponse)
+          : undefined,
+      )
+      json(ctx, 200, { profiles })
+    })
   })
   router.get('/api/app/models', async (ctx) => {
     const search = searchFrom(ctx, ['profile'])
