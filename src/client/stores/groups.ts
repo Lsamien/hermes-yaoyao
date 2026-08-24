@@ -7,7 +7,7 @@ import type {
 import {
   addGroupAgent, approveGroupInteraction as approveApi, archiveGroupRoom as archiveApi,
   clarifyGroupInteraction as clarifyApi, createGroupRoom as createApi, getGroupCapabilities,
-  getGroupMessages, getGroupRoom, getGroupRooms, getGroupTopics, interruptGroupAgent as interruptApi,
+  getGroupMessages, getGroupRoom, getGroupRooms, getGroupTopics, interruptGroupAgent as interruptApi, markGroupTopicRead,
   removeGroupAgent as removeAgentApi, sendGroupMessage as sendApi, updateGroupAgent as updateAgentApi,
   updateGroupRoom as updateRoomApi, uploadGroupFiles, type AgentSeed,
 } from '@/api/groups'
@@ -61,6 +61,7 @@ export const useGroupsStore = defineStore('groups', () => {
   const selectedRoom = computed(() => selectedRoomId.value ? protocol.value.roomDetails[selectedRoomId.value] : undefined)
   const topicProtocol = computed(() => (capabilities.value?.protocolVersion ?? 0) >= 4)
   const hostProtocol = computed(() => (capabilities.value?.protocolVersion ?? 0) >= 5)
+  const activityProtocol = computed(() => (capabilities.value?.protocolVersion ?? 0) >= 8)
   const topics = computed(() => selectedRoomId.value ? protocol.value.topicsByRoom[selectedRoomId.value] ?? [] : [])
   const selectedTopic = computed(() => selectedTopicId.value ? topics.value.find(topic => topic.id === selectedTopicId.value) : undefined)
   const messages = computed(() => topicProtocol.value
@@ -110,6 +111,13 @@ export const useGroupsStore = defineStore('groups', () => {
 
   function topicsForRoom(roomId: string): GroupTopicSummary[] {
     return protocol.value.topicsByRoom[roomId] ?? []
+  }
+
+  function markTopicRead(roomId: string, topicId: string | undefined, messages: GroupMessage[]): void {
+    if (!activityProtocol.value || !topicId) return
+    const throughSeq = Math.max(0, ...messages.map(message => message.seq))
+    if (!throughSeq) return
+    void markGroupTopicRead(roomId, topicId, throughSeq).catch(() => undefined)
   }
 
   async function loadRoomTopics(roomId: string): Promise<void> {
@@ -333,6 +341,7 @@ export const useGroupsStore = defineStore('groups', () => {
     loadingRoomEvents.delete(roomId)
     const key = topicId || roomId
     hasOlderByConversation.value = { ...hasOlderByConversation.value, [key]: page.items.length >= 100 }
+    markTopicRead(roomId, topicId, merged)
   }
 
   async function loadTopicSnapshot(
@@ -360,6 +369,7 @@ export const useGroupsStore = defineStore('groups', () => {
       messagesByTopic: { ...protocol.value.messagesByTopic, [topicId]: merged },
     }
     hasOlderByConversation.value = { ...hasOlderByConversation.value, [topicId]: page.items.length >= 100 }
+    markTopicRead(roomId, topicId, merged)
   }
 
   async function selectRoom(roomId: string, requestedTopicId?: string): Promise<void> {
@@ -662,7 +672,7 @@ export const useGroupsStore = defineStore('groups', () => {
   }
 
   return {
-    availability, capabilities, topicProtocol, hostProtocol, rooms, selectedRoomId, selectedRoom, topics, topicsForRoom, loadRoomTopics, selectedTopicId, selectedTopic,
+    availability, capabilities, topicProtocol, hostProtocol, activityProtocol, rooms, selectedRoomId, selectedRoom, topics, topicsForRoom, loadRoomTopics, selectedTopicId, selectedTopic,
     messages, agents, pendingInteractions,
     connectionState, isLoading, isSending, error, hasMoreBefore,
     start, stop, refresh, selectRoom, selectTopic, startNewTopic, createRoom, updateRoom, archiveRoom, addAgent, updateAgent,

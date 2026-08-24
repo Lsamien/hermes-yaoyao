@@ -556,8 +556,14 @@ test('selects existing group topics and creates a new protocol v4 topic on first
       && url.pathname === `/api/app/groups/rooms/${roomId}/messages`
       && url.searchParams.get('topicId') === existingTopicId
   })
+  const existingTopicRead = page.waitForRequest(request => {
+    const url = new URL(request.url())
+    return request.method() === 'PATCH'
+      && url.pathname === `/api/app/groups/rooms/${roomId}/topics/${existingTopicId}/read`
+  })
   await existingTopic.click()
   await existingTopicRequest
+  expect((await existingTopicRead).postDataJSON()).toMatchObject({ throughSeq: 3 })
   await expect(page).toHaveURL(new RegExp(`/groups/${roomId}/${existingTopicId}$`))
   const timeline = page.locator('.message-stack')
   await expect(timeline.getByText('请核对发布话题的独立历史。', { exact: true })).toBeVisible()

@@ -77,11 +77,11 @@ const groupAssistantMessage = { seq: 2, id: '55555555-5555-4555-8555-55555555555
 const releaseTopicMessage = { seq: 3, id: '99999999-9999-4999-8999-999999999999', roomId, topicId: releaseTopicId, senderKind: 'human', senderId: 'demo-user', senderName: '验收用户', content: '请核对发布话题的独立历史。', status: 'completed', createdAt: now() - 500, updatedAt: now() - 500 }
 const groupMessages = [groupMessage, groupAssistantMessage, releaseTopicMessage]
 const groupTopics = [
-  { id: topicId, roomId, title: '设计验收', preview: groupAssistantMessage.content, messageCount: 2, createdAt: now() - 120, updatedAt: now() - 100 },
-  { id: releaseTopicId, roomId, title: '发布检查', preview: releaseTopicMessage.content, messageCount: 1, createdAt: now() - 500, updatedAt: now() - 500 },
+  { id: topicId, roomId, title: '设计验收', preview: groupAssistantMessage.content, messageCount: 2, unreadCount: 1, latestMessageSeq: 2, createdAt: now() - 120, updatedAt: now() - 100 },
+  { id: releaseTopicId, roomId, title: '发布检查', preview: releaseTopicMessage.content, messageCount: 1, unreadCount: 0, latestMessageSeq: 3, createdAt: now() - 500, updatedAt: now() - 500 },
 ]
 let nextGroupSeq = 4
-const room = { id: roomId, name: '设计与工程协作', cwd: '/tmp', createdAt: now() - 2000, updatedAt: now(), archived: false, agentCount: groupAgents.length, maxReplyRounds: -1, lastMessage: groupAssistantMessage, unreadCount: 0 }
+const room = { id: roomId, name: '设计与工程协作', cwd: '/tmp', createdAt: now() - 2000, updatedAt: now(), archived: false, agentCount: groupAgents.length, maxReplyRounds: -1, lastMessage: groupAssistantMessage, unreadCount: 1, activeRunCount: 0 }
 const rpcRequests = []
 const previewPdf = Buffer.from('JVBERi0xLjQKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFnZXMgMiAwIFI+PgplbmRvYmoKMiAwIG9iago8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PgplbmRvYmoKMyAwIG9iago8PC9UeXBlL1BhZ2UvUGFyZW50IDIgMCBSL01lZGlhQm94WzAgMCAyMDAgMjAwXT4+CmVuZG9iagp4cmVmCjAgNAowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTAgMDAwMDAgbiAKMDAwMDAwMDA1MyAwMDAwMCBuIAowMDAwMDAwMTA1IDAwMDAwIG4gCnRyYWlsZXIKPDwvU2l6ZSA0L1Jvb3QgMSAwIFI+PgpzdGFydHhyZWYKMTY2CiUlRU9G', 'base64')
 
@@ -142,7 +142,7 @@ const server = createServer(async (request, response) => {
     return session ? json(response, 200, session) : json(response, 404, { detail: 'Not found' })
   }
   if (url.pathname === '/api/session-unread') return json(response, 200, { items: { 'session-demo': 0 } })
-  if (url.pathname === '/api/plugins/yaoyao/v1/capabilities') return json(response, 200, { protocolVersion: 7, journalEpoch: epoch, latestCursor: groupCursor, limits: { maxAgentsPerRoom: 8, maxMessageBytes: 65536, maxMessagePageSize: 100, defaultMaxReplyRounds: 3, unlimitedReplyRoundsValue: -1, maxAgentDisplayNameLength: 100 }, eventTypes: ['message.upsert', 'topic.updated', 'run.updated', 'agent.status', 'agent.updated'] })
+  if (url.pathname === '/api/plugins/yaoyao/v1/capabilities') return json(response, 200, { protocolVersion: 8, journalEpoch: epoch, latestCursor: groupCursor, limits: { maxAgentsPerRoom: 8, maxMessageBytes: 65536, maxMessagePageSize: 100, defaultMaxReplyRounds: 3, unlimitedReplyRoundsValue: -1, maxAgentDisplayNameLength: 100 }, eventTypes: ['message.upsert', 'topic.updated', 'room.activity', 'run.updated', 'agent.status', 'agent.updated'] })
   if (url.pathname === '/api/plugins/yaoyao/v1/rooms') return json(response, 200, { items: [room], nextCursor: null })
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}`) return json(response, 200, { ...room, agents: groupAgents, runs: [], pendingInteractions: [], latestCursor: groupCursor })
   const agentPatchMatch = new RegExp(`^/api/plugins/yaoyao/v1/rooms/${roomId}/agents/([^/]+)$`).exec(url.pathname)
@@ -175,6 +175,16 @@ const server = createServer(async (request, response) => {
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/topics`) {
     return json(response, 200, { items: [...groupTopics].sort((a, b) => b.updatedAt - a.updatedAt), nextCursor: null })
   }
+  const topicReadMatch = new RegExp(`^/api/plugins/yaoyao/v1/rooms/${roomId}/topics/([^/]+)/read$`).exec(url.pathname)
+  if (topicReadMatch && request.method === 'PATCH') {
+    const topic = groupTopics.find(item => item.id === decodeURIComponent(topicReadMatch[1]))
+    if (!topic) return json(response, 404, { detail: 'Topic not found' })
+    const input = await body(request)
+    topic.unreadCount = 0
+    topic.latestMessageSeq = Math.max(topic.latestMessageSeq, Number(input.throughSeq) || 0)
+    room.unreadCount = groupTopics.reduce((count, item) => count + item.unreadCount, 0)
+    return json(response, 200, { topic, room: { roomId, activeRunCount: room.activeRunCount, unreadCount: room.unreadCount, lastMessage: room.lastMessage } })
+  }
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/messages` && request.method === 'POST') {
     const input = await body(request)
     if (typeof input.topicId !== 'string' || !input.topicId) return json(response, 400, { detail: 'topicId is required for group protocol v4' })
@@ -185,9 +195,10 @@ const server = createServer(async (request, response) => {
     if (topic) {
       topic.preview = sent.content
       topic.messageCount = groupMessages.filter(message => message.topicId === input.topicId).length
+      topic.latestMessageSeq = sent.seq
       topic.updatedAt = sentAt
     } else {
-      topic = { id: input.topicId, roomId, title: String(input.content || '').trim().split('\n')[0].slice(0, 40) || '新话题', preview: sent.content, messageCount: 1, createdAt: sentAt, updatedAt: sentAt }
+      topic = { id: input.topicId, roomId, title: String(input.content || '').trim().split('\n')[0].slice(0, 40) || '新话题', preview: sent.content, messageCount: 1, unreadCount: 0, latestMessageSeq: sent.seq, createdAt: sentAt, updatedAt: sentAt }
       groupTopics.push(topic)
     }
     room.lastMessage = sent
@@ -203,6 +214,7 @@ const server = createServer(async (request, response) => {
     setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'running', runId }), 650)
     setTimeout(() => broadcastGroup('run.updated', { ...run, status: 'completed', runtimeSessionId: 'group-runtime-demo', updatedAt: now() }), 1800)
     setTimeout(() => broadcastGroup('agent.status', { roomId, agentId, status: 'idle', runId: null }), 1800)
+    setTimeout(() => broadcastGroup('room.activity', { roomId, activeRunCount: 0, unreadCount: room.unreadCount, lastMessage: room.lastMessage }), 1810)
     return
   }
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}/messages`) {

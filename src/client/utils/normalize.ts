@@ -9,6 +9,7 @@ import type {
   GroupInteraction,
   GroupMessage,
   GroupRoomDetail,
+  GroupRoomActivity,
   GroupRoomSummary,
   GroupRun,
   GroupTopicSummary,
@@ -416,6 +417,8 @@ export function normalizeGroupTopic(value: unknown): GroupTopicSummary {
     id: string(source.id), roomId: string(pick(source, 'roomId', 'room_id')),
     title: string(source.title, '新话题'), preview: string(source.preview),
     messageCount: number(pick(source, 'messageCount', 'message_count')),
+    unreadCount: number(pick(source, 'unreadCount', 'unread_count')),
+    latestMessageSeq: number(pick(source, 'latestMessageSeq', 'latest_message_seq')),
     createdAt: number(pick(source, 'createdAt', 'created_at')),
     updatedAt: number(pick(source, 'updatedAt', 'updated_at')),
   }
@@ -429,7 +432,20 @@ export function normalizeGroupRoom(value: unknown): GroupRoomSummary {
     createdAt: number(pick(source, 'createdAt', 'created_at')), updatedAt: number(pick(source, 'updatedAt', 'updated_at')),
     archived: bool(source.archived), agentCount: Array.isArray(rawAgents) ? rawAgents.length : number(pick(source, 'agentCount', 'agent_count')),
     lastMessage: source.lastMessage || source.last_message ? normalizeGroupMessage(pick(source, 'lastMessage', 'last_message')) : null,
-    unreadCount: number(pick(source, 'unreadCount', 'unread_count')), maxReplyRounds: number(pick(source, 'maxReplyRounds', 'max_reply_rounds'), 3),
+    unreadCount: number(pick(source, 'unreadCount', 'unread_count')),
+    activeRunCount: number(pick(source, 'activeRunCount', 'active_run_count')),
+    maxReplyRounds: number(pick(source, 'maxReplyRounds', 'max_reply_rounds'), 3),
+  }
+}
+
+export function normalizeGroupRoomActivity(value: unknown): GroupRoomActivity {
+  const source = record(value)
+  const lastMessage = pick(source, 'lastMessage', 'last_message')
+  return {
+    roomId: string(pick(source, 'roomId', 'room_id')),
+    activeRunCount: number(pick(source, 'activeRunCount', 'active_run_count')),
+    unreadCount: number(pick(source, 'unreadCount', 'unread_count')),
+    lastMessage: lastMessage == null ? null : normalizeGroupMessage(lastMessage),
   }
 }
 

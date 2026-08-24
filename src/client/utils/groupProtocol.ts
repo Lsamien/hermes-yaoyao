@@ -3,7 +3,7 @@ import type {
 } from '@shared/types'
 import {
   normalizeGroupAgent, normalizeGroupInteraction, normalizeGroupMessage, normalizeGroupRoom, normalizeGroupRoomDetail,
-  normalizeGroupRun, normalizeGroupTopic, record, string,
+  normalizeGroupRoomActivity, normalizeGroupRun, normalizeGroupTopic, record, string,
 } from './normalize'
 
 export interface GroupProtocolState {
@@ -129,6 +129,17 @@ export function applyGroupEnvelope(state: GroupProtocolState, envelope: GroupSoc
       const topic = normalizeGroupTopic(payload)
       if (!topic.id || !topic.roomId) break
       next.topicsByRoom[topic.roomId] = upsertGroupTopic(next.topicsByRoom[topic.roomId] ?? [], topic)
+      break
+    }
+    case 'room.activity': {
+      const activity = normalizeGroupRoomActivity(payload)
+      if (!activity.roomId) break
+      next.rooms = next.rooms.map(room => room.id === activity.roomId ? {
+        ...room,
+        activeRunCount: activity.activeRunCount,
+        unreadCount: activity.unreadCount,
+        lastMessage: activity.lastMessage ?? room.lastMessage,
+      } : room)
       break
     }
     case 'interaction.requested':

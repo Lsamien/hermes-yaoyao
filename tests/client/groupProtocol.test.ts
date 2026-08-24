@@ -107,6 +107,19 @@ describe('group protocol continuity', () => {
     expect(reduced.messagesByRoom['room-1']).toEqual([])
   })
 
+  it('applies v8 room activity without replacing the room identity', () => {
+    const activityMessage = groupMessage('activity-message', 'activity-client', '新的回复', 'completed', 'topic-1')
+    const reduced = applyGroupEnvelope(initial(), {
+      type: 'group.event', epoch, cursor: 9, roomId: 'room-1', event: 'room.activity',
+      payload: { roomId: 'room-1', activeRunCount: 2, unreadCount: 3, lastMessage: activityMessage as never },
+    })
+
+    expect(reduced.rooms[0]).toMatchObject({
+      id: 'room-1', name: '群聊', activeRunCount: 2, unreadCount: 3,
+      lastMessage: { id: 'activity-message' },
+    })
+  })
+
   it('converges immediately to one host when agent.updated promotes a new host', () => {
     const state = initial()
     const first = groupAgent('agent-1', '夭夭', true)
@@ -152,8 +165,8 @@ describe('group protocol continuity', () => {
   it('normalizes v5 host fields while keeping v4 agents non-host by default', () => {
     expect(normalizeGroupAgent({ id: 'legacy', room_id: 'room-1', profile: 'legacy' }).isHost).toBe(false)
     expect(normalizeGroupAgent({ id: 'host', room_id: 'room-1', profile: 'host', is_host: true }).isHost).toBe(true)
-    expect(isSupportedGroupProtocolVersion(7)).toBe(true)
-    expect(isSupportedGroupProtocolVersion(8)).toBe(false)
-    expect(SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL).toBe('v2–v7')
+    expect(isSupportedGroupProtocolVersion(8)).toBe(true)
+    expect(isSupportedGroupProtocolVersion(9)).toBe(false)
+    expect(SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL).toBe('v2–v8')
   })
 })

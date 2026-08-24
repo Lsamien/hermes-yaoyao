@@ -241,7 +241,7 @@ export interface GroupLimits {
 }
 
 export const MIN_SUPPORTED_GROUP_PROTOCOL_VERSION = 2
-export const MAX_SUPPORTED_GROUP_PROTOCOL_VERSION = 7
+export const MAX_SUPPORTED_GROUP_PROTOCOL_VERSION = 8
 export const SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL = `v${MIN_SUPPORTED_GROUP_PROTOCOL_VERSION}–v${MAX_SUPPORTED_GROUP_PROTOCOL_VERSION}`
 
 export function isSupportedGroupProtocolVersion(value: number): boolean {
@@ -341,6 +341,7 @@ export interface GroupRoomSummary {
   agentCount: number
   lastMessage?: GroupMessage | null
   unreadCount: number
+  activeRunCount?: number
   maxReplyRounds: number
 }
 
@@ -362,8 +363,17 @@ export interface GroupTopicSummary {
   title: string
   preview: string
   messageCount: number
+  unreadCount?: number
+  latestMessageSeq?: number
   createdAt: number
   updatedAt: number
+}
+
+export interface GroupRoomActivity {
+  roomId: string
+  activeRunCount: number
+  unreadCount: number
+  lastMessage?: GroupMessage | null
 }
 
 export interface GroupTopicPage {
@@ -385,6 +395,7 @@ export type GroupEventType =
   | 'agent.status'
   | 'message.upsert'
   | 'topic.updated'
+  | 'room.activity'
   | 'interaction.requested'
   | 'interaction.resolved'
   | 'run.updated'

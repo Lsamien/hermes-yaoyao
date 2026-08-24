@@ -46,6 +46,12 @@ export async function updateGroupTopic(roomId: string, topicId: string, input: {
   })))
 }
 
+export async function markGroupTopicRead(roomId: string, topicId: string, throughSeq: number): Promise<void> {
+  await apiRequest(`${BASE}/rooms/${encodeURIComponent(roomId)}/topics/${encodeURIComponent(topicId)}/read`, {
+    method: 'PATCH', body: { requestId: requestId(), throughSeq } as JsonValue,
+  })
+}
+
 export interface AgentSeed {
   profile: string
   displayName: string
