@@ -80,7 +80,7 @@ function create() {
             </select>
           </label>
           <label v-if="hostFlowEnabled" class="host-picker">
-            <span>协作模式<small>主持流程由主持人逐步选择下一位成员，避免多人并发造成上下文分叉。</small></span>
+            <span>协作模式<small>主持人可按依赖串行调度，也可一次 @ 多人并列执行；整批结束后统一复核。</small></span>
             <select v-model="orchestrationMode" aria-label="协作模式">
               <option value="free">自由讨论</option>
               <option value="host">主持流程</option>

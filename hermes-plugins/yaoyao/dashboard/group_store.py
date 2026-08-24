@@ -97,6 +97,7 @@ _CASCADE_OPERATIONS = frozenset(
 _CASCADE_PARSE_VERSION = 3
 _MAX_CASCADE_PAGE_SIZE = 32
 _MAX_CASCADE_PLAN_BYTES = 16 * 1024
+_HOST_FLOW_BARRIER_CONTENT = "internal.host-flow.parallel-barrier"
 _TOPIC_TITLE_LENGTH = 120
 _TOPIC_PREVIEW_LENGTH = 240
 _DEFAULT_SESSION_CONFIGURATION_JSON = (
@@ -1958,11 +1959,16 @@ class GroupStore:
                 next_mode = self._orchestration_mode(command["orchestrationMode"])
                 if next_mode != current_room["orchestration_mode"]:
                     active = connection.execute(
-                        """SELECT 1 FROM group_agent_runs
-                        WHERE room_id = ?
-                          AND status IN ('queued', 'running', 'awaiting_input')
+                        """SELECT 1 FROM group_agent_runs AS run
+                        LEFT JOIN group_idempotency AS cascade
+                          ON cascade.request_id = 'internal:cascade:' || run.id
+                        WHERE run.room_id = ?
+                          AND (
+                            run.status IN ('queued', 'running', 'awaiting_input')
+                            OR cascade.operation = ?
+                          )
                         LIMIT 1""",
-                        (canonical_room_id,),
+                        (canonical_room_id, _CASCADE_PENDING_OPERATION),
                     ).fetchone()
                     if active is not None:
                         raise GroupConflictError(
@@ -2981,6 +2987,22 @@ class GroupStore:
                       WHERE occupied_topic.topic_id = candidate.topic_id
                         AND occupied_topic.status IN ('running', 'awaiting_input')
                     )
+                    OR (
+                      agent.is_host = 0
+                      AND NOT EXISTS (
+                        SELECT 1 FROM group_agent_runs AS occupied_topic
+                        JOIN group_agents AS occupied_topic_agent
+                          ON occupied_topic_agent.id = occupied_topic.agent_id
+                        WHERE occupied_topic.topic_id = candidate.topic_id
+                          AND occupied_topic.status IN ('running', 'awaiting_input')
+                          AND (
+                            occupied_topic.root_message_id != candidate.root_message_id
+                            OR occupied_topic.trigger_message_id != candidate.trigger_message_id
+                            OR occupied_topic.depth != candidate.depth
+                            OR occupied_topic_agent.is_host = 1
+                          )
+                      )
+                    )
                   )
                 ORDER BY CASE WHEN room.orchestration_mode = 'host'
                               THEN root_message.seq ELSE trigger_message.seq END ASC,
@@ -3392,7 +3414,7 @@ class GroupStore:
             raise ValueError("A runtime-less settle only supports failed")
         with self.write_transaction() as connection:
             run = self._run_row(connection, canonical_run_id)
-            self._active_room(connection, run["room_id"])
+            room = self._active_room(connection, run["room_id"])
             agent = self._enabled_agent(connection, run["room_id"], run["agent_id"])
             response = self._message_row(connection, run["response_message_id"])
             self._validate_run_message_state(run, response)
@@ -3485,7 +3507,9 @@ class GroupStore:
                     ),
                     created_at=now,
                 )
-            if outcome == "completed":
+            if outcome == "completed" or (
+                room["orchestration_mode"] == "host" and not agent["is_host"]
+            ):
                 self._record_cascade_plan(
                     connection,
                     source=run,
@@ -3542,8 +3566,8 @@ class GroupStore:
         )
         if source_agent is None:
             raise GroupStoreError("Cascade source Agent is missing")
-        if room["orchestration_mode"] == "host" and source_message["visible"]:
-            if source_agent["is_host"]:
+        if room["orchestration_mode"] == "host":
+            if source_agent["is_host"] and source_message["visible"]:
                 target_ids, warnings = self._plan_cascade_mentions(
                     source_message["content"],
                     agents,
@@ -3551,14 +3575,7 @@ class GroupStore:
                     include_automatic=False,
                 )
                 explicit_ids = list(target_ids)
-                if len(target_ids) > 1:
-                    warnings.append({
-                        "code": "mention",
-                        "message": "主持流程每轮只调度一位成员，已采用第一个 @ 目标",
-                    })
-                    target_ids = target_ids[:1]
-                    explicit_ids = explicit_ids[:1]
-            else:
+            elif not source_agent["is_host"]:
                 host = next(
                     (agent for agent in agents if agent["is_host"] and agent["enabled"]),
                     None,
@@ -3566,6 +3583,9 @@ class GroupStore:
                 if host is None:
                     raise GroupStoreError("Host flow has no enabled host Agent")
                 target_ids, warnings = [str(host["id"])], []
+                explicit_ids = []
+            else:
+                target_ids, warnings = [], []
                 explicit_ids = []
         elif source_message["visible"]:
             target_ids, warnings = self._plan_cascade_mentions(
@@ -3614,6 +3634,36 @@ class GroupStore:
                 encoded,
                 created_at,
             ),
+        )
+
+    def _record_host_flow_terminal_plan_if_needed(
+        self,
+        connection: sqlite3.Connection,
+        run: sqlite3.Row,
+        created_at: float,
+    ) -> None:
+        room = connection.execute(
+            "SELECT orchestration_mode, archived FROM group_rooms WHERE id = ?",
+            (run["room_id"],),
+        ).fetchone()
+        agent = connection.execute(
+            "SELECT is_host, enabled FROM group_agents WHERE id = ? AND room_id = ?",
+            (run["agent_id"], run["room_id"]),
+        ).fetchone()
+        if (
+            room is None
+            or room["archived"]
+            or room["orchestration_mode"] != "host"
+            or agent is None
+            or not agent["enabled"]
+            or agent["is_host"]
+        ):
+            return
+        self._record_cascade_plan(
+            connection,
+            source=run,
+            source_message=self._message_row(connection, run["response_message_id"]),
+            created_at=created_at,
         )
 
     @classmethod
@@ -4058,25 +4108,31 @@ class GroupStore:
             if source is None:
                 raise GroupStoreError("Stored cascade source is missing")
             room = connection.execute(
-                "SELECT archived FROM group_rooms WHERE id = ?",
+                "SELECT archived, orchestration_mode FROM group_rooms WHERE id = ?",
                 (source["room_id"],),
             ).fetchone()
             source_agent = connection.execute(
-                "SELECT enabled FROM group_agents WHERE id = ? AND room_id = ?",
+                "SELECT enabled, is_host FROM group_agents WHERE id = ? AND room_id = ?",
                 (source["agent_id"], source["room_id"]),
             ).fetchone()
             if room is None:
                 raise GroupStoreError("Stored cascade ownership is corrupt")
-            if source["status"] != "completed":
-                raise GroupStoreError("Stored cascade source is not completed")
             source_message = self._message_row(
                 connection, source["response_message_id"]
             )
-            if (
-                source_message["id"] != plan["sourceMessageId"]
-                or source_message["status"] != "completed"
-            ):
+            host_flow_member_terminal = (
+                room["orchestration_mode"] == "host"
+                and source_agent is not None
+                and not source_agent["is_host"]
+                and source["status"] in {"completed", "failed", "interrupted"}
+            )
+            if source["status"] != "completed" and not host_flow_member_terminal:
+                raise GroupStoreError("Stored cascade source is not terminal")
+            if source_message["id"] != plan["sourceMessageId"]:
                 raise GroupStoreError("Stored cascade message is corrupt")
+            self._validate_run_message_status(
+                str(source["status"]), str(source_message["status"])
+            )
             if room["archived"] or source_agent is None or not source_agent["enabled"]:
                 result = self._cascade_summary([], [], state="discarded")
                 connection.execute(
@@ -4220,6 +4276,83 @@ class GroupStore:
             warning_texts.append("Cascade depth limit reached")
             canonical_agent_ids = []
         source_message = self._message_row(connection, source["response_message_id"])
+        trigger_message_id = str(source["response_message_id"])
+        if host_review:
+            current_host = next(
+                (agent for agent in room_agents if agent["is_host"] and agent["enabled"]),
+                None,
+            )
+            if current_host is None:
+                raise GroupStoreError("Host flow has no enabled host Agent")
+            canonical_agent_ids = [str(current_host["id"])]
+            reply_modes = {str(current_host["id"]): "automatic"}
+            unfinished_sibling = connection.execute(
+                """SELECT 1 FROM group_agent_runs
+                WHERE topic_id = ? AND root_message_id = ? AND depth = ?
+                  AND trigger_message_id = ? AND id != ?
+                  AND status NOT IN ('completed', 'failed', 'interrupted')
+                LIMIT 1""",
+                (
+                    source["topic_id"],
+                    source["root_message_id"],
+                    source["depth"],
+                    source["trigger_message_id"],
+                    source["id"],
+                ),
+            ).fetchone()
+            if unfinished_sibling is not None:
+                return {"runs": [], "systemMessages": []}
+            existing_review = connection.execute(
+                """SELECT 1 FROM group_agent_runs
+                WHERE topic_id = ? AND root_message_id = ? AND depth = ?
+                  AND agent_id = ? LIMIT 1""",
+                (
+                    source["topic_id"],
+                    source["root_message_id"],
+                    next_depth,
+                    current_host["id"],
+                ),
+            ).fetchone()
+            if existing_review is not None:
+                return {"runs": [], "systemMessages": []}
+            barrier = connection.execute(
+                """SELECT id FROM group_messages
+                WHERE room_id = ? AND topic_id = ? AND root_message_id = ?
+                  AND reply_to_message_id = ? AND sender_kind = 'system'
+                  AND visible = 0 AND content = ? AND status = 'completed'
+                ORDER BY seq ASC LIMIT 1""",
+                (
+                    source["room_id"],
+                    source["topic_id"],
+                    source["root_message_id"],
+                    source["trigger_message_id"],
+                    _HOST_FLOW_BARRIER_CONTENT,
+                ),
+            ).fetchone()
+            if barrier is None:
+                barrier_id = str(uuid.uuid4())
+                connection.execute(
+                    """INSERT INTO group_messages
+                    (id, room_id, topic_id, sender_kind, sender_id, sender_name,
+                     root_message_id, reply_to_message_id, client_message_id,
+                     content, reasoning, tool_state_json, status, error, visible,
+                     created_at, updated_at)
+                    VALUES (?, ?, ?, 'system', 'system', '系统', ?, ?, NULL,
+                            ?, '', '[]', 'completed', '', 0, ?, ?)""",
+                    (
+                        barrier_id,
+                        source["room_id"],
+                        source["topic_id"],
+                        source["root_message_id"],
+                        source["trigger_message_id"],
+                        _HOST_FLOW_BARRIER_CONTENT,
+                        now,
+                        now,
+                    ),
+                )
+                trigger_message_id = barrier_id
+            else:
+                trigger_message_id = str(barrier["id"])
         explicit_ids, _ = self._plan_cascade_mentions(
             source_message["content"],
             room_agents,
@@ -4276,7 +4409,7 @@ class GroupStore:
                     agent_id,
                     agent["display_name"],
                     source["root_message_id"],
-                    source["response_message_id"],
+                    trigger_message_id,
                     int(visible),
                     now,
                     now,
@@ -4298,7 +4431,7 @@ class GroupStore:
                     source["room_id"],
                     source["topic_id"],
                     agent_id,
-                    source["response_message_id"],
+                    trigger_message_id,
                     response_id,
                     source["root_message_id"],
                     next_depth,
@@ -4330,6 +4463,31 @@ class GroupStore:
                 created_at=now,
             )
             created_runs.append(run)
+        if (
+            room["orchestration_mode"] == "host"
+            and source_agent["is_host"]
+            and created_runs
+        ):
+            barrier_id = str(uuid.uuid4())
+            connection.execute(
+                """INSERT INTO group_messages
+                (id, room_id, topic_id, sender_kind, sender_id, sender_name,
+                 root_message_id, reply_to_message_id, client_message_id,
+                 content, reasoning, tool_state_json, status, error, visible,
+                 created_at, updated_at)
+                VALUES (?, ?, ?, 'system', 'system', '系统', ?, ?, NULL,
+                        ?, '', '[]', 'completed', '', 0, ?, ?)""",
+                (
+                    barrier_id,
+                    source["room_id"],
+                    source["topic_id"],
+                    source["root_message_id"],
+                    source["response_message_id"],
+                    _HOST_FLOW_BARRIER_CONTENT,
+                    now,
+                    now,
+                ),
+            )
         system_messages: list[dict[str, object]] = []
         for warning_text in list(dict.fromkeys(warning_texts))[:MAX_AGENTS_PER_ROOM]:
             duplicate = connection.execute(
@@ -4468,8 +4626,8 @@ class GroupStore:
         )
         with self.write_transaction() as connection:
             run = self._run_row(connection, canonical_run_id)
-            self._active_room(connection, run["room_id"])
-            self._enabled_agent(connection, run["room_id"], run["agent_id"])
+            room = self._active_room(connection, run["room_id"])
+            agent = self._enabled_agent(connection, run["room_id"], run["agent_id"])
             response = self._message_row(connection, run["response_message_id"])
             if (
                 response["room_id"] != run["room_id"]
@@ -4539,6 +4697,17 @@ class GroupStore:
                             message,
                             created_at=now,
                         )
+            if status == "completed" or (
+                room["orchestration_mode"] == "host" and not agent["is_host"]
+            ):
+                self._record_cascade_plan(
+                    connection,
+                    source=self._run_row(connection, run["id"]),
+                    source_message=self._message_row(
+                        connection, run["response_message_id"]
+                    ),
+                    created_at=now,
+                )
             return result
 
     def bind_run_runtime(
@@ -5297,6 +5466,9 @@ class GroupStore:
                 runtime_session_ids=run_runtime_ids,
                 run=changed,
             )
+            self._record_host_flow_terminal_plan_if_needed(
+                connection, self._run_row(connection, run["id"]), now
+            )
             changed_ids.append(run["id"])
         return {"runIds": changed_ids, "runtimeSessionIds": runtime_ids}
 
@@ -5362,6 +5534,9 @@ class GroupStore:
                     reason="Dashboard restarted",
                     runtime_session_ids=runtime_ids,
                     run=changed,
+                )
+                self._record_host_flow_terminal_plan_if_needed(
+                    connection, self._run_row(connection, run["id"]), now
                 )
                 changed_ids.append(run["id"])
             return changed_ids

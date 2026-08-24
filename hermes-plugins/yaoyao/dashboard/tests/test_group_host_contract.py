@@ -748,20 +748,78 @@ class GroupHostContractTests(unittest.TestCase):
                 store,
                 room["id"],
                 agents["host"]["id"],
-                content="@成员一 先处理，@成员二 等待",
+                content="@成员一 调研前端，@成员二 调研后端，并列处理",
             )
             delegated = store.complete_cascade(source)
-            self.assertEqual(delegated["runCount"], 1)
-            delegated_run = store.get_run(delegated["runIds"][0])
-            self.assertEqual(delegated_run["agentId"], agents["one"]["id"])
+            self.assertEqual(delegated["runCount"], 2)
+            delegated_runs = [
+                store.get_run(run_id) for run_id in delegated["runIds"]
+            ]
+            self.assertEqual(
+                {run["agentId"] for run in delegated_runs},
+                {agents["one"]["id"], agents["two"]["id"]},
+            )
+            self.assertEqual(
+                {run["triggerMessageId"] for run in delegated_runs},
+                {store.get_run(source)["responseMessageId"]},
+            )
             with store.connection() as connection:
-                required_reply = connection.execute(
-                    "SELECT required_reply FROM group_agent_runs WHERE id = ?",
-                    (delegated_run["id"],),
-                ).fetchone()[0]
-            self.assertEqual(required_reply, 0)
-            self.assertEqual(delegated_run["depth"], 1)
-            self.assertEqual(delegated["systemMessageCount"], 1)
+                required_replies = connection.execute(
+                    """SELECT required_reply FROM group_agent_runs
+                    WHERE id IN (?, ?)""",
+                    tuple(delegated["runIds"]),
+                ).fetchall()
+            self.assertTrue(all(row[0] == 0 for row in required_replies))
+            self.assertTrue(all(run["depth"] == 1 for run in delegated_runs))
+            self.assertEqual(delegated["systemMessageCount"], 0)
+
+            first_parallel = store.claim_next_runnable_run()
+            second_parallel = store.claim_next_runnable_run()
+            self.assertEqual(
+                {first_parallel["id"], second_parallel["id"]},
+                set(delegated["runIds"]),
+            )
+            self.assertIsNone(store.claim_next_runnable_run())
+            later = self._send(store, room["id"], "这是后续独立请求", [])
+
+            store.upsert_agent_message(
+                first_parallel["id"],
+                content="并列结果一",
+                reasoning="",
+                tool_state=[],
+                status="completed",
+            )
+            store.transition_run(first_parallel["id"], "completed")
+            waiting = store.complete_cascade(first_parallel["id"])
+            self.assertEqual(waiting["runCount"], 0)
+
+            store.upsert_agent_message(
+                second_parallel["id"],
+                content="并列结果二",
+                reasoning="",
+                tool_state=[],
+                status="completed",
+            )
+            store.transition_run(second_parallel["id"], "completed")
+            with self.assertRaisesRegex(
+                STORE_MODULE.GroupConflictError, "runs are active"
+            ):
+                store.update_room(
+                    room["id"],
+                    {"requestId": new_id(), "orchestrationMode": "free"},
+                )
+            joined = store.complete_cascade(second_parallel["id"])
+            self.assertEqual(joined["runCount"], 1)
+            review = store.get_run(joined["runIds"][0])
+            self.assertEqual(review["agentId"], agents["host"]["id"])
+            self.assertEqual(review["depth"], 1)
+            claimed_review = store.claim_next_runnable_run()
+            self.assertEqual(claimed_review["id"], review["id"])
+            projection = store.read_run_projection(review["id"])
+            contents = [message["content"] for message in projection["messages"]]
+            self.assertIn("并列结果一", contents)
+            self.assertIn("并列结果二", contents)
+            self.assertNotIn(later["message"]["content"], contents)
 
         with tempfile.TemporaryDirectory() as directory:
             store = GroupStore(Path(directory) / "group.db")
@@ -800,7 +858,7 @@ class GroupHostContractTests(unittest.TestCase):
                 projection, room["agents"]
             )
             self.assertIn("当前唯一发言令牌", prompt)
-            self.assertIn("禁止 @all", prompt)
+            self.assertIn("并列执行", prompt)
 
     def test_v10_migration_adds_free_orchestration_mode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -826,6 +884,58 @@ class GroupHostContractTests(unittest.TestCase):
             self.assertEqual(migrated.schema_version(), 11)
             self.assertEqual(
                 migrated.get_room(room["id"])["orchestrationMode"], "free"
+            )
+
+    def test_host_flow_parallel_barrier_returns_failures_to_host(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room({
+                "requestId": new_id(),
+                "name": "并列失败群",
+                "cwd": "",
+                "orchestrationMode": "host",
+                "agents": [
+                    {"profile": "host", "displayName": "主持人", "isHost": True},
+                    {"profile": "one", "displayName": "成员一"},
+                    {"profile": "two", "displayName": "成员二"},
+                ],
+            })
+            agents = {agent["profile"]: agent for agent in room["agents"]}
+            source = self._insert_completed_source(
+                store,
+                room["id"],
+                agents["host"]["id"],
+                content="@成员一 检查接口，@成员二 检查数据",
+            )
+            delegated = store.complete_cascade(source)
+            first = store.claim_next_runnable_run()
+            second = store.claim_next_runnable_run()
+            self.assertEqual(
+                {first["id"], second["id"]}, set(delegated["runIds"])
+            )
+
+            store.upsert_agent_message(
+                first["id"],
+                content="接口检查完成",
+                reasoning="",
+                tool_state=[],
+                status="completed",
+            )
+            store.transition_run(first["id"], "completed")
+            self.assertEqual(store.complete_cascade(first["id"])["runCount"], 0)
+
+            store.transition_run(second["id"], "failed", error="数据检查失败")
+            joined = store.complete_cascade(second["id"])
+            self.assertEqual(joined["runCount"], 1)
+            review = store.claim_next_runnable_run()
+            projection = store.read_run_projection(review["id"])
+            self.assertEqual(review["agentId"], agents["host"]["id"])
+            self.assertTrue(
+                any(
+                    message["summary"] == "数据检查失败"
+                    for message in projection["messages"]
+                )
             )
 
     @staticmethod

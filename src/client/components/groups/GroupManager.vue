@@ -216,7 +216,7 @@ function statusLabel(status: GroupAgent['status']): string {
       <label><span>名称</span><input v-model="form.name" maxlength="80" @change="saveRoom" /></label>
       <label class="rounds"><span>最多回复轮数<small>-1 表示无限</small></span><input v-model.number="form.replyRounds" type="number" min="-1" max="100" aria-label="最多回复轮数" @change="saveRoom" /></label>
       <label v-if="hostFlowEnabled" class="flow-mode">
-        <span>协作模式<small>主持流程会逐步调度，每轮只允许一位成员执行。</small></span>
+        <span>协作模式<small>主持人可按依赖逐步调度，也可一次 @ 多人并列执行。</small></span>
         <select v-model="form.orchestrationMode" aria-label="协作模式" :disabled="busy || hasActiveAgents" :title="hasActiveAgents ? '请等待当前回复完成或先中断 Agent' : ''" @change="saveRoom">
           <option value="free">自由讨论</option>
           <option value="host">主持流程</option>
