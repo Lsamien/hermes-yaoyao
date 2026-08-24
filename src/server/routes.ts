@@ -632,7 +632,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   })
   router.get('/api/app/groups/rooms', async (ctx) => {
     await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/rooms', {
-      search: searchFrom(ctx, ['limit', 'cursor']),
+      search: searchFrom(ctx, ['limit', 'cursor', 'archived']),
     })
   })
   router.post('/api/app/groups/rooms', async (ctx) => {
@@ -650,6 +650,11 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       })
     })
   }
+  router.post('/api/app/groups/rooms/:roomID/restore', async (ctx) => {
+    await proxy(ctx, dependencies.upstream, groupPath(ctx, '/restore'), {
+      method: 'POST', requestBody: body(ctx),
+    })
+  })
   router.post('/api/app/groups/rooms/:roomID/agents', async (ctx) => {
     await proxy(ctx, dependencies.upstream, groupPath(ctx, '/agents'), {
       method: 'POST', requestBody: body(ctx),
@@ -671,13 +676,25 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   })
   router.get('/api/app/groups/rooms/:roomID/topics', async (ctx) => {
     await proxy(ctx, dependencies.upstream, groupPath(ctx, '/topics'), {
-      search: searchFrom(ctx, ['limit', 'cursor']),
+      search: searchFrom(ctx, ['limit', 'cursor', 'archived']),
     })
   })
   router.patch('/api/app/groups/rooms/:roomID/topics/:topicID', async (ctx) => {
     const topicID = canonicalUUID(ctx.params.topicID, 'topic ID')
     await proxy(ctx, dependencies.upstream, groupPath(ctx, `/topics/${topicID}`), {
       method: 'PATCH', requestBody: body(ctx),
+    })
+  })
+  router.delete('/api/app/groups/rooms/:roomID/topics/:topicID', async (ctx) => {
+    const topicID = canonicalUUID(ctx.params.topicID, 'topic ID')
+    await proxy(ctx, dependencies.upstream, groupPath(ctx, `/topics/${topicID}`), {
+      method: 'DELETE', requestBody: body(ctx),
+    })
+  })
+  router.post('/api/app/groups/rooms/:roomID/topics/:topicID/restore', async (ctx) => {
+    const topicID = canonicalUUID(ctx.params.topicID, 'topic ID')
+    await proxy(ctx, dependencies.upstream, groupPath(ctx, `/topics/${topicID}/restore`), {
+      method: 'POST', requestBody: body(ctx),
     })
   })
   router.patch('/api/app/groups/rooms/:roomID/topics/:topicID/read', async (ctx) => {

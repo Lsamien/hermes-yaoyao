@@ -319,13 +319,14 @@ describe('8800 BFF', () => {
     const topicID = '22222222-2222-4222-8222-222222222222'
 
     await request(runtime.app.callback())
-      .get(`/api/app/groups/rooms/${roomID}/topics?limit=25&cursor=next-topic&ignored=drop-me`)
+      .get(`/api/app/groups/rooms/${roomID}/topics?limit=25&cursor=next-topic&archived=true&ignored=drop-me`)
       .set('Host', '127.0.0.1:8800')
       .expect(200)
     const topics = records.at(-1)!
     expect(topics.path).toBe(`/api/plugins/yaoyao/v1/rooms/${roomID}/topics`)
     expect(topics.search.get('limit')).toBe('25')
     expect(topics.search.get('cursor')).toBe('next-topic')
+    expect(topics.search.get('archived')).toBe('true')
     expect(topics.search.has('ignored')).toBe(false)
 
     const bootstrap = await request(runtime.app.callback())
@@ -344,6 +345,28 @@ describe('8800 BFF', () => {
     expect(renamed.method).toBe('PATCH')
     expect(renamed.path).toBe(`/api/plugins/yaoyao/v1/rooms/${roomID}/topics/${topicID}`)
     expect(renamed.body).toEqual({ requestId: '33333333-3333-4333-8333-333333333333', title: '新标题' })
+
+    await request(runtime.app.callback())
+      .delete(`/api/app/groups/rooms/${roomID}/topics/${topicID}`)
+      .set('Host', '127.0.0.1:8800')
+      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Cookie', cookieHeader(bootstrap))
+      .set('X-CSRF-Token', bootstrap.body.csrfToken)
+      .send({ requestId: '55555555-5555-4555-8555-555555555555' })
+      .expect(200)
+    expect(records.at(-1)?.method).toBe('DELETE')
+    expect(records.at(-1)?.path).toBe(`/api/plugins/yaoyao/v1/rooms/${roomID}/topics/${topicID}`)
+
+    await request(runtime.app.callback())
+      .post(`/api/app/groups/rooms/${roomID}/topics/${topicID}/restore`)
+      .set('Host', '127.0.0.1:8800')
+      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Cookie', cookieHeader(bootstrap))
+      .set('X-CSRF-Token', bootstrap.body.csrfToken)
+      .send({ requestId: '66666666-6666-4666-8666-666666666666' })
+      .expect(200)
+    expect(records.at(-1)?.method).toBe('POST')
+    expect(records.at(-1)?.path).toBe(`/api/plugins/yaoyao/v1/rooms/${roomID}/topics/${topicID}/restore`)
 
     await request(runtime.app.callback())
       .patch(`/api/app/groups/rooms/${roomID}/topics/${topicID}/read`)

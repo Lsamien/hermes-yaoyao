@@ -127,6 +127,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
   app.use(bodyParser({
     encoding: 'utf-8',
     enableTypes: ['json'],
+    parsedMethods: ['POST', 'PUT', 'PATCH', 'DELETE'],
     jsonLimit: '2mb',
     onError: (_error, ctx) => {
       throw new HttpError(ctx.status === 413 ? 413 : 400, 'Invalid JSON request body', 'invalid_json_body')

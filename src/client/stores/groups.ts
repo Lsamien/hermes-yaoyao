@@ -110,7 +110,7 @@ export const useGroupsStore = defineStore('groups', () => {
   }
 
   function topicsForRoom(roomId: string): GroupTopicSummary[] {
-    return protocol.value.topicsByRoom[roomId] ?? []
+    return (protocol.value.topicsByRoom[roomId] ?? []).filter(topic => !topic.archived)
   }
 
   function markTopicRead(roomId: string, topicId: string | undefined, messages: GroupMessage[]): void {
