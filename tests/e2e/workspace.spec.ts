@@ -634,6 +634,18 @@ test('folds tool result rows into their expandable tool call', async ({ page }) 
   await expect(trace.locator('.tool-trace')).toHaveCount(2)
   await expect(trace.locator('.tool-trace__details')).toHaveCount(2)
   await expect(trace.locator('.tool-trace__details').filter({ hasText: '/tmp/demo-report.pdf' })).toBeVisible()
+  const traceContent = trace.locator('.turn-trace__content')
+  await expect(traceContent).toHaveCSS('overflow-y', 'auto')
+  await expect(traceContent.locator(':scope > .turn-trace__item')).toHaveCount(4)
+  const layout = await traceContent.evaluate(element => {
+    const items = [...element.children] as HTMLElement[]
+    return {
+      maxHeight: Number.parseFloat(getComputedStyle(element).maxHeight),
+      leftOffsets: items.map(item => item.offsetLeft),
+    }
+  })
+  expect(layout.maxHeight).toBeLessThanOrEqual(420)
+  expect(new Set(layout.leftOffsets).size).toBe(1)
   await expect(page.locator('[data-message-id="message-tool-call"]')).toHaveCount(0)
   await expect(page.locator('.message--tool')).toHaveCount(0)
 })
