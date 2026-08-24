@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL } from '@shared/types'
-import type { GroupAgent, ModelOption } from '@shared/types'
+import type { GroupAgent, GroupRoomSummary, GroupTopicSummary, ModelOption } from '@shared/types'
 import AppIcon from '@/components/common/AppIcon.vue'
 import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -47,6 +47,10 @@ const agentUpdateError = ref<Record<string, string>>({})
 const managerError = ref('')
 const roomActionMenu = ref<{ roomId: string; x: number; y: number } | null>(null)
 const expandedRoomIds = ref(new Set<string>())
+const showArchivedRooms = ref(false)
+const archivedRoomList = ref<GroupRoomSummary[]>([])
+const showArchivedTopics = ref(false)
+const archivedTopicList = ref<GroupTopicSummary[]>([])
 
 const activeRooms = computed(() => groups.rooms.filter(room => !room.archived))
 const roomSidebarItems = computed(() => activeRooms.value.map(roomSidebarItem))
@@ -352,6 +356,37 @@ async function archiveRoom() {
   await router.replace(groupRoute())
 }
 
+async function toggleArchivedRooms() {
+  showArchivedRooms.value = !showArchivedRooms.value
+  if (showArchivedRooms.value) archivedRoomList.value = await groups.archivedRooms()
+}
+
+async function restoreArchivedRoom(roomId: string) {
+  await groups.restoreRoom(roomId)
+  archivedRoomList.value = await groups.archivedRooms()
+}
+
+async function archiveSelectedTopic() {
+  const roomId = groups.selectedRoomId
+  const topic = groups.selectedTopic
+  if (!roomId || !topic || !window.confirm(`归档“${topic.title}”？历史消息会保留。`)) return
+  await groups.archiveTopic(roomId, topic.id)
+}
+
+async function toggleArchivedTopics() {
+  const roomId = groups.selectedRoomId
+  if (!roomId) return
+  showArchivedTopics.value = !showArchivedTopics.value
+  if (showArchivedTopics.value) archivedTopicList.value = await groups.archivedTopics(roomId)
+}
+
+async function restoreArchivedTopic(topicId: string) {
+  const roomId = groups.selectedRoomId
+  if (!roomId) return
+  await groups.restoreTopic(roomId, topicId)
+  archivedTopicList.value = await groups.archivedTopics(roomId)
+}
+
 function openLocalFile({ name, url }: { name: string; url: string }) {
   const item = previewItemFromUrl(name, url)
   if (item.kind === 'image' || item.kind === 'video') openMedia(item)
@@ -438,9 +473,14 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         <YaoYaoSidebarIcon name="add" />
         <span>新建群聊</span>
       </button>
+      <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" @click="toggleArchivedRooms">
+        <AppIcon name="archive" :size="15" />
+        <span>{{ showArchivedRooms ? '活跃群聊' : '已归档' }}</span>
+      </button>
     </template>
     <template #sidebar>
       <ResourceSidebar
+        v-if="!showArchivedRooms"
         :items="sidebarItems"
         :active-id="groups.selectedRoomId"
         :loading="groups.isLoading"
@@ -453,12 +493,26 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         @context-menu="openRoomActions"
         @toggle="toggleRoomTopics"
       />
+      <section v-else class="archived-list" aria-label="已归档群聊">
+        <p v-if="!archivedRoomList.length">没有已归档群聊</p>
+        <article v-for="archived in archivedRoomList" :key="archived.id">
+          <span>{{ archived.name }}</span>
+          <button type="button" @click="restoreArchivedRoom(archived.id)">恢复</button>
+        </article>
+      </section>
     </template>
 
     <div v-if="groups.availability === 'unsupported' || groups.availability === 'unavailable'" class="groups-unavailable">
       <EmptyState icon="alert" :title="groups.availability === 'unsupported' ? '群聊协议版本不兼容' : '群聊服务暂不可用'" :description="groups.error || `请确认 9119 已安装 YaoYao 群聊 protocol ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL} 插件。`" action-label="重新检查" @action="groups.refresh" />
     </div>
     <div v-else class="groups-workspace">
+      <section v-if="showArchivedTopics" class="archived-topic-list" aria-label="已归档话题">
+        <p v-if="!archivedTopicList.length">此群聊没有已归档话题</p>
+        <article v-for="topic in archivedTopicList" :key="topic.id">
+          <span>{{ topic.title }}</span>
+          <button type="button" @click="restoreArchivedTopic(topic.id)">恢复</button>
+        </article>
+      </section>
       <MessageTimeline
         :messages="messages"
         :title="groups.topicProtocol ? (groups.selectedTopic?.title || '新话题') : (groups.selectedRoom?.name || '群聊')"
@@ -484,6 +538,8 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
             <span v-if="hostAgent" class="group-host-chip" :title="`用户未明确 @ 时由 ${hostAgent.displayName || hostAgent.profile} 负责回应`">主持人 {{ hostAgent.displayName || hostAgent.profile }}</span>
             <div class="group-avatars" aria-label="群聊成员"><span v-for="agent in agents.slice(0, 4)" :key="agent.id" :title="agent.isHost ? `${agent.name} · 主持人` : agent.name" :class="{ host: agent.isHost }">{{ agent.name.slice(0, 1).toUpperCase() }}</span><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
             <button class="icon-button" type="button" title="管理群聊" aria-label="管理群聊" :disabled="!groups.selectedRoom" @click="managerOpen = true"><AppIcon name="dots" /></button>
+            <button v-if="groups.selectedTopic" class="icon-button" type="button" title="归档话题" aria-label="归档话题" @click="archiveSelectedTopic"><AppIcon name="archive" /></button>
+            <button v-if="groups.selectedRoom" class="icon-button" type="button" title="已归档话题" aria-label="已归档话题" @click="toggleArchivedTopics"><AppIcon name="archive" /></button>
           </div>
         </template>
       </MessageTimeline>
@@ -556,6 +612,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 .sidebar-primary-action:hover, .sidebar-primary-action:focus-visible { background: var(--surface-hover); outline: 0; }
 .sidebar-primary-action:focus-visible { box-shadow: inset 0 0 0 1px var(--line-strong); }
 .sidebar-primary-action:disabled { cursor: not-allowed; opacity: .35; }
+.archived-list, .archived-topic-list { display: grid; gap: 8px; padding: 10px; color: var(--text-secondary); font-size: 12px; }.archived-list article, .archived-topic-list article { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }.archived-list button, .archived-topic-list button { border: 0; border-radius: 6px; background: var(--surface-hover); color: var(--text-primary); cursor: pointer; padding: 4px 8px; }
 .group-header-actions { display: flex; align-items: center; gap: 8px; }.group-host-chip { max-width: 150px; overflow: hidden; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line)); border-radius: 999px; background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); font-size: 9px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.group-avatars { display: flex; align-items: center; }.group-avatars span, .group-avatars em { display: grid; width: 24px; height: 24px; margin-left: -5px; place-items: center; border: 2px solid var(--canvas); border-radius: 8px; background: var(--accent); color: var(--text-on-solid); font-size: 8px; font-style: normal; font-weight: 650; }.group-avatars span.host { box-shadow: 0 0 0 1px var(--accent); }.group-avatars span:first-child { margin-left: 0; }.group-avatars em { background: var(--surface-hover); color: var(--text-secondary); }
 .group-error { display: flex; width: min(760px, calc(100% - 32px)); margin: 0 auto 4px; align-items: center; gap: 6px; color: var(--danger); font-size: 9px; }
 @media (max-width: 480px) { .group-avatars, .group-host-chip { display: none; } }

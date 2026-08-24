@@ -5,10 +5,10 @@ import type {
   GroupAgent, GroupCapabilities, GroupMessage, GroupMessagePage, GroupRoomDetail, GroupRoomSummary, GroupRun, GroupSocketEnvelope, GroupTopicSummary, RealtimeConnectionState,
 } from '@shared/types'
 import {
-  addGroupAgent, approveGroupInteraction as approveApi, archiveGroupRoom as archiveApi,
+  addGroupAgent, approveGroupInteraction as approveApi, archiveGroupRoom as archiveApi, archiveGroupTopic as archiveTopicApi,
   clarifyGroupInteraction as clarifyApi, createGroupRoom as createApi, getGroupCapabilities,
   getGroupMessages, getGroupRoom, getGroupRooms, getGroupTopics, interruptGroupAgent as interruptApi, markGroupTopicRead,
-  removeGroupAgent as removeAgentApi, sendGroupMessage as sendApi, updateGroupAgent as updateAgentApi,
+  removeGroupAgent as removeAgentApi, restoreGroupRoom as restoreRoomApi, restoreGroupTopic as restoreTopicApi, sendGroupMessage as sendApi, updateGroupAgent as updateAgentApi,
   updateGroupRoom as updateRoomApi, uploadGroupFiles, type AgentSeed,
 } from '@/api/groups'
 import { GroupEventSocket } from '@/api/realtime'
@@ -94,7 +94,7 @@ export const useGroupsStore = defineStore('groups', () => {
     return loaded.sort((a, b) => b.updatedAt - a.updatedAt)
   }
 
-  async function loadTopics(roomId: string): Promise<GroupTopicSummary[]> {
+  async function loadTopics(roomId: string, archived = false): Promise<GroupTopicSummary[]> {
     const loaded: GroupTopicSummary[] = []
     const seen = new Set<string>()
     let cursor: string | undefined
@@ -102,7 +102,7 @@ export const useGroupsStore = defineStore('groups', () => {
       const key = cursor ?? '<first-page>'
       if (seen.has(key)) throw new Error('群聊话题分页返回了重复游标')
       seen.add(key)
-      const page = await getGroupTopics(roomId, cursor, 50)
+      const page = await getGroupTopics(roomId, cursor, 50, archived)
       loaded.push(...page.items)
       cursor = page.nextCursor ?? undefined
     } while (cursor && loaded.length < 2_000)
@@ -459,6 +459,46 @@ export const useGroupsStore = defineStore('groups', () => {
     await saveCache()
   }
 
+  async function restoreRoom(roomId: string): Promise<GroupRoomDetail> {
+    const detail = await restoreRoomApi(roomId)
+    protocol.value = snapshotGroupRoom(protocol.value, detail, [], topicProtocol.value ? { topics: [] } : {})
+    await saveCache()
+    return detail
+  }
+
+  async function archiveTopic(roomId: string, topicId: string): Promise<void> {
+    const topic = await archiveTopicApi(roomId, topicId)
+    const current = protocol.value.topicsByRoom[roomId] ?? []
+    protocol.value = { ...protocol.value, topicsByRoom: { ...protocol.value.topicsByRoom, [roomId]: current.map(item => item.id === topic.id ? topic : item) } }
+    if (selectedRoomId.value === roomId && selectedTopicId.value === topicId) {
+      selectedTopicId.value = current.find(item => item.id !== topicId && !item.archived)?.id
+    }
+    await saveCache()
+  }
+
+  async function restoreTopic(roomId: string, topicId: string): Promise<GroupTopicSummary> {
+    const topic = await restoreTopicApi(roomId, topicId)
+    const current = protocol.value.topicsByRoom[roomId] ?? []
+    protocol.value = { ...protocol.value, topicsByRoom: { ...protocol.value.topicsByRoom, [roomId]: upsertGroupTopic(current, topic) } }
+    await saveCache()
+    return topic
+  }
+
+  async function archivedRooms(): Promise<GroupRoomSummary[]> {
+    const loaded: GroupRoomSummary[] = []
+    let cursor: string | undefined
+    do {
+      const page = await getGroupRooms(cursor, 50, true)
+      loaded.push(...page.items)
+      cursor = page.nextCursor ?? undefined
+    } while (cursor && loaded.length < 2_000)
+    return loaded.sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  async function archivedTopics(roomId: string): Promise<GroupTopicSummary[]> {
+    return loadTopics(roomId, true)
+  }
+
   function publishAgent(roomId: string, agent: GroupAgent): void {
     const detail = protocol.value.roomDetails[roomId]
     if (!detail) return
@@ -675,7 +715,7 @@ export const useGroupsStore = defineStore('groups', () => {
     availability, capabilities, topicProtocol, hostProtocol, activityProtocol, rooms, selectedRoomId, selectedRoom, topics, topicsForRoom, loadRoomTopics, selectedTopicId, selectedTopic,
     messages, agents, pendingInteractions,
     connectionState, isLoading, isSending, error, hasMoreBefore,
-    start, stop, refresh, selectRoom, selectTopic, startNewTopic, createRoom, updateRoom, archiveRoom, addAgent, updateAgent,
+    start, stop, refresh, selectRoom, selectTopic, startNewTopic, createRoom, updateRoom, archiveRoom, restoreRoom, archiveTopic, restoreTopic, archivedRooms, archivedTopics, addAgent, updateAgent,
     removeAgent, sendMessage, loadOlder, interruptAgent, approveInteraction, clarifyInteraction,
   }
 })

@@ -41,7 +41,7 @@ from .group_protocol import (
 )
 
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 _WAL_RETRY_DELAYS = (0.01, 0.02, 0.04, 0.08)
 EVENT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MIN_RETAINED_EVENTS = 100_000
@@ -123,6 +123,7 @@ _SCHEMA_STATEMENTS = (
         last_read_message_seq INTEGER NOT NULL DEFAULT 0,
         created_at REAL NOT NULL,
         updated_at REAL NOT NULL,
+        archived INTEGER NOT NULL DEFAULT 0,
         UNIQUE(room_id, id)
     )""",
     """CREATE TABLE IF NOT EXISTS group_agents (
@@ -234,7 +235,7 @@ _SCHEMA_STATEMENTS = (
         created_at REAL NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_group_rooms_ordering ON group_rooms(archived, updated_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_group_topics_room_ordering ON group_topics(room_id, updated_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_group_topics_room_ordering ON group_topics(room_id, archived, updated_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_group_messages_room_seq ON group_messages(room_id, seq)",
     "CREATE INDEX IF NOT EXISTS idx_group_messages_topic_seq ON group_messages(topic_id, seq)",
     "CREATE INDEX IF NOT EXISTS idx_group_agent_runs_room ON group_agent_runs(room_id)",
@@ -479,6 +480,9 @@ class GroupStore:
             raw_version = "7"
         if raw_version == "7":
             self._migrate_v7_to_v8(connection)
+            raw_version = "8"
+        if raw_version == "8":
+            self._migrate_v8_to_v9(connection)
         self._validated_schema_version(
             self._metadata_value_from_connection(connection, "schema_version")
         )
@@ -1156,11 +1160,31 @@ class GroupStore:
         )
 
     @staticmethod
+    def _migrate_v8_to_v9(connection: sqlite3.Connection) -> None:
+        """Make topics independently archivable without removing history."""
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(group_topics)")
+        }
+        if "archived" not in columns:
+            connection.execute(
+                "ALTER TABLE group_topics ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
+            )
+        connection.execute("DROP INDEX IF EXISTS idx_group_topics_room_ordering")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_group_topics_room_ordering "
+            "ON group_topics(room_id, archived, updated_at DESC, id DESC)"
+        )
+        connection.execute(
+            "UPDATE group_meta SET value = '9' WHERE key = 'schema_version'"
+        )
+
+    @staticmethod
     def _validate_v8_columns(connection: sqlite3.Connection) -> None:
         expected_columns = {
             "group_meta": {"key", "value"},
             "group_rooms": {"id", "name", "cwd", "max_reply_rounds", "created_at", "updated_at", "archived"},
-            "group_topics": {"id", "room_id", "title", "last_read_message_seq", "created_at", "updated_at"},
+            "group_topics": {"id", "room_id", "title", "last_read_message_seq", "created_at", "updated_at", "archived"},
             "group_agents": {"id", "room_id", "profile", "display_name", "display_name_key", "description", "stored_session_id", "last_context_message_seq", "enabled", "reply_without_mention", "is_host", "model_override", "provider_override", "reasoning_effort_override", "fast_mode_override", "session_config_json", "created_at", "updated_at"},
             "group_agent_topic_state": {"agent_id", "topic_id", "last_context_message_seq", "created_at", "updated_at"},
             "group_messages": {"seq", "id", "room_id", "topic_id", "sender_kind", "sender_id", "sender_name", "root_message_id", "reply_to_message_id", "client_message_id", "content", "reasoning", "tool_state_json", "status", "error", "visible", "created_at", "updated_at"},
@@ -1181,6 +1205,7 @@ class GroupStore:
             ("group_interactions", "topic_id"): ("TEXT", 1, None),
             ("group_agent_topic_state", "last_context_message_seq"): ("INTEGER", 1, "0"),
             ("group_topics", "last_read_message_seq"): ("INTEGER", 1, "0"),
+            ("group_topics", "archived"): ("INTEGER", 1, "0"),
         }
         for table, required in expected_columns.items():
             rows = list(connection.execute(f"PRAGMA table_info({table})"))
@@ -1681,7 +1706,9 @@ class GroupStore:
             result["latestCursor"] = int(cursor_row["cursor"])
             return result
 
-    def list_rooms(self, *, limit: int, cursor: str | None) -> CursorPage:
+    def list_rooms(
+        self, *, limit: int, cursor: str | None, archived: bool = False
+    ) -> CursorPage:
         if (
             not isinstance(limit, int)
             or isinstance(limit, bool)
@@ -1692,8 +1719,8 @@ class GroupStore:
         query = """SELECT id, name, cwd, max_reply_rounds, created_at, updated_at, archived,
             (SELECT COUNT(*) FROM group_agents WHERE room_id = group_rooms.id) AS agent_count,
             (SELECT COUNT(*) FROM group_topics WHERE room_id = group_rooms.id) AS topic_count
-            FROM group_rooms WHERE archived = 0"""
-        params: list[object] = []
+            FROM group_rooms WHERE archived = ?"""
+        params: list[object] = [int(archived)]
         if cursor_values is not None:
             query += " AND ((updated_at < ?) OR (updated_at = ? AND id < ?))"
             params.extend((cursor_values[0], cursor_values[0], cursor_values[1]))
@@ -1721,7 +1748,8 @@ class GroupStore:
         return CursorPage(items=items, next_cursor=next_cursor)
 
     def list_topics(
-        self, room_id: str, *, limit: int, cursor: str | None
+        self, room_id: str, *, limit: int, cursor: str | None,
+        archived: bool = False,
     ) -> CursorPage:
         """Return one room's topics in stable most-recently-active order."""
         canonical_room_id = self._canonical_uuid(room_id, "roomId")
@@ -1755,8 +1783,9 @@ class GroupStore:
              FROM group_messages AS visible_message
              WHERE visible_message.topic_id = topic.id
                AND visible_message.visible = 1), 0) AS latest_message_seq
-            FROM group_topics AS topic WHERE topic.room_id = ?"""
-        params: list[object] = [canonical_room_id]
+            FROM group_topics AS topic
+            WHERE topic.room_id = ? AND topic.archived = ?"""
+        params: list[object] = [canonical_room_id, int(archived)]
         if cursor_values is not None:
             query += " AND ((topic.updated_at < ?) OR (topic.updated_at = ? AND topic.id < ?))"
             params.extend((cursor_values[0], cursor_values[0], cursor_values[1]))
@@ -1873,7 +1902,7 @@ class GroupStore:
 
         def action(connection: sqlite3.Connection) -> dict[str, object]:
             self._active_room(connection, canonical_room_id)
-            self._topic_row(connection, canonical_room_id, canonical_topic_id)
+            self._active_topic(connection, canonical_room_id, canonical_topic_id)
             now = self._now()
             connection.execute(
                 """UPDATE group_topics SET title = ?, updated_at = ?
@@ -1892,6 +1921,78 @@ class GroupStore:
         return self.execute_idempotent(
             "topic.updated",
             request_id,
+            self._scoped_payload(command, canonical_room_id, canonical_topic_id),
+            action,
+        )
+
+    def archive_topic(
+        self, room_id: str, topic_id: str, command: Mapping[str, object]
+    ) -> dict[str, object]:
+        canonical_room_id = self._canonical_uuid(room_id, "roomId")
+        canonical_topic_id = self._canonical_uuid(topic_id, "topicId")
+        command = self._command(command, {"requestId"})
+        request_id = self._command_request_id(command)
+
+        def action(connection: sqlite3.Connection) -> dict[str, object]:
+            self._active_room(connection, canonical_room_id)
+            self._active_topic(connection, canonical_room_id, canonical_topic_id)
+            now = self._now()
+            self._interrupt_runs_for_scope(
+                connection, room_id=canonical_room_id, topic_id=canonical_topic_id,
+                reason="Topic archived", now=now,
+            )
+            connection.execute(
+                "UPDATE group_topics SET archived = 1, updated_at = ? "
+                "WHERE id = ? AND room_id = ?",
+                (now, canonical_topic_id, canonical_room_id),
+            )
+            topic = self._topic_summary_by_id(
+                connection, canonical_room_id, canonical_topic_id
+            )
+            self._append_event(
+                connection, canonical_room_id, "topic.archived", topic,
+                created_at=now,
+            )
+            return topic
+
+        return self.execute_idempotent(
+            "topic.archived", request_id,
+            self._scoped_payload(command, canonical_room_id, canonical_topic_id),
+            action,
+        )
+
+    def restore_topic(
+        self, room_id: str, topic_id: str, command: Mapping[str, object]
+    ) -> dict[str, object]:
+        canonical_room_id = self._canonical_uuid(room_id, "roomId")
+        canonical_topic_id = self._canonical_uuid(topic_id, "topicId")
+        command = self._command(command, {"requestId"})
+        request_id = self._command_request_id(command)
+
+        def action(connection: sqlite3.Connection) -> dict[str, object]:
+            self._active_room(connection, canonical_room_id)
+            topic_row = self._topic_row(
+                connection, canonical_room_id, canonical_topic_id
+            )
+            if not topic_row["archived"]:
+                raise GroupConflictError("Topic is already active")
+            now = self._now()
+            connection.execute(
+                "UPDATE group_topics SET archived = 0, updated_at = ? "
+                "WHERE id = ? AND room_id = ?",
+                (now, canonical_topic_id, canonical_room_id),
+            )
+            topic = self._topic_summary_by_id(
+                connection, canonical_room_id, canonical_topic_id
+            )
+            self._append_event(
+                connection, canonical_room_id, "topic.restored", topic,
+                created_at=now,
+            )
+            return topic
+
+        return self.execute_idempotent(
+            "topic.restored", request_id,
             self._scoped_payload(command, canonical_room_id, canonical_topic_id),
             action,
         )
@@ -1992,6 +2093,36 @@ class GroupStore:
             action,
         )
         return self._runtime_envelope(response)
+
+    def restore_room(self, room_id: str, command: Mapping[str, object]) -> dict[str, object]:
+        canonical_room_id = self._canonical_uuid(room_id, "roomId")
+        command = self._command(command, {"requestId"})
+        request_id = self._command_request_id(command)
+
+        def action(connection: sqlite3.Connection) -> dict[str, object]:
+            room = self._room_detail(
+                connection, canonical_room_id, include_archived=True
+            )
+            if not room["archived"]:
+                raise GroupConflictError("Room is already active")
+            now = self._now()
+            connection.execute(
+                "UPDATE group_rooms SET archived = 0, updated_at = ? WHERE id = ?",
+                (now, canonical_room_id),
+            )
+            restored = self._room_detail(
+                connection, canonical_room_id, include_archived=True
+            )
+            self._append_event(
+                connection, canonical_room_id, "room.restored", restored,
+                created_at=now,
+            )
+            return restored
+
+        return self.execute_idempotent(
+            "room.restored", request_id,
+            self._scoped_payload(command, canonical_room_id), action,
+        )
 
     def add_agent(
         self, room_id: str, command: Mapping[str, object]
@@ -4927,6 +5058,7 @@ class GroupStore:
         reason: str,
         now: float,
         agent_id: str | None = None,
+        topic_id: str | None = None,
         include_queued: bool = True,
     ) -> dict[str, list[str]]:
         statuses = (
@@ -4942,6 +5074,9 @@ class GroupStore:
         if agent_id is not None:
             query += " AND run.agent_id = ?"
             params.append(agent_id)
+        if topic_id is not None:
+            query += " AND run.topic_id = ?"
+            params.append(topic_id)
         query += " ORDER BY response.seq ASC, run.id ASC"
         runs = connection.execute(query, params).fetchall()
         changed_ids: list[str] = []
@@ -5421,6 +5556,14 @@ class GroupStore:
             raise GroupNotFoundError("Topic not found in room")
         return topic
 
+    def _active_topic(
+        self, connection: sqlite3.Connection, room_id: str, topic_id: str
+    ) -> sqlite3.Row:
+        topic = self._topic_row(connection, room_id, topic_id)
+        if topic["archived"]:
+            raise GroupNotFoundError("Topic not found in room")
+        return topic
+
     @classmethod
     def _topic_summary_by_id(
         cls, connection: sqlite3.Connection, room_id: str, topic_id: str
@@ -5467,6 +5610,8 @@ class GroupStore:
         if existing is not None:
             if existing["room_id"] != room_id:
                 raise GroupConflictError("Topic does not belong to room")
+            if existing["archived"]:
+                raise GroupConflictError("Topic is archived")
             return existing
         connection.execute(
             """INSERT INTO group_topics
@@ -6333,6 +6478,7 @@ class GroupStore:
             "unreadCount": int(row["unread_count"]),
             "latestMessageSeq": int(row["latest_message_seq"]),
             "lastReadMessageSeq": int(row["last_read_message_seq"]),
+            "archived": bool(row["archived"]),
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }

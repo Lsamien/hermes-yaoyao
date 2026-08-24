@@ -354,6 +354,15 @@ class _UnavailableRuntime:
     async def archive_room(self, **_: object) -> dict[str, object]:
         raise _package._yaoyao_group_runtime_unavailable_error()
 
+    async def restore_room(self, **_: object) -> dict[str, object]:
+        raise _package._yaoyao_group_runtime_unavailable_error()
+
+    async def archive_topic(self, **_: object) -> dict[str, object]:
+        raise _package._yaoyao_group_runtime_unavailable_error()
+
+    async def restore_topic(self, **_: object) -> dict[str, object]:
+        raise _package._yaoyao_group_runtime_unavailable_error()
+
     async def add_agent(self, **_: object) -> dict[str, object]:
         raise _package._yaoyao_group_runtime_unavailable_error()
 
@@ -1045,8 +1054,11 @@ async def capabilities() -> dict[str, object]:
 async def list_rooms(
     limit: int = Query(default=50, ge=1, le=100),
     cursor: str | None = Query(default=None, min_length=1, max_length=4096),
+    archived: bool = Query(default=False),
 ) -> dict[str, object]:
-    page = await _store_call("list_rooms", limit=limit, cursor=cursor)
+    page = await _store_call(
+        "list_rooms", limit=limit, cursor=cursor, archived=archived
+    )
     return {"items": page.items, "nextCursor": page.next_cursor}
 
 
@@ -1054,9 +1066,11 @@ async def list_topics(
     room_id: UUID,
     limit: int = Query(default=50, ge=1, le=100),
     cursor: str | None = Query(default=None, min_length=1, max_length=4096),
+    archived: bool = Query(default=False),
 ) -> dict[str, object]:
     page = await _store_call(
-        "list_topics", str(room_id), limit=limit, cursor=cursor
+        "list_topics", str(room_id), limit=limit, cursor=cursor,
+        archived=archived,
     )
     return {"items": page.items, "nextCursor": page.next_cursor}
 
@@ -1069,6 +1083,24 @@ async def update_topic(
         room_id=str(room_id),
         topic_id=str(topic_id),
         command=_command(request, exclude_unset=True),
+    )
+
+
+async def archive_topic(
+    room_id: UUID, topic_id: UUID, request: RequestIDRequest
+) -> dict[str, object]:
+    return await _runtime_call(
+        "archive_topic", room_id=str(room_id), topic_id=str(topic_id),
+        request_id=str(request.request_id),
+    )
+
+
+async def restore_topic(
+    room_id: UUID, topic_id: UUID, request: RequestIDRequest
+) -> dict[str, object]:
+    return await _runtime_call(
+        "restore_topic", room_id=str(room_id), topic_id=str(topic_id),
+        request_id=str(request.request_id),
     )
 
 
@@ -1104,6 +1136,12 @@ async def archive_room(room_id: UUID, request: RequestIDRequest) -> dict[str, ob
         "archive_room",
         room_id=str(room_id),
         request_id=str(request.request_id),
+    )
+
+
+async def restore_room(room_id: UUID, request: RequestIDRequest) -> dict[str, object]:
+    return await _runtime_call(
+        "restore_room", room_id=str(room_id), request_id=str(request.request_id)
     )
 
 
@@ -1264,6 +1302,18 @@ def _build_router() -> APIRouter:
     built.add_api_route("/rooms/{room_id}", get_room, methods=["GET"])
     built.add_api_route("/rooms/{room_id}", update_room, methods=["PATCH"])
     built.add_api_route("/rooms/{room_id}", archive_room, methods=["DELETE"])
+    built.add_api_route("/rooms/{room_id}/restore", restore_room, methods=["POST"])
+    built.add_api_route("/rooms/{room_id}/topics", list_topics, methods=["GET"])
+    built.add_api_route(
+        "/rooms/{room_id}/topics/{topic_id}", update_topic, methods=["PATCH"]
+    )
+    built.add_api_route(
+        "/rooms/{room_id}/topics/{topic_id}", archive_topic, methods=["DELETE"]
+    )
+    built.add_api_route(
+        "/rooms/{room_id}/topics/{topic_id}/restore", restore_topic,
+        methods=["POST"],
+    )
     built.add_api_route("/rooms/{room_id}/agents", add_agent, methods=["POST"])
     built.add_api_route(
         "/rooms/{room_id}/agents/{agent_id}", update_agent, methods=["PATCH"]
@@ -1275,10 +1325,6 @@ def _build_router() -> APIRouter:
         "/rooms/{room_id}/agents/{agent_id}/interrupt",
         interrupt_agent,
         methods=["POST"],
-    )
-    built.add_api_route("/rooms/{room_id}/topics", list_topics, methods=["GET"])
-    built.add_api_route(
-        "/rooms/{room_id}/topics/{topic_id}", update_topic, methods=["PATCH"]
     )
     built.add_api_route(
         "/rooms/{room_id}/topics/{topic_id}/read",

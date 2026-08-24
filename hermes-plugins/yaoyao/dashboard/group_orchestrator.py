@@ -131,6 +131,16 @@ class _Store(Protocol):
         self, room_id: str, command: Mapping[str, object]
     ) -> dict[str, object]: ...
 
+    def restore_room(self, room_id: str, command: Mapping[str, object]) -> dict[str, object]: ...
+
+    def archive_topic(
+        self, room_id: str, topic_id: str, command: Mapping[str, object]
+    ) -> dict[str, object]: ...
+
+    def restore_topic(
+        self, room_id: str, topic_id: str, command: Mapping[str, object]
+    ) -> dict[str, object]: ...
+
     def create_room(self, command: Mapping[str, object]) -> dict[str, object]: ...
 
     def update_room(
@@ -235,6 +245,7 @@ class _GatewayEvent:
 class _RuntimeState:
     run_id: str
     room_id: str
+    topic_id: str
     agent_id: str
     runtime_id: str
     generation: int
@@ -782,6 +793,90 @@ class GroupOrchestrator:
             self.wake()
             return dict(result)
 
+    async def archive_topic(
+        self, *, room_id: str, topic_id: str, request_id: str
+    ) -> dict[str, object]:
+        _required_string(room_id, "roomId")
+        _required_string(topic_id, "topicId")
+        _required_string(request_id, "requestId")
+        return await self._tracked_control(
+            lambda: self._archive_topic(room_id, topic_id, request_id),
+            task_name=f"yaoyao-group-archive-topic-{request_id}",
+            failure_message="YaoYao group topic archive failed",
+        )
+
+    async def _archive_topic(
+        self, room_id: str, topic_id: str, request_id: str
+    ) -> dict[str, object]:
+        async with self._room_serial(room_id):
+            with self._mapping_lock:
+                states = sorted(
+                    (state for _generation, state in self._runtime_states.values()
+                     if state.room_id == room_id and state.topic_id == topic_id),
+                    key=lambda state: (state.agent_id, state.runtime_id, state.generation),
+                )
+            async with AsyncExitStack() as stack:
+                for state in states:
+                    await stack.enter_async_context(self._submission_serial(state.agent_id))
+                    await stack.enter_async_context(state.mutation_lock)
+                current_states = self._current_owned_states(states)
+                envelope = await self._run_states_blocking(
+                    current_states, self.store.archive_topic, room_id, topic_id,
+                    {"requestId": request_id},
+                )
+                if not isinstance(envelope, Mapping):
+                    raise GroupOrchestratorError("Archived topic is invalid")
+                result = dict(envelope)
+                if result.get("id") != topic_id or result.get("archived") is not True:
+                    raise GroupOrchestratorError("Archived topic identity changed")
+                self.wake()
+                cleanup_errors = await self._cleanup_lifecycle_targets_locked(
+                    current_states, tuple(), room_id=room_id, topic_id=topic_id,
+                )
+                if cleanup_errors:
+                    raise GroupOrchestratorError(
+                        "Topic was archived durably, but Gateway cleanup failed: "
+                        + "; ".join(cleanup_errors)
+                    )
+                return result
+
+    async def restore_topic(
+        self, *, room_id: str, topic_id: str, request_id: str
+    ) -> dict[str, object]:
+        return await self._topic_lifecycle(
+            room_id, topic_id, request_id, self.store.restore_topic, "restore"
+        )
+
+    async def restore_room(
+        self, *, room_id: str, request_id: str
+    ) -> dict[str, object]:
+        _required_string(room_id, "roomId")
+        _required_string(request_id, "requestId")
+        async with self._room_serial(room_id):
+            result = await asyncio.to_thread(
+                self.store.restore_room, room_id, {"requestId": request_id}
+            )
+            if not isinstance(result, Mapping):
+                raise GroupOrchestratorError("Restored room is invalid")
+            self.wake()
+            return dict(result)
+
+    async def _topic_lifecycle(
+        self, room_id: str, topic_id: str, request_id: str,
+        function: Callable[..., object], label: str,
+    ) -> dict[str, object]:
+        _required_string(room_id, "roomId")
+        _required_string(topic_id, "topicId")
+        _required_string(request_id, "requestId")
+        async with self._room_serial(room_id):
+            result = await asyncio.to_thread(
+                function, room_id, topic_id, {"requestId": request_id}
+            )
+            if not isinstance(result, Mapping):
+                raise GroupOrchestratorError(f"{label.title()}d topic is invalid")
+            self.wake()
+            return dict(result)
+
     async def mark_topic_read(
         self, *, room_id: str, topic_id: str, command: Mapping[str, object]
     ) -> dict[str, object]:
@@ -1161,12 +1256,14 @@ class GroupOrchestrator:
         *,
         room_id: str,
         agent_id: str | None = None,
+        topic_id: str | None = None,
     ) -> list[str]:
         owned = {
             state.runtime_id: state
             for state in states
             if state.room_id == room_id
             and (agent_id is None or state.agent_id == agent_id)
+            and (topic_id is None or state.topic_id == topic_id)
         }
         cleanup_errors: list[str] = []
         replay_runtime_ids = set(runtime_ids)
@@ -2061,6 +2158,7 @@ class GroupOrchestrator:
         room = _required_mapping(projection.get("room"), "projection.room")
         agent = _required_mapping(projection.get("agent"), "projection.agent")
         room_id = _required_string(room.get("id"), "projection.room.id")
+        topic_id = _required_string(run.get("topicId"), "projection.run.topicId")
         agent_id = _required_string(agent.get("id"), "projection.agent.id")
         if _required_string(run.get("id"), "projection.run.id") != run_id:
             raise GroupOrchestratorError("projection run identity changed")
@@ -2226,6 +2324,7 @@ class GroupOrchestrator:
                 state = self._install_runtime(
                     run_id=run_id,
                     room_id=room_id,
+                    topic_id=topic_id,
                     agent_id=agent_id,
                     identity=identity,
                     expected_stored_id=expected_stored_id,
@@ -2417,6 +2516,7 @@ class GroupOrchestrator:
         *,
         run_id: str,
         room_id: str,
+        topic_id: str,
         agent_id: str,
         identity: SessionIdentity,
         expected_stored_id: str | None,
@@ -2435,6 +2535,7 @@ class GroupOrchestrator:
             state = _RuntimeState(
                 run_id=run_id,
                 room_id=room_id,
+                topic_id=topic_id,
                 agent_id=agent_id,
                 runtime_id=identity.runtime_id,
                 generation=self._next_generation,

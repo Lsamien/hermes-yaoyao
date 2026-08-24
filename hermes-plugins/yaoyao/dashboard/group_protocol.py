@@ -18,7 +18,7 @@ from pydantic import (
 )
 
 
-PROTOCOL_VERSION = 8
+PROTOCOL_VERSION = 9
 MAX_AGENTS_PER_ROOM = 8
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_TOOL_STATE_BYTES = 256 * 1024
@@ -51,12 +51,15 @@ EVENT_TYPES = frozenset({
     "room.created",
     "room.updated",
     "room.deleted",
+    "room.restored",
     "agent.created",
     "agent.updated",
     "agent.deleted",
     "agent.status",
     "message.upsert",
     "topic.updated",
+    "topic.archived",
+    "topic.restored",
     "room.activity",
     "interaction.requested",
     "interaction.resolved",

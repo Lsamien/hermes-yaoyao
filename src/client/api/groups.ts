@@ -16,8 +16,8 @@ export async function getGroupCapabilities(): Promise<GroupCapabilities> {
   return normalizeGroupCapabilities(unwrapData(await apiRequest<unknown>(`${BASE}/capabilities`)))
 }
 
-export async function getGroupRooms(cursor?: string, limit = 50): Promise<GroupRoomPage> {
-  const payload = unwrapData(await apiRequest<unknown>(apiUrl(`${BASE}/rooms`, { cursor, limit: Math.max(1, Math.min(100, limit)) })))
+export async function getGroupRooms(cursor?: string, limit = 50, archived = false): Promise<GroupRoomPage> {
+  const payload = unwrapData(await apiRequest<unknown>(apiUrl(`${BASE}/rooms`, { cursor, limit: Math.max(1, Math.min(100, limit)), archived })))
   const source = record(payload)
   return {
     items: values(source.items ?? source.rooms ?? payload).map(normalizeGroupRoom).filter(room => room.id),
@@ -29,9 +29,9 @@ export async function getGroupRoom(roomId: string): Promise<GroupRoomDetail> {
   return normalizeGroupRoomDetail(unwrapData(await apiRequest<unknown>(`${BASE}/rooms/${encodeURIComponent(roomId)}`)))
 }
 
-export async function getGroupTopics(roomId: string, cursor?: string, limit = 50): Promise<GroupTopicPage> {
+export async function getGroupTopics(roomId: string, cursor?: string, limit = 50, archived = false): Promise<GroupTopicPage> {
   const payload = unwrapData(await apiRequest<unknown>(apiUrl(`${BASE}/rooms/${encodeURIComponent(roomId)}/topics`, {
-    cursor, limit: Math.max(1, Math.min(100, limit)),
+    cursor, limit: Math.max(1, Math.min(100, limit)), archived,
   })))
   const source = record(payload)
   return {
@@ -43,6 +43,18 @@ export async function getGroupTopics(roomId: string, cursor?: string, limit = 50
 export async function updateGroupTopic(roomId: string, topicId: string, input: { title: string }): Promise<GroupTopicSummary> {
   return normalizeGroupTopic(unwrapData(await apiRequest<unknown>(`${BASE}/rooms/${encodeURIComponent(roomId)}/topics/${encodeURIComponent(topicId)}`, {
     method: 'PATCH', body: { requestId: requestId(), ...input } as JsonValue,
+  })))
+}
+
+export async function archiveGroupTopic(roomId: string, topicId: string): Promise<GroupTopicSummary> {
+  return normalizeGroupTopic(unwrapData(await apiRequest<unknown>(`${BASE}/rooms/${encodeURIComponent(roomId)}/topics/${encodeURIComponent(topicId)}`, {
+    method: 'DELETE', body: { requestId: requestId() } as JsonValue,
+  })))
+}
+
+export async function restoreGroupTopic(roomId: string, topicId: string): Promise<GroupTopicSummary> {
+  return normalizeGroupTopic(unwrapData(await apiRequest<unknown>(`${BASE}/rooms/${encodeURIComponent(roomId)}/topics/${encodeURIComponent(topicId)}/restore`, {
+    method: 'POST', body: { requestId: requestId() } as JsonValue,
   })))
 }
 
@@ -79,6 +91,12 @@ export async function updateGroupRoom(roomId: string, input: { name?: string; cw
 export async function archiveGroupRoom(roomId: string): Promise<GroupRoomDetail> {
   return normalizeGroupRoomDetail(unwrapData(await apiRequest<unknown>(`${BASE}/rooms/${encodeURIComponent(roomId)}`, {
     method: 'DELETE', body: { requestId: requestId() },
+  })))
+}
+
+export async function restoreGroupRoom(roomId: string): Promise<GroupRoomDetail> {
+  return normalizeGroupRoomDetail(unwrapData(await apiRequest<unknown>(`${BASE}/rooms/${encodeURIComponent(roomId)}/restore`, {
+    method: 'POST', body: { requestId: requestId() } as JsonValue,
   })))
 }
 

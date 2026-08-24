@@ -421,6 +421,7 @@ export function normalizeGroupTopic(value: unknown): GroupTopicSummary {
     latestMessageSeq: number(pick(source, 'latestMessageSeq', 'latest_message_seq')),
     createdAt: number(pick(source, 'createdAt', 'created_at')),
     updatedAt: number(pick(source, 'updatedAt', 'updated_at')),
+    archived: bool(source.archived),
   }
 }
 

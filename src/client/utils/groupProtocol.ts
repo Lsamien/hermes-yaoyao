@@ -77,7 +77,8 @@ export function applyGroupEnvelope(state: GroupProtocolState, envelope: GroupSoc
   }
   switch (envelope.event) {
     case 'room.created':
-    case 'room.updated': {
+    case 'room.updated':
+    case 'room.restored': {
       const room = normalizeGroupRoom(payload)
       if (room.id) next.rooms = upsert(next.rooms, room).sort((a, b) => b.updatedAt - a.updatedAt)
       if (roomId && next.roomDetails[roomId] && envelope.event === 'room.updated') {
@@ -125,7 +126,9 @@ export function applyGroupEnvelope(state: GroupProtocolState, envelope: GroupSoc
         : room)
       break
     }
-    case 'topic.updated': {
+    case 'topic.updated':
+    case 'topic.archived':
+    case 'topic.restored': {
       const topic = normalizeGroupTopic(payload)
       if (!topic.id || !topic.roomId) break
       next.topicsByRoom[topic.roomId] = upsertGroupTopic(next.topicsByRoom[topic.roomId] ?? [], topic)
