@@ -9,6 +9,14 @@ export type UiAgent = {
   replyRounds?: number
 }
 
+export type GroupProfileOption = {
+  id: string
+  profile: string
+  displayName: string
+  nodeId: string
+  nodeLabel: string
+}
+
 export type UiRoom = {
   id: string
   name: string

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
+import type { GroupProfileOption } from './types'
 
 interface CreateGroupPayload {
   name: string
-  profiles: string[]
+  members: GroupProfileOption[]
   autoReply: boolean
   replyRounds: number
   instructions?: string
@@ -12,7 +13,7 @@ interface CreateGroupPayload {
   orchestrationMode?: 'free' | 'host'
 }
 
-const props = withDefaults(defineProps<{ open: boolean; profiles: string[]; hostEnabled?: boolean; hostFlowEnabled?: boolean; roomInstructionsEnabled?: boolean; busy?: boolean }>(), {
+const props = withDefaults(defineProps<{ open: boolean; profiles: GroupProfileOption[]; hostEnabled?: boolean; hostFlowEnabled?: boolean; roomInstructionsEnabled?: boolean; busy?: boolean }>(), {
   hostEnabled: false,
   hostFlowEnabled: false,
   roomInstructionsEnabled: false,
@@ -36,16 +37,16 @@ watch(() => props.open, open => {
   if (!open) return
   name.value = ''
   instructions.value = ''
-  selected.value = props.profiles.slice(0, 1)
+  selected.value = props.profiles.slice(0, 1).map(profile => profile.id)
   hostProfile.value = selected.value[0] ?? ''
   autoReply.value = true
   replyRounds.value = 3
   orchestrationMode.value = 'free'
 }, { immediate: true })
 
-function toggle(profile: string) {
-  if (selected.value.includes(profile)) selected.value = selected.value.filter(item => item !== profile)
-  else if (selected.value.length < 8) selected.value.push(profile)
+function toggle(profile: GroupProfileOption) {
+  if (selected.value.includes(profile.id)) selected.value = selected.value.filter(item => item !== profile.id)
+  else if (selected.value.length < 8) selected.value.push(profile.id)
   if (!selected.value.includes(hostProfile.value)) hostProfile.value = selected.value[0] ?? ''
 }
 
@@ -53,7 +54,7 @@ function create() {
   if (!valid.value) return
   const payload: CreateGroupPayload = {
     name: name.value.trim(),
-    profiles: selected.value,
+    members: selected.value.flatMap(id => props.profiles.find(profile => profile.id === id) ?? []),
     autoReply: autoReply.value,
     replyRounds: replyRounds.value,
   }
@@ -74,15 +75,15 @@ function create() {
           <label v-if="roomInstructionsEnabled" class="field room-instructions"><span>说明 <small>供所有 Agent 查阅的规则和形式准则</small></span><textarea v-model="instructions" maxlength="4000" rows="4" placeholder="例如：先确认事实；结论使用中文；涉及发布必须等待确认。" /></label>
           <div class="agent-picker">
             <div class="agent-picker__heading"><span>选择 Agent</span><small>{{ selected.length }}/8</small></div>
-            <button v-for="profile in profiles" :key="profile" type="button" :class="{ selected: selected.includes(profile) }" :disabled="!selected.includes(profile) && selected.length >= 8" @click="toggle(profile)">
-              <span>{{ profile.slice(0, 1).toUpperCase() }}</span><strong>{{ profile }}</strong><AppIcon v-if="selected.includes(profile)" name="check" :size="15" />
+            <button v-for="profile in profiles" :key="profile.id" type="button" :class="{ selected: selected.includes(profile.id) }" :disabled="!selected.includes(profile.id) && selected.length >= 8" @click="toggle(profile)">
+              <span>{{ profile.displayName.slice(0, 1).toUpperCase() }}</span><strong>{{ profile.displayName }}<small>{{ profile.profile }} · {{ profile.nodeLabel }}</small></strong><AppIcon v-if="selected.includes(profile.id)" name="check" :size="15" />
             </button>
             <p v-if="!profiles.length">当前没有可用 Agent，请先在 Hermes 配置 Profile。</p>
           </div>
           <label v-if="hostEnabled" class="host-picker">
             <span>主持人<small>用户没有明确 @ 时，主持人始终负责回应。</small></span>
             <select v-model="hostProfile" aria-label="主持人">
-              <option v-for="profile in selected" :key="profile" :value="profile">{{ profile }}</option>
+              <option v-for="profileID in selected" :key="profileID" :value="profileID">{{ profiles.find(profile => profile.id === profileID)?.displayName || profileID }}</option>
             </select>
           </label>
           <label v-if="hostFlowEnabled" class="host-picker">
@@ -108,7 +109,7 @@ function create() {
 .create-dialog { width: min(470px, 100%); max-height: min(680px, calc(100vh - 36px)); padding: 18px; overflow-y: auto; border: 1px solid var(--line); border-radius: 17px; background: var(--surface-raised); box-shadow: var(--shadow-float); }
 header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; } header small { color: var(--text-muted); font-size: 9px; letter-spacing: .06em; } h2 { margin: 3px 0 0; font-size: 19px; letter-spacing: -.03em; }
 .field { display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary); font-size: 10px; }.field span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }.field small { color: var(--text-muted); font-size: 9px; font-weight: 400; }.field input, .field textarea { padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; outline: none; resize: vertical; background: var(--surface-soft); color: var(--text-primary); }.field input { height: 38px; }.field textarea { min-height: 86px; padding-block: 9px; line-height: 1.5; }.field input:focus, .field textarea:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }.room-instructions { margin-top: 13px; }
-.agent-picker { margin-top: 17px; }.agent-picker__heading { display: flex; justify-content: space-between; margin-bottom: 7px; color: var(--text-secondary); font-size: 10px; }.agent-picker__heading small { color: var(--text-muted); }.agent-picker > button { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 9px; padding: 5px 8px; border: 0; border-radius: 9px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }.agent-picker > button:hover, .agent-picker > button.selected { background: var(--surface-soft); }.agent-picker > button:disabled { opacity: .35; }.agent-picker > button > span { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: var(--text-on-solid); font-size: 10px; }.agent-picker > button strong { flex: 1; font-size: 11px; }.agent-picker p { color: var(--text-muted); font-size: 10px; }
+.agent-picker { margin-top: 17px; }.agent-picker__heading { display: flex; justify-content: space-between; margin-bottom: 7px; color: var(--text-secondary); font-size: 10px; }.agent-picker__heading small { color: var(--text-muted); }.agent-picker > button { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 9px; padding: 5px 8px; border: 0; border-radius: 9px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }.agent-picker > button:hover, .agent-picker > button.selected { background: var(--surface-soft); }.agent-picker > button:disabled { opacity: .35; }.agent-picker > button > span { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: var(--text-on-solid); font-size: 10px; }.agent-picker > button strong { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; font-size: 11px; }.agent-picker > button strong small { overflow: hidden; color: var(--text-muted); font-size: 9px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }.agent-picker p { color: var(--text-muted); font-size: 10px; }
 .host-picker { display: grid; grid-template-columns: minmax(0, 1fr) 148px; align-items: center; gap: 12px; margin-top: 13px; padding: 11px; border: 1px solid var(--line); border-radius: 10px; color: var(--text-secondary); font-size: 10px; }.host-picker > span { display: flex; min-width: 0; flex-direction: column; gap: 3px; font-weight: 650; }.host-picker small { color: var(--text-muted); font-size: 9px; font-weight: 400; line-height: 1.45; }.host-picker select { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; outline: 0; background: var(--surface-soft); color: var(--text-primary); font-size: 10px; }.host-picker select:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }
 .dialog-settings { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 15px; padding: 11px; border-radius: 10px; background: var(--surface-soft); }.dialog-settings label { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 10px; }.dialog-settings input[type="checkbox"] { accent-color: var(--accent); }.dialog-settings input[type="number"] { width: 51px; padding: 4px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-raised); color: var(--text-primary); text-align: center; }
 footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }

@@ -18,7 +18,7 @@ from pydantic import (
 )
 
 
-PROTOCOL_VERSION = 10
+PROTOCOL_VERSION = 11
 MAX_AGENTS_PER_ROOM = 8
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_TOOL_STATE_BYTES = 256 * 1024
@@ -97,6 +97,8 @@ class GroupModel(BaseModel):
 
 class AgentSeed(GroupModel):
     profile: str = Field(min_length=1, max_length=100)
+    node_id: str = Field(default="local", alias="nodeId", min_length=1, max_length=64)
+    node_label: str = Field(default="", alias="nodeLabel", max_length=100)
     display_name: str | None = Field(
         default=None, alias="displayName", max_length=MAX_AGENT_DISPLAY_NAME_LENGTH
     )
@@ -131,6 +133,16 @@ class AgentSeed(GroupModel):
     @classmethod
     def reject_reserved_display_name(cls, value: str | None) -> str | None:
         return validate_optional_display_name(value)
+
+    @field_validator("node_id")
+    @classmethod
+    def validate_node_id(cls, value: str) -> str:
+        return normalize_node_id(value)
+
+    @field_validator("node_label")
+    @classmethod
+    def normalize_node_label(cls, value: str) -> str:
+        return " ".join(value.split())
 
 
 class CreateRoomRequest(GroupModel):
@@ -237,6 +249,8 @@ class MarkTopicReadRequest(GroupModel):
 class AddAgentRequest(GroupModel):
     request_id: UUID = Field(alias="requestId")
     profile: str = Field(min_length=1, max_length=100)
+    node_id: str = Field(default="local", alias="nodeId", min_length=1, max_length=64)
+    node_label: str = Field(default="", alias="nodeLabel", max_length=100)
     display_name: str | None = Field(
         default=None, alias="displayName", max_length=MAX_AGENT_DISPLAY_NAME_LENGTH
     )
@@ -271,6 +285,16 @@ class AddAgentRequest(GroupModel):
     @classmethod
     def reject_reserved_display_name(cls, value: str | None) -> str | None:
         return validate_optional_display_name(value)
+
+    @field_validator("node_id")
+    @classmethod
+    def validate_node_id(cls, value: str) -> str:
+        return normalize_node_id(value)
+
+    @field_validator("node_label")
+    @classmethod
+    def normalize_node_label(cls, value: str) -> str:
+        return " ".join(value.split())
 
 
 class UpdateAgentRequest(GroupModel):
@@ -344,6 +368,19 @@ def normalize_optional_agent_configuration(value: str | None) -> str | None:
     if not normalized:
         raise ValueError("configuration value must not be blank")
     return normalized
+
+
+def normalize_node_id(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized == "local":
+        return normalized
+    try:
+        canonical = str(UUID(normalized))
+    except ValueError as error:
+        raise ValueError("nodeId must be local or a canonical UUID") from error
+    if canonical != normalized:
+        raise ValueError("nodeId must be local or a canonical UUID")
+    return canonical
 
 
 def validate_reasoning_override(value: str | None) -> str | None:

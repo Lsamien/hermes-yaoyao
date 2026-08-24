@@ -5,7 +5,7 @@
 仓库同时归档了夭夭的 Hermes Dashboard 插件，位于
 [`hermes-plugins/yaoyao/dashboard`](hermes-plugins/yaoyao/dashboard)。Web 工作台和该插件是两个独立部署单元：前者运行在 `8800`，后者由已运行的 Hermes Dashboard 在 `9119` 加载。
 
-当前发布版本：**Git `v0.1.0` / 夭夭 Web `0.1.0` / Hermes Dashboard 插件 `1.6.1`**。
+当前发布版本：**Git `v0.1.0` / 夭夭 Web `0.1.0` / Hermes Dashboard 插件 `1.7.0`**。
 
 需要由自动化 Agent 部署或升级时，请直接使用 [Agent 安装手册](docs/agent-install.md)。其中包含固定版本校验、备份、同步、单一 Dashboard 重载与验证步骤。
 
@@ -84,6 +84,23 @@ npm install
 cp .env.example .env
 npm run dev
 ```
+
+## 手机扫码与跨节点 Agent
+
+插件 `1.7.0` 与当前 Web 服务共同提供 Hermes 节点配对。每台参与设备都需要安装相同版本的夭夭插件并运行 Web 服务：
+
+1. 在目标 Hermes 的夭夭 Web 左下角打开“手机与节点”。
+2. 输入一次 Hermes 密码并生成两分钟有效、只能使用一次的二维码；密码只用于创建独立设备会话，不会保存。
+3. 在夭夭 iOS 的“设置 → 服务器与账号”中选择“扫描 Hermes 节点”。
+4. 扫描后，该节点的 Bots、普通聊天历史和 Agent Profile 会按节点身份加入手机；同名 Profile 使用 `nodeId + profile` 区分。
+
+二维码不包含账号密码、长期 Token 或 Dashboard Cookie。Web 服务会签发可撤销的设备 Token，并把代理所需的 Dashboard Cookie 加密保存在 `HERMES_YAOYAO_HOME`。iOS Token 按服务器账号保存在系统 Keychain。忘记 iOS 中的节点或在 Web 中撤销设备都会终止后续访问。
+
+当前免密扫码签发要求 Hermes 启用 `basic` 密码 provider，以便为每台手机建立彼此独立、可单独刷新的上游会话；不会复制浏览器正在轮换的 refresh Cookie。仅启用 OAuth/SSO 的安装仍可在 iOS 中使用手动“添加服务器账号”，等待 Hermes 提供适合移动回调的原生授权方式。
+
+原生群聊由房主 Hermes 保存权威房间、话题和消息。扫码时，iOS 会把远端节点以加密凭据注册到房主插件；房主通过远端 `nodeWorker` 执行 Session，并转发流式事件、审批、澄清、中断和受限群聊附件。房主工作目录不会作为远端绝对路径使用，远端 Agent 默认采用自己的工作区。
+
+免密配对和跨节点执行应使用 HTTPS/WSS 或 Tailscale。只有显式设置 `HERMES_YAOYAO_ALLOW_INSECURE_LAN=1` 时才应在可信局域网使用 HTTP；不要把二维码或配对凭据发送给不受信任的人。
 
 ## 网络暴露：9119 与 8800 分别控制
 

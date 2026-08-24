@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib
 import asyncio
+import base64
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
@@ -11,6 +13,8 @@ import sys
 import subprocess
 import tempfile
 import textwrap
+import threading
+import time
 import unittest
 import uuid
 
@@ -28,6 +32,15 @@ ORCHESTRATOR = importlib.import_module(
     f"{group_plugin_api._LOCAL_PACKAGE}.group_orchestrator"
 )
 GATEWAY = importlib.import_module(f"{group_plugin_api._LOCAL_PACKAGE}.group_gateway")
+NODE_WORKER = importlib.import_module(
+    f"{group_plugin_api._LOCAL_PACKAGE}.group_node_worker"
+)
+NODE_REGISTRY = importlib.import_module(
+    f"{group_plugin_api._LOCAL_PACKAGE}.group_node_registry"
+)
+REMOTE_GATEWAY = importlib.import_module(
+    f"{group_plugin_api._LOCAL_PACKAGE}.group_remote_gateway"
+)
 GroupStore = STORE_MODULE.GroupStore
 
 
@@ -36,6 +49,239 @@ def request_id() -> str:
 
 
 class GroupSettingsContractTests(unittest.TestCase):
+    def test_room_accepts_same_profile_from_local_and_paired_node(self) -> None:
+        node_id = request_id()
+        request = PROTOCOL.CreateRoomRequest.model_validate({
+            "requestId": request_id(),
+            "name": "跨节点评审",
+            "agents": [
+                {"profile": "default", "displayName": "本机 Agent"},
+                {
+                    "profile": "default",
+                    "nodeId": node_id,
+                    "nodeLabel": "MacBook Pro",
+                    "displayName": "远端 Agent",
+                },
+            ],
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room(
+                group_plugin_api._create_room_command(request)
+            )
+            agents_by_node = {item["nodeId"]: item for item in room["agents"]}
+            self.assertEqual(set(agents_by_node), {"local", node_id})
+            self.assertEqual(agents_by_node["local"]["profile"], "default")
+            self.assertEqual(agents_by_node[node_id]["profile"], "default")
+            self.assertEqual(agents_by_node[node_id]["nodeLabel"], "MacBook Pro")
+            with store.connection() as connection:
+                stored = connection.execute(
+                    "SELECT profile, execution_profile FROM group_agents "
+                    "ORDER BY created_at, id"
+                ).fetchall()
+            self.assertNotEqual(stored[0]["profile"], stored[1]["profile"])
+            self.assertIn("default", {row["execution_profile"] for row in stored})
+
+    def test_paired_node_registry_encrypts_token_and_router_scopes_runtime(self) -> None:
+        node_id = request_id()
+        with tempfile.TemporaryDirectory() as directory:
+            registry = NODE_REGISTRY.PairedNodeRegistry(Path(directory))
+            registered = registry.register({
+                "nodeId": node_id,
+                "name": "远端 Mac",
+                "serverUrl": "https://remote.example/node/11111111-1111-4111-8111-111111111111",
+                "fingerprint": "fingerprint",
+                "accessToken": "top-secret-token",
+            })
+            self.assertNotIn("accessToken", registered)
+            persisted = (Path(directory) / "paired-group-nodes.json").read_text()
+            self.assertNotIn("top-secret-token", persisted)
+            self.assertEqual(registry.get(node_id)["accessToken"], "top-secret-token")
+
+            events: list[tuple[str, str, dict[str, object]]] = []
+            remote = _FakeRemoteGateway()
+            router = REMOTE_GATEWAY.GroupGatewayRouter(
+                lambda *event: events.append(event),
+                registry=registry,
+                local=_FakeNodeGateway(),
+                remote_factory=lambda _node, callback: remote.bind(callback),
+            )
+            identity = router.create_session_for_node(
+                node_id, "default", "群聊", "", [], None
+            )
+            self.assertTrue(identity.runtime_id.startswith("remote:"))
+            router.submit_prompt(identity.runtime_id, "执行")
+            self.assertEqual(remote.submissions, [("remote-runtime", "执行")])
+            remote.emit("remote-runtime", "message.delta", {"text": "完成"})
+            self.assertEqual(events, [(identity.runtime_id, "message.delta", {"text": "完成"})])
+            router.shutdown()
+
+    def test_remote_gateway_adapter_calls_paired_worker_and_replays_events(self) -> None:
+        _WorkerHTTPHandler.prompts = []
+        _WorkerHTTPHandler.attachments = []
+        _WorkerHTTPHandler.emitted = False
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _WorkerHTTPHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        events: list[tuple[str, str, dict[str, object]]] = []
+        attachments = tempfile.TemporaryDirectory()
+        attachment_root = Path(attachments.name)
+        room_root = attachment_root / "room"
+        room_root.mkdir()
+        attachment_path = room_root / "资料.txt"
+        attachment_path.write_text("跨节点附件", encoding="utf-8")
+        adapter = REMOTE_GATEWAY.RemoteNodeGatewayAdapter(
+            {
+                "serverUrl": (
+                    f"http://127.0.0.1:{server.server_port}"
+                    "/node/11111111-1111-4111-8111-111111111111"
+                ),
+                "accessToken": "worker-token",
+            },
+            lambda *event: events.append(event),
+            poll_interval=0.01,
+            attachment_root=attachment_root,
+        )
+        try:
+            identity = adapter.create_session(
+                "default", "跨节点", "", [], None
+            )
+            self.assertEqual(identity.runtime_id, "runtime-http")
+            adapter.submit_prompt(
+                identity.runtime_id,
+                f"开始\n\n[资料](<{attachment_path}>)",
+            )
+            deadline = time.time() + 2
+            while not events and time.time() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(
+                events,
+                [("runtime-http", "message.complete", {"text": "远端完成"})],
+            )
+            self.assertIn("开始", _WorkerHTTPHandler.prompts[0])
+            self.assertIn("attachment://", _WorkerHTTPHandler.prompts[0])
+            self.assertEqual(
+                _WorkerHTTPHandler.attachments,
+                [("资料.txt", "跨节点附件".encode("utf-8"))],
+            )
+        finally:
+            adapter.shutdown()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+            attachments.cleanup()
+
+    def test_orchestrator_dispatches_remote_agent_through_node_router(self) -> None:
+        node_id = request_id()
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room({
+                "requestId": request_id(),
+                "name": "远程执行",
+                "cwd": directory,
+                "agents": [{
+                    "profile": "default",
+                    "nodeId": node_id,
+                    "nodeLabel": "Remote Mac",
+                    "displayName": "远端 Agent",
+                }],
+            })
+            [agent] = room["agents"]
+            created = store.create_human_message(
+                room["id"],
+                request_id=request_id(),
+                client_message_id=request_id(),
+                content="执行远端任务",
+                mention_agent_ids=[agent["id"]],
+            )
+            run_id = created["runs"][0]["id"]
+            gateway_holder: list[_CrossNodeOrchestratorGateway] = []
+
+            async def exercise() -> None:
+                def factory(callback):
+                    gateway = _CrossNodeOrchestratorGateway(callback)
+                    gateway_holder.append(gateway)
+                    return gateway
+
+                orchestrator = ORCHESTRATOR.GroupOrchestrator(
+                    store,
+                    gateway_factory=factory,
+                    completion_timeout=2,
+                )
+                await orchestrator.start()
+                orchestrator.wake()
+                deadline = asyncio.get_running_loop().time() + 3
+                while store.get_run(run_id)["status"] not in {
+                    "completed", "failed", "interrupted"
+                }:
+                    if asyncio.get_running_loop().time() >= deadline:
+                        self.fail("Remote Agent run did not settle")
+                    await asyncio.sleep(0.01)
+                await orchestrator.shutdown()
+
+            asyncio.run(exercise())
+            [gateway] = gateway_holder
+            self.assertEqual(gateway.remote_opens[0][:2], (node_id, "default"))
+            self.assertEqual(gateway.remote_opens[0][2], "")
+            self.assertEqual(store.get_run(run_id)["status"], "completed")
+            messages = store.list_messages(room["id"])
+            self.assertEqual(messages[-1]["content"], "远端完成")
+
+    def test_node_worker_routes_and_bounded_event_replay(self) -> None:
+        gateway = _FakeNodeGateway()
+        worker = NODE_WORKER.NodeGatewayWorker(gateway=gateway)
+        opened = worker.open_session(
+            NODE_WORKER.NodeWorkerOpenRequest.model_validate({
+                "profile": "remote-agent",
+                "title": "跨节点群聊",
+                "cwd": "",
+            })
+        )
+        self.assertEqual(opened["storedSessionId"], "stored-1")
+        self.assertEqual(opened["runtimeSessionId"], "runtime-1")
+
+        worker.submit_prompt(
+            "runtime-1",
+            NODE_WORKER.NodeWorkerPromptRequest(text="请分析"),
+        )
+        self.assertEqual(gateway.submissions, [("runtime-1", "请分析")])
+        worker.attach_file(
+            "runtime-1",
+            name="资料.txt",
+            mime_type="text/plain",
+            content="附件内容".encode("utf-8"),
+        )
+        self.assertEqual(gateway.requests[0][0], "file.attach")
+        self.assertTrue(
+            gateway.requests[0][1]["data_url"].startswith(
+                "data:text/plain;base64,"
+            )
+        )
+        worker._on_event("runtime-1", "message.delta", {"text": "结果"})
+        page = worker.events(after=0, runtime_id="runtime-1", limit=100)
+        self.assertEqual(page["latestCursor"], 1)
+        self.assertEqual(page["items"][0]["payload"], {"text": "结果"})
+        self.assertFalse(page["reset"])
+        self.assertEqual(
+            worker.events(
+                after=0,
+                runtime_id=None,
+                limit=100,
+                client_id="another-client",
+            )["items"],
+            [],
+        )
+        with self.assertRaises(NODE_WORKER.NodeWorkerError):
+            worker.interrupt("runtime-1", client_id="another-client")
+
+        paths = {getattr(route, "path", "") for route in group_plugin_api.router.routes}
+        self.assertIn("/v1/node-worker/sessions", paths)
+        self.assertIn("/v1/node-worker/events", paths)
+        worker.shutdown()
+        self.assertTrue(gateway.shutdown_called)
+
     def test_room_instructions_round_trip_into_agent_prompt(self) -> None:
         create = PROTOCOL.CreateRoomRequest.model_validate({
             "requestId": request_id(),
@@ -107,7 +353,7 @@ class GroupSettingsContractTests(unittest.TestCase):
 
             migrated = GroupStore(path)
             migrated.initialize()
-            self.assertEqual(migrated.schema_version(), 12)
+            self.assertEqual(migrated.schema_version(), 13)
             self.assertEqual(migrated.get_room(room["id"])["instructions"], "")
 
     def test_terminal_session_info_captures_effective_model_for_settlement(self) -> None:
@@ -412,7 +658,7 @@ class GroupSettingsContractTests(unittest.TestCase):
                 )
 
     def test_protocol_v5_advertises_reply_round_contract(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 10)
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 11)
         self.assertEqual(
             PROTOCOL.limits_payload()["defaultMaxReplyRounds"], 3
         )
@@ -786,7 +1032,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             self._create_v1_database(path)
             store = GroupStore(path)
             store.initialize()
-            self.assertEqual(store.schema_version(), 12)
+            self.assertEqual(store.schema_version(), 13)
             self.assertEqual(store.journal_epoch(), "11111111-1111-4111-8111-111111111111")
             with store.connection() as connection:
                 room = connection.execute("SELECT * FROM group_rooms").fetchone()
@@ -1797,6 +2043,208 @@ class GroupSettingsContractTests(unittest.TestCase):
         connection.execute("INSERT INTO group_idempotency VALUES (?,?,?,?,?)", (str(uuid.uuid4()), "test", "hash", json.dumps({}), 1.0))
         connection.commit()
         connection.close()
+
+
+class _WorkerHTTPHandler(BaseHTTPRequestHandler):
+    prompts: list[str] = []
+    attachments: list[tuple[str, bytes]] = []
+    emitted = False
+
+    def do_POST(self) -> None:  # noqa: N802 - stdlib callback spelling
+        if self.headers.get("Authorization") != "Bearer worker-token":
+            self._json(401, {"error": "unauthorized"})
+            return
+        length = int(self.headers.get("Content-Length", "0"))
+        raw_body = self.rfile.read(length)
+        if self.path.endswith("/sessions/runtime-http/attachments"):
+            encoded_name = self.headers["X-File-Name-B64"]
+            name = base64.urlsafe_b64decode(
+                encoded_name + "=" * (-len(encoded_name) % 4)
+            ).decode()
+            self.attachments.append((name, raw_body))
+            self._json(200, {"attached": True})
+            return
+        body = json.loads(raw_body or b"{}")
+        if self.path.endswith("/node-worker/sessions"):
+            self._json(200, {
+                "storedSessionId": "stored-http",
+                "runtimeSessionId": "runtime-http",
+                "running": False,
+            })
+            return
+        if self.path.endswith("/sessions/runtime-http/prompt"):
+            self.prompts.append(body["text"])
+            self._json(200, {"status": "streaming"})
+            return
+        self._json(404, {"error": "not found"})
+
+    def do_GET(self) -> None:  # noqa: N802 - stdlib callback spelling
+        if self.headers.get("Authorization") != "Bearer worker-token":
+            self._json(401, {"error": "unauthorized"})
+            return
+        if "/node-worker/events?" not in self.path:
+            self._json(404, {"error": "not found"})
+            return
+        items = []
+        if not self.emitted:
+            type(self).emitted = True
+            items = [{
+                "cursor": 1,
+                "runtimeSessionId": "runtime-http",
+                "type": "message.complete",
+                "payload": {"text": "远端完成"},
+            }]
+        self._json(200, {
+            "items": items,
+            "latestCursor": 1 if self.emitted else 0,
+            "oldestCursor": 1,
+            "reset": False,
+        })
+
+    def log_message(self, format: str, *args: object) -> None:
+        _ = (format, args)
+
+    def _json(self, status: int, value: object) -> None:
+        encoded = json.dumps(value).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+
+class _FakeNodeGateway:
+    def __init__(self) -> None:
+        self.submissions: list[tuple[str, str]] = []
+        self.requests: list[tuple[str, dict[str, object]]] = []
+        self.shutdown_called = False
+
+    def create_session(
+        self,
+        profile: str,
+        title: str,
+        cwd: str,
+        messages: list[dict[str, object]],
+        configuration: dict[str, object],
+    ) -> object:
+        _ = (profile, title, cwd, messages, configuration)
+        return GATEWAY.SessionIdentity("stored-1", "runtime-1", False)
+
+    def resume_session(self, profile: str, stored_id: str) -> object:
+        _ = profile
+        return GATEWAY.SessionIdentity(stored_id, "runtime-1", False)
+
+    def submit_prompt(self, runtime_id: str, text: str) -> None:
+        self.submissions.append((runtime_id, text))
+
+    def request(
+        self, method: str, params: dict[str, object]
+    ) -> dict[str, object]:
+        self.requests.append((method, params))
+        return {"attached": True}
+
+    def interrupt(self, runtime_id: str) -> None:
+        _ = runtime_id
+
+    def close(self, runtime_id: str) -> bool:
+        _ = runtime_id
+        return True
+
+    def respond_approval(self, runtime_id: str, choice: str) -> int:
+        _ = (runtime_id, choice)
+        return 1
+
+    def respond_clarification(self, request_id: str, answer: str) -> str:
+        _ = (request_id, answer)
+        return "ok"
+
+    def shutdown(self) -> None:
+        self.shutdown_called = True
+
+
+class _FakeRemoteGateway(_FakeNodeGateway):
+    def __init__(self) -> None:
+        super().__init__()
+        self.callback = None
+
+    def bind(self, callback):
+        self.callback = callback
+        return self
+
+    def create_session(
+        self,
+        profile: str,
+        title: str,
+        cwd: str,
+        messages: list[dict[str, object]],
+        configuration: dict[str, object] | None,
+    ) -> object:
+        _ = (profile, title, cwd, messages, configuration)
+        return GATEWAY.SessionIdentity(
+            "remote-stored", "remote-runtime", False
+        )
+
+    def emit(
+        self, runtime_id: str, event_type: str, payload: dict[str, object]
+    ) -> None:
+        assert self.callback is not None
+        self.callback(runtime_id, event_type, payload)
+
+    def owns_clarification(self, request_id: str) -> bool:
+        _ = request_id
+        return False
+
+
+class _CrossNodeOrchestratorGateway(_FakeNodeGateway):
+    transport = type(
+        "DrainTransport",
+        (),
+        {"drain": lambda self, timeout=None: True},
+    )()
+
+    def __init__(self, callback) -> None:
+        super().__init__()
+        self.callback = callback
+        self.remote_opens: list[tuple[str, str, str]] = []
+
+    def create_session_for_node(
+        self,
+        node_id: str,
+        profile: str,
+        title: str,
+        cwd: str,
+        messages: list[dict[str, object]],
+        configuration: dict[str, object] | None,
+    ) -> object:
+        _ = (title, messages, configuration)
+        self.remote_opens.append((node_id, profile, cwd))
+        return GATEWAY.SessionIdentity(
+            "remote-stored", "remote:runtime", False
+        )
+
+    def resume_session_for_node(
+        self, node_id: str, profile: str, stored_id: str
+    ) -> object:
+        self.remote_opens.append((node_id, profile, ""))
+        return GATEWAY.SessionIdentity(stored_id, "remote:runtime", False)
+
+    def submit_prompt(self, runtime_id: str, text: str) -> None:
+        self.submissions.append((runtime_id, text))
+        self.callback(runtime_id, "message.delta", {"text": "远端完成"})
+        self.callback(
+            runtime_id,
+            "message.complete",
+            {"status": "complete", "text": "远端完成"},
+        )
+        self.callback(
+            runtime_id,
+            "session.info",
+            {
+                "running": False,
+                "stored_session_id": "remote-stored",
+                "profile_name": "default",
+            },
+        )
 
 
 if __name__ == "__main__":

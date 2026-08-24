@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import importlib
 import inspect
@@ -101,6 +102,12 @@ _package = _ensure_local_package()
 _protocol = importlib.import_module(f"{_LOCAL_PACKAGE}.group_protocol")
 _store_module = importlib.import_module(f"{_LOCAL_PACKAGE}.group_store")
 _stream_module = importlib.import_module(f"{_LOCAL_PACKAGE}.group_stream")
+_node_worker_module = importlib.import_module(
+    f"{_LOCAL_PACKAGE}.group_node_worker"
+)
+_node_registry_module = importlib.import_module(
+    f"{_LOCAL_PACKAGE}.group_node_registry"
+)
 
 
 PROTOCOL_VERSION = _protocol.PROTOCOL_VERSION
@@ -119,6 +126,12 @@ UpdateAgentRequest = _protocol.UpdateAgentRequest
 UpdateRoomRequest = _protocol.UpdateRoomRequest
 UpdateTopicRequest = _protocol.UpdateTopicRequest
 MarkTopicReadRequest = _protocol.MarkTopicReadRequest
+NodeWorkerOpenRequest = _node_worker_module.NodeWorkerOpenRequest
+NodeWorkerPromptRequest = _node_worker_module.NodeWorkerPromptRequest
+NodeWorkerApprovalRequest = _node_worker_module.NodeWorkerApprovalRequest
+NodeWorkerClarificationRequest = _node_worker_module.NodeWorkerClarificationRequest
+NodeGatewayWorker = _node_worker_module.NodeGatewayWorker
+PairedNodeRegistry = _node_registry_module.PairedNodeRegistry
 
 GroupStore = _store_module.GroupStore
 GroupStoreError = _store_module.GroupStoreError
@@ -894,6 +907,16 @@ with _bootstrap_lock:
         _package._yaoyao_group_runtime_override = False
         _package._yaoyao_group_orchestrator_factory = _default_orchestrator_factory
         _package._yaoyao_group_runtime_manager = _RuntimeManager()
+        _package._yaoyao_node_worker_lock = threading.Lock()
+        _package._yaoyao_node_worker = None
+        _package._yaoyao_node_registry_lock = threading.Lock()
+        _package._yaoyao_node_registry = None
+    if not hasattr(_package, "_yaoyao_node_worker_lock"):
+        _package._yaoyao_node_worker_lock = threading.Lock()
+        _package._yaoyao_node_worker = None
+    if not hasattr(_package, "_yaoyao_node_registry_lock"):
+        _package._yaoyao_node_registry_lock = threading.Lock()
+        _package._yaoyao_node_registry = None
 
 
 def set_store_for_testing(store: object | None) -> None:
@@ -908,6 +931,57 @@ def set_agent_name_resolver(resolver: Callable[[str], str]) -> None:
     """Use the plugin's existing per-profile agentName setting."""
     global _agent_name_resolver
     _agent_name_resolver = resolver
+
+
+def set_node_worker_for_testing(worker: object | None) -> None:
+    with _package._yaoyao_node_worker_lock:
+        current = _package._yaoyao_node_worker
+        if current is not None and current is not worker:
+            shutdown = getattr(current, "shutdown", None)
+            if callable(shutdown):
+                shutdown()
+        _package._yaoyao_node_worker = worker
+
+
+def _node_worker_instance() -> object:
+    with _package._yaoyao_node_worker_lock:
+        worker = _package._yaoyao_node_worker
+        if worker is None:
+            worker = NodeGatewayWorker()
+            _package._yaoyao_node_worker = worker
+        return worker
+
+
+async def _node_worker_call(method: str, *args: object, **kwargs: object) -> object:
+    worker = _node_worker_instance()
+    operation = getattr(worker, method, None)
+    if not callable(operation):
+        raise RuntimeUnavailableError()
+    return await asyncio.to_thread(operation, *args, **kwargs)
+
+
+def set_node_registry_for_testing(registry: object | None) -> None:
+    with _package._yaoyao_node_registry_lock:
+        _package._yaoyao_node_registry = registry
+
+
+def _node_registry_instance() -> object:
+    with _package._yaoyao_node_registry_lock:
+        registry = _package._yaoyao_node_registry
+        if registry is None:
+            registry = PairedNodeRegistry.from_environment()
+            _package._yaoyao_node_registry = registry
+        return registry
+
+
+async def _node_registry_call(
+    method: str, *args: object, **kwargs: object
+) -> object:
+    registry = _node_registry_instance()
+    operation = getattr(registry, method, None)
+    if not callable(operation):
+        raise RuntimeUnavailableError()
+    return await asyncio.to_thread(operation, *args, **kwargs)
 
 
 def set_runtime_facade(runtime: object | None) -> None:
@@ -1007,6 +1081,10 @@ def _create_room_command(request: CreateRoomRequest) -> dict[str, object]:
                 item.pop("replyWithoutMention", None)
             if isinstance(item, dict) and "is_host" not in seed.model_fields_set:
                 item.pop("isHost", None)
+            if isinstance(item, dict) and "node_id" not in seed.model_fields_set:
+                item.pop("nodeId", None)
+            if isinstance(item, dict) and "node_label" not in seed.model_fields_set:
+                item.pop("nodeLabel", None)
             if isinstance(item, dict):
                 for field, alias in (
                     ("model", "model"),
@@ -1025,6 +1103,10 @@ def _add_agent_command(request: AddAgentRequest) -> dict[str, object]:
         command.pop("replyWithoutMention", None)
     if "is_host" not in request.model_fields_set:
         command.pop("isHost", None)
+    if "node_id" not in request.model_fields_set:
+        command.pop("nodeId", None)
+    if "node_label" not in request.model_fields_set:
+        command.pop("nodeLabel", None)
     for field, alias in (
         ("model", "model"),
         ("provider", "provider"),
@@ -1052,7 +1134,9 @@ async def capabilities() -> dict[str, object]:
         "latestCursor": latest_cursor,
         "limits": limits_payload(),
         "eventTypes": sorted(EVENT_TYPES),
-        "features": ["hostFlow", "roomInstructions"],
+        "features": [
+            "hostFlow", "roomInstructions", "nodeWorker", "nodeRegistry"
+        ],
     }
 
 
@@ -1274,6 +1358,145 @@ async def respond_clarification(
     )
 
 
+def _node_client_id(request: Request) -> str:
+    value = request.headers.get("x-yaoyao-node-client", "").strip().lower()
+    try:
+        canonical = str(UUID(value))
+    except ValueError as error:
+        raise GroupInvalidRequest("Paired node client identity is required") from error
+    if canonical != value:
+        raise GroupInvalidRequest("Paired node client identity is required")
+    return canonical
+
+
+async def node_worker_open_session(
+    payload: NodeWorkerOpenRequest,
+    request: Request,
+) -> object:
+    return await _node_worker_call(
+        "open_session", payload, _node_client_id(request)
+    )
+
+
+async def register_paired_node(request: Request) -> object:
+    try:
+        payload = await request.json()
+    except Exception as error:
+        raise GroupInvalidRequest("Node registration requires JSON") from error
+    if not isinstance(payload, dict):
+        raise GroupInvalidRequest("Node registration must be an object")
+    return await _node_registry_call("register", payload)
+
+
+async def list_paired_nodes() -> dict[str, object]:
+    nodes = await _node_registry_call("list")
+    return {"items": nodes}
+
+
+async def revoke_paired_node(node_id: UUID) -> dict[str, object]:
+    removed = await _node_registry_call("revoke", str(node_id))
+    if not removed:
+        raise GroupInvalidRequest("Paired Hermes node was not found")
+    return {"ok": True}
+
+
+async def node_worker_submit_prompt(
+    runtime_session_id: str,
+    payload: NodeWorkerPromptRequest,
+    request: Request,
+) -> dict[str, object]:
+    await _node_worker_call(
+        "submit_prompt", runtime_session_id, payload, _node_client_id(request)
+    )
+    return {"status": "streaming"}
+
+
+async def node_worker_interrupt(
+    runtime_session_id: str,
+    request: Request,
+) -> dict[str, object]:
+    await _node_worker_call(
+        "interrupt", runtime_session_id, _node_client_id(request)
+    )
+    return {"status": "interrupted"}
+
+
+async def node_worker_close_session(
+    runtime_session_id: str,
+    request: Request,
+) -> dict[str, object]:
+    closed = await _node_worker_call(
+        "close_session", runtime_session_id, _node_client_id(request)
+    )
+    return {"closed": bool(closed)}
+
+
+async def node_worker_respond_approval(
+    runtime_session_id: str,
+    payload: NodeWorkerApprovalRequest,
+    request: Request,
+) -> dict[str, object]:
+    resolved = await _node_worker_call(
+        "respond_approval",
+        runtime_session_id,
+        payload,
+        _node_client_id(request),
+    )
+    return {"resolved": resolved}
+
+
+async def node_worker_respond_clarification(
+    payload: NodeWorkerClarificationRequest,
+    request: Request,
+) -> dict[str, object]:
+    status = await _node_worker_call(
+        "respond_clarification", payload, _node_client_id(request)
+    )
+    return {"status": status}
+
+
+async def node_worker_events(
+    request: Request,
+    after: int = Query(default=0, ge=0),
+    runtime_session_id: str | None = Query(
+        default=None, alias="runtimeSessionId", min_length=1, max_length=4096
+    ),
+    limit: int = Query(default=100, ge=1, le=256),
+) -> object:
+    return await _node_worker_call(
+        "events",
+        after=after,
+        runtime_id=runtime_session_id,
+        limit=limit,
+        client_id=_node_client_id(request),
+    )
+
+
+async def node_worker_attach_file(
+    runtime_session_id: str,
+    request: Request,
+) -> object:
+    encoded_name = request.headers.get("x-file-name-b64", "")
+    mime_type = request.headers.get("x-mime-type", "application/octet-stream")
+    try:
+        name = base64.urlsafe_b64decode(
+            encoded_name + "=" * (-len(encoded_name) % 4)
+        ).decode("utf-8")
+    except (ValueError, UnicodeDecodeError) as error:
+        raise GroupInvalidRequest("Attachment name header is invalid") from error
+    content = await request.body()
+    if not content or len(content) > _MAX_GROUP_UPLOAD_FILE_BYTES:
+        raise GroupInvalidRequest("Remote attachment content is invalid")
+    return await _node_worker_call(
+        "attach_file",
+        runtime_session_id,
+        name=name,
+        mime_type=mime_type,
+        content=content,
+        client_id=_node_client_id(request),
+    )
+
+
 async def stream_events(websocket: WebSocket) -> None:
     """Delegate the read-only event channel to the authenticated streamer."""
     allowed, close_code = _stream_module.websocket_upgrade_allowed(websocket)
@@ -1357,6 +1580,47 @@ def _build_router() -> APIRouter:
     built.add_api_route(
         "/rooms/{room_id}/interactions/{interaction_id}/clarification",
         respond_clarification,
+        methods=["POST"],
+    )
+    built.add_api_route("/nodes", register_paired_node, methods=["POST"])
+    built.add_api_route("/nodes", list_paired_nodes, methods=["GET"])
+    built.add_api_route(
+        "/nodes/{node_id}", revoke_paired_node, methods=["DELETE"]
+    )
+    built.add_api_route(
+        "/node-worker/sessions", node_worker_open_session, methods=["POST"]
+    )
+    built.add_api_route(
+        "/node-worker/sessions/{runtime_session_id}/prompt",
+        node_worker_submit_prompt,
+        methods=["POST"],
+    )
+    built.add_api_route(
+        "/node-worker/sessions/{runtime_session_id}/interrupt",
+        node_worker_interrupt,
+        methods=["POST"],
+    )
+    built.add_api_route(
+        "/node-worker/sessions/{runtime_session_id}",
+        node_worker_close_session,
+        methods=["DELETE"],
+    )
+    built.add_api_route(
+        "/node-worker/sessions/{runtime_session_id}/approval",
+        node_worker_respond_approval,
+        methods=["POST"],
+    )
+    built.add_api_route(
+        "/node-worker/clarification",
+        node_worker_respond_clarification,
+        methods=["POST"],
+    )
+    built.add_api_route(
+        "/node-worker/events", node_worker_events, methods=["GET"]
+    )
+    built.add_api_route(
+        "/node-worker/sessions/{runtime_session_id}/attachments",
+        node_worker_attach_file,
         methods=["POST"],
     )
     built.add_api_websocket_route("/events", stream_events)

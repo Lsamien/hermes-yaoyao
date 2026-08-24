@@ -1,5 +1,5 @@
 import type {
-  GroupAgent, GroupCapabilities, GroupInteraction, GroupMessagePage, GroupRoomDetail, GroupRoomPage, GroupRun, GroupTopicPage, GroupTopicSummary, JsonValue, UploadReference,
+  GroupAgent, GroupCapabilities, GroupInteraction, GroupMessagePage, GroupNode, GroupRoomDetail, GroupRoomPage, GroupRun, GroupTopicPage, GroupTopicSummary, JsonValue, UploadReference,
 } from '@shared/types'
 import { apiRequest, apiUrl, unwrapData } from './client'
 import {
@@ -14,6 +14,32 @@ function requestId(): string { return createUuid() }
 
 export async function getGroupCapabilities(): Promise<GroupCapabilities> {
   return normalizeGroupCapabilities(unwrapData(await apiRequest<unknown>(`${BASE}/capabilities`)))
+}
+
+export async function getGroupNodes(): Promise<GroupNode[]> {
+  const payload = record(unwrapData(await apiRequest<unknown>(`${BASE}/nodes`)))
+  return values(payload.items ?? payload.nodes).flatMap(value => {
+    const node = record(value)
+    const nodeId = String(node.nodeId ?? node.node_id ?? '')
+    if (!nodeId) return []
+    return [{
+      nodeId,
+      name: String(node.name ?? nodeId),
+      serverUrl: String(node.serverUrl ?? node.server_url ?? ''),
+      fingerprint: String(node.fingerprint ?? ''),
+      createdAt: Number(node.createdAt ?? node.created_at ?? 0),
+      updatedAt: Number(node.updatedAt ?? node.updated_at ?? 0),
+      profiles: values(node.profiles).flatMap(profileValue => {
+        const profile = record(profileValue)
+        const name = String(profile.name ?? '')
+        return name ? [{
+          name,
+          displayName: String(profile.displayName ?? profile.display_name ?? name),
+          model: String(profile.model ?? ''),
+        }] : []
+      }),
+    }]
+  })
 }
 
 export async function getGroupRooms(cursor?: string, limit = 50, archived = false): Promise<GroupRoomPage> {
@@ -72,6 +98,8 @@ export async function markGroupTopicRead(roomId: string, topicId: string, throug
 
 export interface AgentSeed {
   profile: string
+  nodeId?: string
+  nodeLabel?: string
   displayName: string
   description?: string
   replyWithoutMention?: boolean

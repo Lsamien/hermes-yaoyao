@@ -2,12 +2,12 @@ import { computed, ref, shallowRef, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { isSupportedGroupProtocolVersion, SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL } from '@shared/types'
 import type {
-  GroupAgent, GroupCapabilities, GroupMessage, GroupMessagePage, GroupRoomDetail, GroupRoomSummary, GroupRun, GroupSocketEnvelope, GroupTopicSummary, RealtimeConnectionState,
+  GroupAgent, GroupCapabilities, GroupMessage, GroupMessagePage, GroupNode, GroupRoomDetail, GroupRoomSummary, GroupRun, GroupSocketEnvelope, GroupTopicSummary, RealtimeConnectionState,
 } from '@shared/types'
 import {
   addGroupAgent, approveGroupInteraction as approveApi, archiveGroupRoom as archiveApi, archiveGroupTopic as archiveTopicApi,
   clarifyGroupInteraction as clarifyApi, createGroupRoom as createApi, getGroupCapabilities,
-  getGroupMessages, getGroupRoom, getGroupRooms, getGroupTopics, getPinnedGroupTopics, interruptGroupAgent as interruptApi, markGroupTopicRead,
+  getGroupMessages, getGroupNodes, getGroupRoom, getGroupRooms, getGroupTopics, getPinnedGroupTopics, interruptGroupAgent as interruptApi, markGroupTopicRead,
   removeGroupAgent as removeAgentApi, restoreGroupRoom as restoreRoomApi, restoreGroupTopic as restoreTopicApi, sendGroupMessage as sendApi, updateGroupAgent as updateAgentApi,
   updateGroupRoom as updateRoomApi, updateGroupTopic as updateTopicApi, uploadGroupFiles, type AgentSeed,
 } from '@/api/groups'
@@ -43,6 +43,7 @@ export const useGroupsStore = defineStore('groups', () => {
   const selectedRoomId = ref<string>()
   const selectedTopicId = ref<string>()
   const pinnedTopics = ref<GroupTopicSummary[]>([])
+  const nodes = ref<GroupNode[]>([])
   const connectionState = ref<RealtimeConnectionState>('idle')
   const isLoading = ref(false)
   const isSending = ref(false)
@@ -214,6 +215,9 @@ export const useGroupsStore = defineStore('groups', () => {
           throw new Error(`群聊协议版本不兼容：支持 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}，服务器返回 v${anchor.protocolVersion || 'unknown'}`)
         }
         const loadedRooms = await loadRooms()
+        nodes.value = anchor.features?.includes('nodeRegistry')
+          ? await getGroupNodes()
+          : []
         if (expectedGeneration !== generation) return
         await loadPinnedTopics()
         if (expectedGeneration !== generation) return
@@ -745,7 +749,7 @@ export const useGroupsStore = defineStore('groups', () => {
     availability, capabilities, topicProtocol, hostProtocol, hostFlowProtocol, roomInstructionsProtocol, activityProtocol, rooms, selectedRoomId, selectedRoom, topics, topicsForRoom, loadRoomTopics, selectedTopicId, selectedTopic,
     messages, agents, pendingInteractions,
     connectionState, isLoading, isSending, error, hasMoreBefore,
-    pinnedTopics, start, stop, refresh, selectRoom, selectTopic, startNewTopic, createRoom, updateRoom, archiveRoom, restoreRoom, archiveTopic, restoreTopic, setTopicPinned, renameTopic, loadPinnedTopics, archivedRooms, archivedTopics, addAgent, updateAgent,
+    pinnedTopics, nodes, start, stop, refresh, selectRoom, selectTopic, startNewTopic, createRoom, updateRoom, archiveRoom, restoreRoom, archiveTopic, restoreTopic, setTopicPinned, renameTopic, loadPinnedTopics, archivedRooms, archivedTopics, addAgent, updateAgent,
     removeAgent, sendMessage, loadOlder, interruptAgent, approveInteraction, clarifyInteraction,
   }
 })

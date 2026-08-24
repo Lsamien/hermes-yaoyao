@@ -10,6 +10,7 @@ import ComposerShell from '@/components/composer/ComposerShell.vue'
 import type { ComposerOption, ComposerReference, ComposerSubmit } from '@/components/composer/types'
 import CreateGroupDialog from '@/components/groups/CreateGroupDialog.vue'
 import GroupManager from '@/components/groups/GroupManager.vue'
+import type { GroupProfileOption } from '@/components/groups/types'
 import PreviewModal from '@/components/library/PreviewModal.vue'
 import ImagePreviewLightbox from '@/components/library/ImagePreviewLightbox.vue'
 import type { PreviewMedia } from '@/components/library/ImagePreviewLightbox.vue'
@@ -140,8 +141,24 @@ const hostAgent = computed(() => groups.hostProtocol ? groups.agents.find(agent 
 const connected = computed(() => ['connected', 'ready'].includes(groups.connectionState))
 const activeInteraction = computed(() => groupInteraction(groups.pendingInteractions[0]))
 const room = computed(() => groups.selectedRoom ? roomToUi(groups.selectedRoom) : null)
-const profiles = computed(() => auth.profiles.map(profile => profile.name))
-const availableProfiles = computed(() => profiles.value.filter(profile => !groups.agents.some(agent => agent.profile === profile)))
+const profiles = computed<GroupProfileOption[]>(() => [
+  ...auth.profiles.map(profile => ({
+    id: `local|${profile.name}`,
+    profile: profile.name,
+    displayName: profile.agentName || profile.displayName || profile.name,
+    nodeId: 'local',
+    nodeLabel: '当前 Hermes',
+  })),
+  ...groups.nodes.flatMap(node => node.profiles.map(profile => ({
+    id: `${node.nodeId}|${profile.name}`,
+    profile: profile.name,
+    displayName: profile.displayName || profile.name,
+    nodeId: node.nodeId,
+    nodeLabel: node.name,
+  }))),
+])
+const availableProfiles = computed(() => profiles.value.filter(profile => !groups.agents.some(agent =>
+  agent.profile === profile.profile && agent.nodeId === profile.nodeId)))
 const uploadsEnabled = computed(() => auth.groupUploadsEnabled)
 const managerBusy = computed(() => groups.isLoading || Object.values(agentUpdateBusy.value).some(Boolean))
 const reference = computed<ComposerReference | null>(() => quoted.value ? { id: quoted.value.id, author: quoted.value.author, content: quoted.value.content } : null)
@@ -328,16 +345,18 @@ async function startTopic(roomId: string) {
   } catch { /* store publishes the error */ }
 }
 
-async function createRoom(payload: { name: string; profiles: string[]; autoReply: boolean; replyRounds: number; instructions?: string; hostProfile?: string; orchestrationMode?: 'free' | 'host' }) {
-  const hostProfile = payload.hostProfile || payload.profiles[0]
+async function createRoom(payload: { name: string; members: GroupProfileOption[]; autoReply: boolean; replyRounds: number; instructions?: string; hostProfile?: string; orchestrationMode?: 'free' | 'host' }) {
+  const hostProfile = payload.hostProfile || payload.members[0]?.id
   const detail = await groups.createRoom({
     name: payload.name,
     ...(groups.roomInstructionsProtocol ? { instructions: payload.instructions ?? '' } : {}),
-    agents: payload.profiles.map(profile => ({
-      profile,
-      displayName: auth.profiles.find(item => item.name === profile)?.agentName || auth.profiles.find(item => item.name === profile)?.displayName || profile,
+    agents: payload.members.map(member => ({
+      profile: member.profile,
+      nodeId: member.nodeId,
+      nodeLabel: member.nodeLabel,
+      displayName: member.displayName,
       replyWithoutMention: payload.autoReply,
-      ...(groups.hostProtocol ? { isHost: profile === hostProfile } : {}),
+      ...(groups.hostProtocol ? { isHost: member.id === hostProfile } : {}),
     })),
     maxReplyRounds: payload.replyRounds,
     ...(groups.hostFlowProtocol ? { orchestrationMode: payload.orchestrationMode ?? 'free' } : {}),
@@ -365,11 +384,15 @@ async function updateRoom(patch: { name?: string; instructions?: string; replyRo
   })
 }
 
-async function addAgent(profile: string) {
+async function addAgent(profileID: string) {
   if (!groups.selectedRoom) return
+  const member = profiles.value.find(profile => profile.id === profileID)
+  if (!member) return
   await groups.addAgent(groups.selectedRoom.id, {
-    profile,
-    displayName: auth.profiles.find(item => item.name === profile)?.agentName || auth.profiles.find(item => item.name === profile)?.displayName || profile,
+    profile: member.profile,
+    nodeId: member.nodeId,
+    nodeLabel: member.nodeLabel,
+    displayName: member.displayName,
     replyWithoutMention: true,
     ...(groups.hostProtocol ? { isHost: false } : {}),
   })

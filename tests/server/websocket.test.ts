@@ -57,6 +57,169 @@ function closeRuntime(runtime: NodeServerRuntime): () => Promise<void> {
 }
 
 describe('WebSocket relay', () => {
+  it('lets a QR-paired iOS node use Hermes-compatible REST and WebSocket paths', async () => {
+    let pairedCookie = ''
+    const pairedFrames: Array<Record<string, unknown>> = []
+    const upstream = createServer((request, response) => {
+      response.setHeader('Content-Type', 'application/json')
+      if (request.url === '/api/status') {
+        pairedCookie = request.headers.cookie ?? pairedCookie
+        response.setHeader('Set-Cookie', 'hermes_session_at=paired-user; Path=/; HttpOnly')
+        response.end(JSON.stringify({ auth_required: true }))
+      } else if (request.url === '/api/auth/me') {
+        pairedCookie = request.headers.cookie ?? pairedCookie
+        response.end(JSON.stringify({ user_id: 'paired-user', display_name: 'Paired User' }))
+      } else if (request.url === '/api/profiles') {
+        pairedCookie = request.headers.cookie ?? pairedCookie
+        response.end(JSON.stringify({ profiles: [{ name: 'default', is_default: true }] }))
+      } else if (request.url === '/api/plugins/yaoyao/profiles') {
+        response.end(JSON.stringify({ profiles: [{ name: 'default', agentName: '夭夭' }] }))
+      } else if (request.url === '/api/auth/providers') {
+        response.end(JSON.stringify({ providers: [{ name: 'basic', supports_password: true }] }))
+      } else if (request.url === '/auth/password-login' && request.method === 'POST') {
+        response.setHeader('Set-Cookie', 'hermes_session_rt=paired-refresh; Path=/; HttpOnly')
+        response.end(JSON.stringify({ ok: true }))
+      } else if (request.url === '/api/auth/ws-ticket' && request.method === 'POST') {
+        pairedCookie = request.headers.cookie ?? pairedCookie
+        response.end(JSON.stringify({ ticket: 'paired-upstream-ticket' }))
+      } else {
+        response.statusCode = 404
+        response.end(JSON.stringify({ error: 'not found' }))
+      }
+    })
+    const upstreamSockets = new WebSocketServer({ noServer: true })
+    upstream.on('upgrade', (request, socket, head) => {
+      const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+      if (url.pathname !== '/api/ws' || url.searchParams.get('ticket') !== 'paired-upstream-ticket') {
+        socket.destroy()
+        return
+      }
+      upstreamSockets.handleUpgrade(request, socket, head, client => {
+        client.send(JSON.stringify({ method: 'gateway.ready', params: { paired: true } }))
+        client.on('message', data => {
+          const frame = JSON.parse(data.toString()) as Record<string, unknown>
+          pairedFrames.push(frame)
+          client.send(JSON.stringify({ id: frame.id, result: {} }))
+        })
+      })
+    })
+    const upstreamPort = await listen(upstream)
+    closers.push(async () => {
+      for (const client of upstreamSockets.clients) client.terminate()
+      upstreamSockets.close()
+      await closeServer(upstream)
+    })
+
+    const home = mkdtempSync(join(tmpdir(), 'hermes-yaoyao-paired-ws-'))
+    homes.push(home)
+    const config: ServerConfig = {
+      host: '127.0.0.1', port: 8800,
+      upstream: new URL(`http://127.0.0.1:${upstreamPort}`),
+      allowedHosts: new Set(), home,
+      mediaRoot: join(home, 'media'), attachmentsRoot: join(home, 'attachments'), imagesRoot: join(home, 'images'), mediaOwner: 'tester',
+      allowInsecureLan: false, insecureLan: false, production: false,
+    }
+    const application = createApplication({ config })
+    const node = createNodeServer(application)
+    await listen(node.server)
+    closers.push(closeRuntime(node))
+    const port = (node.server.address() as AddressInfo).port
+    config.port = port
+    const origin = `http://127.0.0.1:${port}`
+
+    const bootstrap = await fetch(`${origin}/api/app/bootstrap`)
+    const bootstrapBody = await bootstrap.json() as { csrfToken: string }
+    const cookie = cookies(bootstrap)
+    const pairingResponse = await fetch(`${origin}/api/app/pairings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json', Cookie: cookie, Origin: origin,
+        'X-CSRF-Token': bootstrapBody.csrfToken,
+      },
+      body: JSON.stringify({
+        username: 'paired-user', password: 'paired-password',
+      }),
+    })
+    expect(pairingResponse.status).toBe(201)
+    const pairing = await pairingResponse.json() as { pairingId: string; qrPayload: string }
+    const qr = new URL(pairing.qrPayload)
+    const claimResponse = await fetch(`${origin}/api/pair/v1/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pairingId: pairing.pairingId,
+        secret: qr.searchParams.get('secret'),
+        deviceName: 'Test iPhone',
+      }),
+    })
+    expect(claimResponse.status).toBe(201)
+    const claim = await claimResponse.json() as { serverUrl: string; token: string; deviceId: string }
+    const authorization = `Bearer ${claim.token}`
+
+    const status = await fetch(`${claim.serverUrl}/api/status`, {
+      headers: { Authorization: authorization },
+    })
+    expect(status.status).toBe(200)
+    expect((await status.json() as { auth_required: boolean }).auth_required).toBe(true)
+    const ticketResponse = await fetch(`${claim.serverUrl}/api/auth/ws-ticket`, {
+      method: 'POST', headers: { Authorization: authorization },
+    })
+    expect(ticketResponse.status).toBe(200)
+    const ticket = (await ticketResponse.json() as { ticket: string }).ticket
+    expect(pairedCookie).toContain('hermes_session_at=paired-user')
+
+    const socket = await wsOpen(
+      `${claim.serverUrl.replace(/^http/, 'ws')}/api/ws?ticket=${encodeURIComponent(ticket)}`,
+      origin,
+      '',
+    )
+    expect(await wsMessage(socket)).toMatchObject({
+      method: 'gateway.ready', params: { paired: true },
+    })
+    socket.send(JSON.stringify({
+      id: 'profiles', method: 'profiles.list',
+      params: { include_sessions: true },
+    }))
+    await wsMessage(socket)
+    socket.send(JSON.stringify({
+      id: 'profile-meta', method: 'profiles.configure',
+      params: {
+        name: 'default',
+        ui_meta: { 'hermes-bots': { chat: 'stored-session' } },
+        ui_meta_expected_revisions: { 'hermes-bots': 2 },
+      },
+    }))
+    await wsMessage(socket)
+    socket.send(JSON.stringify({
+      id: 'hidden-bot', method: 'session.create',
+      params: {
+        profile: 'default', title: 'Bot Chat', source: 'ios_bot_group',
+        hidden: true, close_on_disconnect: false,
+      },
+    }))
+    await wsMessage(socket)
+    expect(pairedFrames[0]).toEqual({
+      id: 'profiles', method: 'profiles.list', params: { include_sessions: true },
+    })
+    expect(pairedFrames[1]).toMatchObject({
+      id: 'profile-meta', method: 'profiles.configure',
+      params: { name: 'default' },
+    })
+    expect(pairedFrames[2]).toMatchObject({
+      id: 'hidden-bot', method: 'session.create',
+      params: { profile: 'default', source: 'ios_bot_group', hidden: true },
+    })
+    socket.close()
+
+    const revoke = await fetch(`${origin}/api/pair/v1/devices/${claim.deviceId}`, {
+      method: 'DELETE', headers: { Authorization: authorization },
+    })
+    expect(revoke.status).toBe(200)
+    expect(await fetch(`${claim.serverUrl}/api/status`, {
+      headers: { Authorization: authorization },
+    })).toHaveProperty('status', 401)
+  })
+
   it('keeps the upstream ticket server-side and filters chat RPC methods', async () => {
     const received: Array<Record<string, unknown>> = []
     const upstream = createServer((request, response) => {

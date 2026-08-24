@@ -4,6 +4,7 @@ import WebSocket, { WebSocketServer, type RawData } from 'ws'
 import type { ServerConfig } from './config.js'
 import { HttpError } from './errors.js'
 import type { RealtimeChannel, RealtimeLeaseStore } from './leases.js'
+import type { NodePairingStore } from './pairing.js'
 import { isAllowedHostHeader, isExactOrigin, requestAccountKey } from './security.js'
 
 const CHAT_MAX_PAYLOAD = 36 * 1_024 * 1_024
@@ -16,6 +17,9 @@ const CHAT_METHODS = new Set([
   'file.attach',
   'image.attach_bytes',
   'pdf.attach',
+  'profiles.configure',
+  'profiles.get_asset',
+  'profiles.list',
   'prompt.submit',
   'session.branch',
   'session.close',
@@ -137,7 +141,55 @@ function normalizedSessionOpenParams(
   }
 }
 
-function checkedChatFrame(data: RawData, isBinary: boolean): string {
+function normalizedPairedSessionOpenParams(
+  method: 'session.create' | 'session.resume',
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  const profile = safeString(params.profile, 'profile', true)!
+  const source = safeString(params.source, 'source') ?? 'mobile'
+  const columns = typeof params.cols === 'number' && Number.isInteger(params.cols)
+    ? Math.min(500, Math.max(20, params.cols))
+    : 80
+  if (method === 'session.resume') {
+    return {
+      session_id: safeString(params.session_id, 'session_id', true)!,
+      profile,
+      source,
+      close_on_disconnect: false,
+      omit_messages: params.omit_messages === true,
+      cols: columns,
+    }
+  }
+  const title = safeString(params.title, 'title')
+  const cwd = typeof params.cwd === 'string' && params.cwd.length <= 4_096 ? params.cwd : ''
+  const reasoning = safeString(params.reasoning_effort, 'reasoning effort')
+  const allowedReasoning = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+  if (reasoning && !allowedReasoning.has(reasoning)) throw new HttpError(400, 'Reasoning effort is invalid')
+  const model = safeString(params.model, 'model')
+  const provider = safeString(params.provider, 'provider')
+  if ((model === undefined) !== (provider === undefined)) {
+    throw new HttpError(400, 'Model and provider must be set together')
+  }
+  const messages = params.messages
+  if (messages !== undefined && (!Array.isArray(messages) || messages.length > 256)) {
+    throw new HttpError(400, 'Seed messages are invalid')
+  }
+  return {
+    profile,
+    source,
+    close_on_disconnect: false,
+    cols: columns,
+    cwd,
+    hidden: params.hidden === true,
+    ...(title ? { title } : {}),
+    ...(reasoning ? { reasoning_effort: reasoning } : {}),
+    ...(model && provider ? { model, provider } : {}),
+    ...(typeof params.fast === 'boolean' ? { fast: params.fast } : {}),
+    ...(messages !== undefined ? { messages } : {}),
+  }
+}
+
+function checkedChatFrame(data: RawData, isBinary: boolean, paired = false): string {
   if (isBinary) throw new HttpError(400, 'Binary chat frames are not accepted')
   const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer)
   if (bytes.byteLength > CHAT_MAX_PAYLOAD) throw new HttpError(413, 'Chat frame is too large')
@@ -165,7 +217,43 @@ function checkedChatFrame(data: RawData, isBinary: boolean): string {
   const profileRequired = request.method === 'session.create' || request.method === 'session.resume'
   safeString(params.profile, 'profile', profileRequired)
   if (request.method === 'session.create' || request.method === 'session.resume') {
-    params = normalizedSessionOpenParams(request.method, params)
+    params = paired
+      ? normalizedPairedSessionOpenParams(request.method, params)
+      : normalizedSessionOpenParams(request.method, params)
+  }
+  if (request.method === 'profiles.list') {
+    const preferred = params.preferred_session_ids
+    if (preferred !== undefined && (!preferred || typeof preferred !== 'object' || Array.isArray(preferred))) {
+      throw new HttpError(400, 'preferred_session_ids must be an object')
+    }
+    params = {
+      ...(typeof params.include_sessions === 'boolean' ? { include_sessions: params.include_sessions } : {}),
+      ...(preferred !== undefined ? { preferred_session_ids: preferred } : {}),
+    }
+  }
+  if (request.method === 'profiles.get_asset') {
+    params = {
+      name: safeString(params.name, 'profile name', true)!,
+      asset: safeString(params.asset, 'profile asset', true)!,
+    }
+  }
+  if (request.method === 'profiles.configure') {
+    if (!params.ui_meta || typeof params.ui_meta !== 'object' || Array.isArray(params.ui_meta)) {
+      throw new HttpError(400, 'ui_meta must be an object')
+    }
+    if (params.ui_meta_expected_revisions !== undefined
+      && (!params.ui_meta_expected_revisions
+        || typeof params.ui_meta_expected_revisions !== 'object'
+        || Array.isArray(params.ui_meta_expected_revisions))) {
+      throw new HttpError(400, 'ui_meta_expected_revisions must be an object')
+    }
+    params = {
+      name: safeString(params.name, 'profile name', true)!,
+      ui_meta: params.ui_meta,
+      ...(params.ui_meta_expected_revisions !== undefined
+        ? { ui_meta_expected_revisions: params.ui_meta_expected_revisions }
+        : {}),
+    }
   }
   if (request.method === 'config.set') params = normalizedConfigParams(params)
   if (request.method === 'prompt.submit' || request.method === 'session.steer') {
@@ -211,6 +299,28 @@ function upstreamWebSocketURL(config: ServerConfig, channel: RealtimeChannel, le
   if (channel === 'groups') {
     url.searchParams.set('epoch', lease.epoch!)
     url.searchParams.set('cursor', String(lease.cursor ?? 0))
+  }
+  return url
+}
+
+function pairedUpstreamWebSocketURL(
+  config: ServerConfig,
+  channel: RealtimeChannel,
+  ticket: string,
+  epoch?: string,
+  cursor?: number,
+): URL {
+  const url = new URL(config.upstream)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  const prefix = config.upstream.pathname === '/' ? '' : config.upstream.pathname.replace(/\/$/, '')
+  url.pathname = channel === 'chat'
+    ? `${prefix}/api/ws`
+    : `${prefix}/api/plugins/yaoyao/v1/events`
+  url.search = ''
+  url.searchParams.set('ticket', ticket)
+  if (channel === 'groups') {
+    url.searchParams.set('epoch', epoch!)
+    url.searchParams.set('cursor', String(cursor ?? 0))
   }
   return url
 }
@@ -298,6 +408,7 @@ function relaySocket(
   channel: RealtimeChannel,
   onFinished: () => void,
   groupAnchor?: { epoch: string; cursor: number },
+  paired = false,
 ): void {
   const groupValidator = groupAnchor
     ? new GroupFrameValidator(groupAnchor.epoch, groupAnchor.cursor)
@@ -332,7 +443,7 @@ function relaySocket(
       if (channel === 'groups') throw new HttpError(403, 'Group event stream is read-only')
       if (upstream.readyState !== WebSocket.OPEN) throw new HttpError(409, 'Hermes socket is not ready')
       if (upstream.bufferedAmount > MAX_BUFFERED_BYTES) throw new HttpError(429, 'Hermes socket is congested')
-      upstream.send(checkedChatFrame(data, isBinary))
+      upstream.send(checkedChatFrame(data, isBinary, paired))
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'Invalid frame'
       closePair(client, upstream, 1008, reason)
@@ -382,6 +493,7 @@ export function installWebSocketRelay(
   server: HttpServer,
   config: ServerConfig,
   leases: RealtimeLeaseStore,
+  pairings: NodePairingStore,
 ): () => void {
   const socketServer = new WebSocketServer({ noServer: true, maxPayload: CHAT_MAX_PAYLOAD })
   const active = new Map<string, number>()
@@ -391,6 +503,99 @@ export function installWebSocketRelay(
       url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'invalid'}`)
     } catch {
       rejectUpgrade(socket, 400, 'Invalid WebSocket URL')
+      return
+    }
+    const pairedMatch = url.pathname.match(
+      /^\/node\/([0-9a-f-]{36})\/api\/(ws|plugins\/yaoyao\/v1\/events)$/,
+    )
+    if (pairedMatch) {
+      const deviceID = pairedMatch[1]!
+      const channel: RealtimeChannel = pairedMatch[2] === 'ws' ? 'chat' : 'groups'
+      const host = request.headers.host
+      const origin = typeof request.headers.origin === 'string' ? request.headers.origin : undefined
+      const secure = Boolean(config.tlsCert)
+      if (!isAllowedHostHeader(host, config)
+        || (origin !== undefined && !isExactOrigin(origin, host, secure, config.allowedHosts))) {
+        rejectUpgrade(socket, 403, 'Host or Origin rejected')
+        return
+      }
+      if (!pairings.hasDevice(deviceID)) {
+        rejectUpgrade(socket, 401, 'Paired device was revoked')
+        return
+      }
+      const allowedQuery = channel === 'groups'
+        ? new Set(['ticket', 'epoch', 'cursor'])
+        : new Set(['ticket'])
+      if ([...url.searchParams.keys()].some((name) => !allowedQuery.has(name))) {
+        rejectUpgrade(socket, 400, 'Unexpected WebSocket query parameter')
+        return
+      }
+      const ticket = url.searchParams.get('ticket')
+      if (!ticket || ticket.length > 4_096) {
+        rejectUpgrade(socket, 401, 'Missing paired node ticket')
+        return
+      }
+      const epoch = channel === 'groups' ? url.searchParams.get('epoch') : undefined
+      const cursorValue = channel === 'groups' ? Number(url.searchParams.get('cursor') ?? '0') : 0
+      if (channel === 'groups' && (!epoch
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(epoch)
+        || !Number.isSafeInteger(cursorValue) || cursorValue < 0)) {
+        rejectUpgrade(socket, 400, 'Invalid paired group cursor')
+        return
+      }
+      const connectionKey = `paired:${deviceID}:${channel}`
+      const maximum = channel === 'chat' ? 4 : 2
+      if ((active.get(connectionKey) ?? 0) >= maximum) {
+        rejectUpgrade(socket, 429, 'Too many realtime connections')
+        return
+      }
+      active.set(connectionKey, (active.get(connectionKey) ?? 0) + 1)
+      socketServer.handleUpgrade(request, socket, head, (client) => {
+        const upstream = new WebSocket(
+          pairedUpstreamWebSocketURL(
+            config,
+            channel,
+            ticket,
+            epoch ?? undefined,
+            cursorValue,
+          ),
+          {
+            headers: { Origin: config.upstream.origin },
+            maxPayload: channel === 'chat' ? CHAT_MAX_PAYLOAD : GROUP_MAX_PAYLOAD,
+            handshakeTimeout: 15_000,
+          },
+        )
+        let released = false
+        const release = () => {
+          if (released) return
+          released = true
+          const count = (active.get(connectionKey) ?? 1) - 1
+          if (count <= 0) active.delete(connectionKey)
+          else active.set(connectionKey, count)
+        }
+        upstream.once('open', () => relaySocket(
+          client,
+          upstream,
+          channel,
+          release,
+          channel === 'groups' ? { epoch: epoch!, cursor: cursorValue } : undefined,
+          true,
+        ))
+        upstream.once('unexpected-response', () => {
+          if (client.readyState === WebSocket.OPEN) client.close(1011, 'Hermes rejected WebSocket')
+          release()
+        })
+        upstream.once('error', () => {
+          if (upstream.readyState !== WebSocket.OPEN && client.readyState === WebSocket.OPEN) {
+            client.close(1011, 'Unable to connect to Hermes')
+            release()
+          }
+        })
+        client.once('close', () => {
+          if (upstream.readyState === WebSocket.CONNECTING) upstream.terminate()
+          release()
+        })
+      })
       return
     }
     if (!url.pathname.startsWith('/ws/')) {

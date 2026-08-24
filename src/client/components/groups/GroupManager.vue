@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import type { GroupAgent, ModelOption } from '@shared/types'
 import AppIcon from '@/components/common/AppIcon.vue'
 import type { UiRoom } from './types'
+import type { GroupProfileOption } from './types'
 
 type AgentSettingsPatch = Partial<Pick<GroupAgent,
   'displayName' | 'description' | 'enabled' | 'replyWithoutMention' | 'isHost' | 'model' | 'provider' | 'reasoningEffort' | 'fastMode'>>
@@ -37,7 +38,7 @@ const props = withDefaults(defineProps<{
   hostEnabled?: boolean
   hostFlowEnabled?: boolean
   roomInstructionsEnabled?: boolean
-  availableProfiles?: string[]
+  availableProfiles?: GroupProfileOption[]
   modelOptionsByProfile?: Record<string, ModelOption[]>
   modelOptionsLoading?: Record<string, boolean>
   modelOptionsError?: Record<string, string>
@@ -241,7 +242,7 @@ function statusLabel(status: GroupAgent['status']): string {
       <div class="agent-list">
         <article v-for="agent in agents" :key="agent.id">
           <span class="agent-avatar">{{ agent.displayName.slice(0, 1).toUpperCase() }}<i :class="`status-${agent.status}`" /></span>
-          <span class="agent-copy"><span class="agent-name-line"><strong>{{ agent.displayName }}</strong><em v-if="hostEnabled && agent.isHost" class="host-badge">主持人</em></span><small>{{ agent.profile }} · {{ statusLabel(agent.status) }}</small></span>
+          <span class="agent-copy"><span class="agent-name-line"><strong>{{ agent.displayName }}</strong><em v-if="hostEnabled && agent.isHost" class="host-badge">主持人</em></span><small>{{ agent.profile }}<template v-if="agent.nodeId !== 'local'"> · {{ agent.nodeLabel || agent.nodeId.slice(0, 8) }}</template> · {{ statusLabel(agent.status) }}</small></span>
           <button class="agent-action" type="button" :title="`设置 ${agent.displayName}`" :aria-label="`设置${agent.displayName}`" @click="openAgentSettings(agent)"><AppIcon name="settings" :size="14" /></button>
           <button v-if="agent.status === 'running' || agent.status === 'queued'" class="agent-action" type="button" title="中断" @click="emit('interruptAgent', agent.id)"><AppIcon name="stop" :size="13" /></button>
           <button class="agent-action danger" type="button" :title="removeAgentTitle(agent)" :aria-label="`移除${agent.displayName}`" :disabled="!canRemoveAgent(agent) || busy" @click="emit('removeAgent', agent.id)"><AppIcon name="trash" :size="14" /></button>
@@ -251,7 +252,7 @@ function statusLabel(status: GroupAgent['status']): string {
       <div v-if="agents.length < 8 && availableProfiles?.length" class="add-agent">
         <select aria-label="选择要添加的 Agent" @change="($event.target as HTMLSelectElement).value && emit('addAgent', ($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''">
           <option value="">添加 Agent…</option>
-          <option v-for="profile in availableProfiles" :key="profile" :value="profile">{{ profile }}</option>
+          <option v-for="profile in availableProfiles" :key="profile.id" :value="profile.id">{{ profile.displayName }} · {{ profile.nodeLabel }}</option>
         </select>
       </div>
     </section>

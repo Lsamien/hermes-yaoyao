@@ -33,7 +33,7 @@ function initial(): GroupProtocolState {
 
 function groupAgent(id: string, displayName: string, isHost: boolean): GroupAgent {
   return {
-    id, roomId: 'room-1', profile: displayName, displayName, description: '', storedSessionId: null,
+    id, roomId: 'room-1', profile: displayName, nodeId: 'local', nodeLabel: '', displayName, description: '', storedSessionId: null,
     lastContextMessageSeq: 0, enabled: true, replyWithoutMention: false, isHost,
     model: null, provider: null, reasoningEffort: null, fastMode: null,
     createdAt: 1, updatedAt: 1, status: 'idle',
@@ -167,7 +167,8 @@ describe('group protocol continuity', () => {
     expect(normalizeGroupAgent({ id: 'host', room_id: 'room-1', profile: 'host', is_host: true }).isHost).toBe(true)
     expect(isSupportedGroupProtocolVersion(8)).toBe(true)
     expect(isSupportedGroupProtocolVersion(10)).toBe(true)
-    expect(isSupportedGroupProtocolVersion(11)).toBe(false)
-    expect(SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL).toBe('v2–v10')
+    expect(isSupportedGroupProtocolVersion(11)).toBe(true)
+    expect(isSupportedGroupProtocolVersion(12)).toBe(false)
+    expect(SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL).toBe('v2–v11')
   })
 })

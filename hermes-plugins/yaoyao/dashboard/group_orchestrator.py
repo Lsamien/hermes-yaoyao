@@ -18,7 +18,8 @@ import threading
 import uuid
 from typing import Any, Awaitable, Callable, Mapping, Protocol
 
-from .group_gateway import GroupGatewayAdapter, SessionIdentity
+from .group_gateway import SessionIdentity
+from .group_remote_gateway import GroupGatewayRouter
 from .group_protocol import MAX_MESSAGE_BYTES, MAX_TOOL_STATE_BYTES
 
 
@@ -515,7 +516,7 @@ class GroupOrchestrator:
         self._gateway_factory: GatewayFactory = (
             gateway_factory
             if gateway_factory is not None
-            else lambda callback: GroupGatewayAdapter(on_event=callback)
+            else lambda callback: GroupGatewayRouter(callback)
         )
         if work_enabled is not None and not callable(work_enabled):
             raise ValueError("work_enabled must be callable")
@@ -2224,6 +2225,9 @@ class GroupOrchestrator:
             await self._fail_claim_without_projection(run_id)
             return
         profile = _required_string(agent.get("profile"), "projection.agent.profile")
+        node_id = _required_string(
+            agent.get("nodeId", "local"), "projection.agent.nodeId"
+        )
         reply_mode = _required_string(run.get("replyMode"), "projection.run.replyMode")
         if reply_mode not in {"mentioned", "automatic"}:
             raise GroupOrchestratorError("projection.run.replyMode is invalid")
@@ -2261,18 +2265,51 @@ class GroupOrchestrator:
         gateway = self._required_gateway()
         try:
             if expected_stored_id is None:
-                identity = await asyncio.to_thread(
-                    gateway.create_session,
-                    profile,
-                    f"[群聊] {room_name} · {display_name}",
-                    cwd_value,
-                    [],
-                    configuration,
-                )
+                if node_id == "local":
+                    identity = await asyncio.to_thread(
+                        gateway.create_session,
+                        profile,
+                        f"[群聊] {room_name} · {display_name}",
+                        cwd_value,
+                        [],
+                        configuration,
+                    )
+                else:
+                    create_remote = getattr(
+                        gateway, "create_session_for_node", None
+                    )
+                    if not callable(create_remote):
+                        raise GroupOrchestratorError(
+                            "Gateway does not support remote nodes"
+                        )
+                    identity = await asyncio.to_thread(
+                        create_remote,
+                        node_id,
+                        profile,
+                        f"[群聊] {room_name} · {display_name}",
+                        "",
+                        [],
+                        configuration,
+                    )
             else:
-                identity = await asyncio.to_thread(
-                    gateway.resume_session, profile, expected_stored_id
-                )
+                if node_id == "local":
+                    identity = await asyncio.to_thread(
+                        gateway.resume_session, profile, expected_stored_id
+                    )
+                else:
+                    resume_remote = getattr(
+                        gateway, "resume_session_for_node", None
+                    )
+                    if not callable(resume_remote):
+                        raise GroupOrchestratorError(
+                            "Gateway does not support remote nodes"
+                        )
+                    identity = await asyncio.to_thread(
+                        resume_remote,
+                        node_id,
+                        profile,
+                        expected_stored_id,
+                    )
         except Exception:  # noqa: BLE001 - never create a fallback session
             logger.error("YaoYao group session create/resume failed")
             await self._settle_unbound_failed(

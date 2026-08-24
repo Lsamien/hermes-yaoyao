@@ -9,6 +9,13 @@ import type { ServerConfig } from './config.js'
 import { isLoopbackUpstream } from './config.js'
 import { HttpError } from './errors.js'
 import { canonicalEpoch, groupCursor, type RealtimeChannel, RealtimeLeaseStore } from './leases.js'
+import {
+  bearerToken,
+  DEFAULT_NODE_SCOPES,
+  NODE_PAIRING_PROTOCOL_VERSION,
+  type NodeScope,
+  NodePairingStore,
+} from './pairing.js'
 import { acceptedRequestOrigin, accountKeyFromCookieHeader, CsrfProtection, requestAccountKey } from './security.js'
 import {
   applyUpstreamCookies,
@@ -27,6 +34,7 @@ export interface RouteDependencies {
   csrf: CsrfProtection
   upstream: UpstreamClient
   leases: RealtimeLeaseStore
+  pairings: NodePairingStore
   uploads: UploadStore
 }
 
@@ -36,6 +44,28 @@ function body(ctx: Koa.Context): JsonObject {
     throw new HttpError(400, 'A JSON object body is required', 'invalid_json_body')
   }
   return value as JsonObject
+}
+
+function optionalBody(ctx: Koa.Context): JsonObject | undefined {
+  const value = (ctx.request as Koa.Request & { body?: unknown }).body
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as JsonObject
+    : undefined
+}
+
+async function boundedRawBody(ctx: Koa.Context, maximum: number): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const raw of ctx.req) {
+    const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as Uint8Array)
+    size += chunk.byteLength
+    if (size > maximum) {
+      throw new HttpError(413, 'Paired node attachment is too large', 'node_attachment_too_large')
+    }
+    chunks.push(chunk)
+  }
+  if (size === 0) throw new HttpError(400, 'Paired node attachment is empty', 'invalid_node_attachment')
+  return Buffer.concat(chunks, size)
 }
 
 function parseJson(response: UpstreamResponse): JsonObject {
@@ -140,6 +170,53 @@ function json(ctx: Koa.Context, status: number, value: unknown): void {
   ctx.status = status
   ctx.type = 'application/json; charset=utf-8'
   ctx.body = value
+}
+
+function requestOrigin(ctx: Koa.Context, config: ServerConfig): string {
+  const secure = ctx.secure || Boolean(config.tlsCert)
+  return `${secure ? 'https' : 'http'}://${ctx.host}`
+}
+
+function pairingScopes(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || !value.every((scope) => typeof scope === 'string')) {
+    throw new HttpError(400, 'scopes must be a string array', 'invalid_scope')
+  }
+  return value
+}
+
+function pairedProxyScope(path: string, method: string): NodeScope {
+  if (path === '/profiles' || path.startsWith('/profiles/')) {
+    return path.includes('/sessions') ? 'history.read' : 'agents.read'
+  }
+  if (path === '/sessions' || path.startsWith('/sessions/')) {
+    return ['GET', 'HEAD'].includes(method) ? 'history.read' : 'sessions.execute'
+  }
+  if (path.startsWith('/plugins/yaoyao/v1/')) {
+    return ['GET', 'HEAD'].includes(method) ? 'groups.read' : 'groups.execute'
+  }
+  return 'sessions.execute'
+}
+
+function pairedProxyPath(rawPath: string): string {
+  const path = rawPath.startsWith('/') ? rawPath : `/${rawPath}`
+  if (path.includes('\\') || path.includes('\u0000') || path.length > 2_048) {
+    throw new HttpError(400, 'Paired node path is invalid', 'invalid_node_path')
+  }
+  const allowed = path === '/status'
+    || path === '/auth/me'
+    || path === '/auth/ws-ticket'
+    || path === '/profiles'
+    || path.startsWith('/profiles/')
+    || path === '/sessions'
+    || path.startsWith('/sessions/')
+    || path.startsWith('/model/')
+    || path.startsWith('/models/')
+    || path.startsWith('/files/')
+    || path.startsWith('/attachments/')
+    || path.startsWith('/plugins/yaoyao/')
+  if (!allowed) throw new HttpError(404, 'Paired node route is not available', 'node_route_not_found')
+  return `/api${path}`
 }
 
 async function proxy(
@@ -281,6 +358,58 @@ async function login(ctx: Koa.Context, dependencies: RouteDependencies, jar: Coo
   const result = requireSuccess(response)
   if (result.ok !== true) throw new HttpError(401, 'Hermes rejected the login', 'login_failed')
   await bootstrap(ctx, dependencies, jar, true)
+}
+
+async function independentPairingCookies(
+  ctx: Koa.Context,
+  dependencies: RouteDependencies,
+  authenticatedJar: CookieJar,
+  request: JsonObject | undefined,
+): Promise<string> {
+  const status = requireSuccess(
+    await dependencies.upstream.request('/api/status', authenticatedJar),
+  )
+  if (!authRequired(status)) {
+    const cookies = authenticatedJar.header
+    if (!cookies) throw new HttpError(401, 'Hermes session is unavailable', 'authentication_required')
+    return cookies
+  }
+  const username = typeof request?.username === 'string' ? request.username.trim() : ''
+  const password = typeof request?.password === 'string' ? request.password : ''
+  if (!username || !password || username.length > 320 || password.length > 4_096) {
+    throw new HttpError(
+      400,
+      'Hermes username and password are required to create an independent paired-device session',
+      'pairing_credentials_required',
+    )
+  }
+  const jar = new CookieJar('')
+  const providersBody = requireSuccess(
+    await dependencies.upstream.request('/api/auth/providers', jar),
+  )
+  const providers = Array.isArray(providersBody.providers) ? providersBody.providers : []
+  const provider = providers.find((entry) => Boolean(
+    entry && typeof entry === 'object' && !Array.isArray(entry)
+      && (entry as JsonObject).supports_password === true
+      && String((entry as JsonObject).name).toLowerCase() === 'basic',
+  )) as JsonObject | undefined
+  if (!provider || typeof provider.name !== 'string') {
+    throw new HttpError(
+      403,
+      'Hermes does not offer independent password sessions for QR pairing',
+      'pairing_login_unavailable',
+    )
+  }
+  const response = await dependencies.upstream.request('/auth/password-login', jar, {
+    method: 'POST',
+    body: { provider: provider.name, username, password, next: '' },
+    clientAddress: ctx.req.socket.remoteAddress,
+  })
+  const result = requireSuccess(response)
+  if (result.ok !== true) throw new HttpError(401, 'Hermes rejected the pairing login', 'pairing_login_failed')
+  await requireGatewayAuthentication(ctx, dependencies, jar)
+  if (!jar.header) throw new HttpError(502, 'Hermes did not issue paired-device cookies', 'pairing_session_missing')
+  return jar.header
 }
 
 async function requireGatewayAuthentication(
@@ -456,6 +585,179 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     json(ctx, 200, { ok: true })
   })
 
+  router.post('/api/app/pairings', async (ctx) => {
+    await withJar(ctx, async (jar) => {
+      await requireGatewayAuthentication(ctx, dependencies, jar)
+      const request = optionalBody(ctx)
+      const cookieHeader = await independentPairingCookies(
+        ctx,
+        dependencies,
+        jar,
+        request,
+      )
+      const pairing = dependencies.pairings.create(
+        cookieHeader,
+        pairingScopes(request?.scopes),
+      )
+      const origin = requestOrigin(ctx, dependencies.config)
+      const deepLink = new URL('yaoyao://pair')
+      deepLink.searchParams.set('v', String(NODE_PAIRING_PROTOCOL_VERSION))
+      deepLink.searchParams.set('url', origin)
+      deepLink.searchParams.set('node', pairing.nodeID)
+      deepLink.searchParams.set('id', pairing.id)
+      deepLink.searchParams.set('secret', pairing.secret)
+      deepLink.searchParams.set('fingerprint', pairing.fingerprint)
+      json(ctx, 201, {
+        protocolVersion: NODE_PAIRING_PROTOCOL_VERSION,
+        pairingId: pairing.id,
+        nodeId: pairing.nodeID,
+        fingerprint: pairing.fingerprint,
+        scopes: pairing.scopes,
+        expiresAt: pairing.expiresAt,
+        qrPayload: deepLink.toString(),
+      })
+    })
+  })
+
+  router.get('/api/app/pairings/:pairingID', async (ctx) => {
+    await withJar(ctx, async (jar) => {
+      await requireGatewayAuthentication(ctx, dependencies, jar)
+      json(ctx, 200, dependencies.pairings.status(ctx.params.pairingID))
+    })
+  })
+
+  router.get('/api/app/paired-devices', async (ctx) => {
+    await withJar(ctx, async (jar) => {
+      await requireGatewayAuthentication(ctx, dependencies, jar)
+      json(ctx, 200, {
+        nodeId: dependencies.pairings.nodeID,
+        fingerprint: dependencies.pairings.fingerprint,
+        devices: dependencies.pairings.list(),
+      })
+    })
+  })
+
+  router.delete('/api/app/paired-devices/:deviceID', async (ctx) => {
+    await withJar(ctx, async (jar) => {
+      await requireGatewayAuthentication(ctx, dependencies, jar)
+      try {
+        const delegated = new CookieJar(
+          dependencies.pairings.delegatedCookies(ctx.params.deviceID),
+        )
+        await dependencies.upstream.request('/auth/logout', delegated, {
+          method: 'POST', clientAddress: ctx.req.socket.remoteAddress,
+        })
+      } catch {
+        // Revocation of the local delegation remains authoritative even when
+        // Hermes is temporarily unreachable; its cookie is never returned.
+      }
+      if (!dependencies.pairings.revoke(ctx.params.deviceID)) {
+        throw new HttpError(404, 'Paired device was not found', 'paired_device_not_found')
+      }
+      json(ctx, 200, { ok: true })
+    })
+  })
+
+  router.post('/api/pair/v1/claim', (ctx) => {
+    const request = body(ctx)
+    const pairingID = typeof request.pairingId === 'string' ? request.pairingId : ''
+    const secret = typeof request.secret === 'string' ? request.secret : ''
+    const deviceName = typeof request.deviceName === 'string' ? request.deviceName : ''
+    const claimed = dependencies.pairings.claim({ pairingID, secret, deviceName })
+    const origin = requestOrigin(ctx, dependencies.config)
+    json(ctx, 201, {
+      protocolVersion: NODE_PAIRING_PROTOCOL_VERSION,
+      nodeId: claimed.nodeID,
+      fingerprint: claimed.fingerprint,
+      deviceId: claimed.device.id,
+      deviceName: claimed.device.name,
+      token: claimed.token,
+      scopes: claimed.scopes,
+      serverUrl: `${origin}/node/${claimed.device.id}`,
+    })
+  })
+
+  router.get('/api/pair/v1/capabilities', (ctx) => {
+    json(ctx, 200, {
+      protocolVersion: NODE_PAIRING_PROTOCOL_VERSION,
+      nodeId: dependencies.pairings.nodeID,
+      fingerprint: dependencies.pairings.fingerprint,
+      scopes: [...DEFAULT_NODE_SCOPES],
+      features: ['bots', 'bot-group', 'native-group-worker', 'history'],
+    })
+  })
+
+  router.delete('/api/pair/v1/devices/:deviceID', async (ctx) => {
+    const token = bearerToken(ctx.get('authorization'))
+    const cookies = dependencies.pairings.authorize(ctx.params.deviceID, token)
+    try {
+      await dependencies.upstream.request('/auth/logout', new CookieJar(cookies), {
+        method: 'POST', clientAddress: ctx.req.socket.remoteAddress,
+      })
+    } catch {
+      // The paired bearer is revoked locally even if upstream logout fails.
+    }
+    if (!dependencies.pairings.revoke(ctx.params.deviceID)) {
+      throw new HttpError(404, 'Paired device was not found', 'paired_device_not_found')
+    }
+    json(ctx, 200, { ok: true })
+  })
+
+  router.all('/node/:deviceID/api/*nodePath', async (ctx) => {
+    const rawPath = Array.isArray(ctx.params.nodePath)
+      ? ctx.params.nodePath.join('/')
+      : ctx.params.nodePath
+    const path = pairedProxyPath(rawPath)
+    const scope = pairedProxyScope(path.slice('/api'.length), ctx.method)
+    const token = bearerToken(ctx.get('authorization'))
+    const cookieHeader = dependencies.pairings.authorize(
+      ctx.params.deviceID,
+      token,
+      scope,
+    )
+    if (ctx.querystring.length > 8_192) {
+      throw new HttpError(414, 'Paired node query is too long', 'node_query_too_long')
+    }
+    const jar = new CookieJar(cookieHeader)
+    const isWorkerAttachment = ctx.method === 'POST'
+      && /\/plugins\/yaoyao\/v1\/node-worker\/sessions\/[^/]+\/attachments$/.test(path)
+      && ctx.get('content-type').split(';', 1)[0]?.trim().toLowerCase() === 'application/octet-stream'
+    let rawBody: BodyInit | undefined
+    let requestHeaders: Record<string, string> = {
+      'x-yaoyao-node-client': ctx.params.deviceID,
+    }
+    if (isWorkerAttachment) {
+      const encodedName = ctx.get('x-file-name-b64')
+      const mimeType = ctx.get('x-mime-type') || 'application/octet-stream'
+      if (!/^[A-Za-z0-9_-]{2,512}$/.test(encodedName)
+        || !/^[\x20-\x7e]{1,200}$/.test(mimeType)) {
+        throw new HttpError(400, 'Paired node attachment headers are invalid', 'invalid_node_attachment')
+      }
+      const buffer = await boundedRawBody(ctx, 25 * 1_024 * 1_024)
+      rawBody = buffer.buffer.slice(
+        buffer.byteOffset,
+        buffer.byteOffset + buffer.byteLength,
+      ) as ArrayBuffer
+      requestHeaders = {
+        ...requestHeaders,
+        'content-type': 'application/octet-stream',
+        'x-file-name-b64': encodedName,
+        'x-mime-type': mimeType,
+      }
+    }
+    const response = await dependencies.upstream.request(path, jar, {
+      method: ctx.method,
+      search: new URLSearchParams(ctx.querystring),
+      body: ['GET', 'HEAD'].includes(ctx.method) || isWorkerAttachment
+        ? undefined : optionalBody(ctx),
+      rawBody,
+      headers: requestHeaders,
+      clientAddress: ctx.req.socket.remoteAddress,
+    })
+    dependencies.pairings.updateCookies(ctx.params.deviceID, jar.header)
+    sendUpstreamResponse(ctx, response, jar)
+  })
+
   // Historical messages can contain Markdown links such as
   // /Users/<owner>/Agents/<path>. Map only the configured media root, never
   // an arbitrary local filesystem path.
@@ -629,6 +931,23 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
 
   router.get('/api/app/groups/capabilities', async (ctx) => {
     await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/capabilities')
+  })
+  router.get('/api/app/groups/nodes', async (ctx) => {
+    await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/nodes')
+  })
+  router.post('/api/app/groups/nodes', async (ctx) => {
+    await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/nodes', {
+      method: 'POST', requestBody: body(ctx),
+    })
+  })
+  router.delete('/api/app/groups/nodes/:nodeID', async (ctx) => {
+    const nodeID = canonicalUUID(ctx.params.nodeID, 'node ID')
+    await proxy(
+      ctx,
+      dependencies.upstream,
+      `/api/plugins/yaoyao/v1/nodes/${nodeID}`,
+      { method: 'DELETE', requestBody: body(ctx) },
+    )
   })
   router.get('/api/app/groups/rooms', async (ctx) => {
     await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/rooms', {

@@ -5,9 +5,13 @@ import type { GroupAgent } from '@shared/types'
 import CreateGroupDialog from '@/components/groups/CreateGroupDialog.vue'
 import GroupManager from '@/components/groups/GroupManager.vue'
 
+const profiles = (...names: string[]) => names.map(name => ({
+  id: `local|${name}`, profile: name, displayName: name, nodeId: 'local', nodeLabel: '当前 Hermes',
+}))
+
 function agent(id: string, profile: string, displayName: string, isHost: boolean, replyWithoutMention: boolean): GroupAgent {
   return {
-    id, roomId: 'room-1', profile, displayName, description: `${displayName} 的职责`, storedSessionId: null,
+    id, roomId: 'room-1', profile, nodeId: 'local', nodeLabel: '', displayName, description: `${displayName} 的职责`, storedSessionId: null,
     lastContextMessageSeq: 0, enabled: true, replyWithoutMention, isHost,
     model: null, provider: null, reasoningEffort: null, fastMode: null,
     createdAt: 1, updatedAt: 1, status: 'idle',
@@ -15,10 +19,34 @@ function agent(id: string, profile: string, displayName: string, isHost: boolean
 }
 
 describe('group host controls', () => {
+  it('keeps same-name Profiles distinct across paired Hermes nodes', async () => {
+    const local = profiles('default')[0]!
+    const remote = {
+      id: '11111111-1111-4111-8111-111111111111|default',
+      profile: 'default',
+      displayName: '远端夭夭',
+      nodeId: '11111111-1111-4111-8111-111111111111',
+      nodeLabel: 'MacBook Pro',
+    }
+    const wrapper = mount(CreateGroupDialog, {
+      attachTo: document.body,
+      props: { open: true, profiles: [local, remote], hostEnabled: true },
+      global: { stubs: { teleport: true } },
+    })
+    await wrapper.get('input[placeholder="例如：产品评审"]').setValue('跨节点群')
+    await wrapper.findAll('.agent-picker > button')[1]!.trigger('click')
+    await wrapper.get('.solid-button').trigger('click')
+    expect(wrapper.emitted('create')?.[0]?.[0]).toMatchObject({
+      members: [local, remote],
+      hostProfile: local.id,
+    })
+    wrapper.unmount()
+  })
+
   it('keeps one independent host selection when creating a v5 room', async () => {
     const wrapper = mount(CreateGroupDialog, {
       attachTo: document.body,
-      props: { open: true, profiles: ['yaoyao', 'yaoer'], hostEnabled: true },
+      props: { open: true, profiles: profiles('yaoyao', 'yaoer'), hostEnabled: true },
       global: { stubs: { teleport: true } },
     })
     await nextTick()
@@ -26,16 +54,16 @@ describe('group host controls', () => {
     const profileButtons = wrapper.findAll('.agent-picker > button')
     await profileButtons[1]!.trigger('click')
     const host = wrapper.get<HTMLSelectElement>('select[aria-label="主持人"]')
-    await host.setValue('yaoer')
+    await host.setValue('local|yaoer')
     await profileButtons[1]!.trigger('click')
-    expect(host.element.value).toBe('yaoyao')
+    expect(host.element.value).toBe('local|yaoyao')
     await profileButtons[1]!.trigger('click')
-    await host.setValue('yaoer')
+    await host.setValue('local|yaoer')
     expect(wrapper.get<HTMLInputElement>('input[aria-label="所有成员无需 @ 也回复"]').element.checked).toBe(true)
     await wrapper.get('.solid-button').trigger('click')
 
     expect(wrapper.emitted('create')?.[0]?.[0]).toEqual({
-      name: '主持人验收', profiles: ['yaoyao', 'yaoer'], hostProfile: 'yaoer', autoReply: true, replyRounds: 3,
+      name: '主持人验收', members: profiles('yaoyao', 'yaoer'), hostProfile: 'local|yaoer', autoReply: true, replyRounds: 3,
     })
     wrapper.unmount()
   })
@@ -43,7 +71,7 @@ describe('group host controls', () => {
   it('keeps the legacy v4 create UI and payload free of host fields', async () => {
     const wrapper = mount(CreateGroupDialog, {
       attachTo: document.body,
-      props: { open: true, profiles: ['yaoyao'], hostEnabled: false },
+      props: { open: true, profiles: profiles('yaoyao'), hostEnabled: false },
       global: { stubs: { teleport: true } },
     })
     await nextTick()
@@ -62,7 +90,7 @@ describe('group host controls', () => {
       attachTo: document.body,
       props: {
         open: true,
-        profiles: ['yaoyao', 'yaoer'],
+        profiles: profiles('yaoyao', 'yaoer'),
         hostEnabled: true,
         hostFlowEnabled: true,
         roomInstructionsEnabled: true,

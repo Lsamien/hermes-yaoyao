@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | Git 发布标签 | `v0.1.0` | `git describe --tags --exact-match HEAD` |
 | 夭夭 Web | `0.1.0` | `package.json` 的 `version` |
-| Hermes Dashboard 插件 | `1.6.1` | `hermes-plugins/yaoyao/dashboard/manifest.json` 的 `version` |
+| Hermes Dashboard 插件 | `1.7.0` | `hermes-plugins/yaoyao/dashboard/manifest.json` 的 `version` |
 
 以下步骤以仓库根目录为工作目录。不要使用浮动分支替代发布标签。
 
@@ -87,7 +87,7 @@ git checkout "$RELEASE_VERSION"
 
 test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_VERSION"
 test "$(node -p \"require('./package.json').version\")" = "0.1.0"
-test "$(node -e \"console.log(require('./hermes-plugins/yaoyao/dashboard/manifest.json').version)\")" = "1.6.1"
+test "$(node -e \"console.log(require('./hermes-plugins/yaoyao/dashboard/manifest.json').version)\")" = "1.7.0"
 ```
 
 这会进入 detached HEAD 状态，属于部署发布版本的预期行为。若 Agent 负责修改代码，应另行创建工作分支，不要在此发布检出上修改。
@@ -116,7 +116,7 @@ test -f "$PLUGIN_DIR/manifest.json"
 test -f "$PLUGIN_DIR/plugin_api.py"
 test -f "$PLUGIN_DIR/group_plugin_api.py"
 test -f "$PLUGIN_DIR/dist/index.js"
-test "$(node -e \"console.log(require(process.argv[1]).version)\" "$PLUGIN_DIR/manifest.json")" = "1.6.1"
+test "$(node -e \"console.log(require(process.argv[1]).version)\" "$PLUGIN_DIR/manifest.json")" = "1.7.0"
 ```
 
 `rsync --delete` 的范围严格限于 `$PLUGIN_DIR`，不会删除其他 Hermes 插件或用户数据。若目标目录已有额外的本机定制文件，应先将其移出目录或改用不带 `--delete` 的同步命令。

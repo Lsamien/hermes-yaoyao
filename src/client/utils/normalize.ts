@@ -350,7 +350,10 @@ export function normalizeGroupAgent(value: unknown): GroupAgent {
   const rawFastMode = pick(source, 'fastMode', 'fast_mode')
   return {
     id: string(source.id), roomId: string(pick(source, 'roomId', 'room_id')),
-    profile: string(source.profile), displayName: string(pick(source, 'displayName', 'display_name'), string(source.profile)),
+    profile: string(source.profile),
+    nodeId: string(pick(source, 'nodeId', 'node_id'), 'local'),
+    nodeLabel: string(pick(source, 'nodeLabel', 'node_label')),
+    displayName: string(pick(source, 'displayName', 'display_name'), string(source.profile)),
     description: string(source.description), storedSessionId: string(pick(source, 'storedSessionId', 'stored_session_id')) || null,
     lastContextMessageSeq: number(pick(source, 'lastContextMessageSeq', 'last_context_message_seq')),
     enabled: bool(source.enabled, true), replyWithoutMention: bool(pick(source, 'replyWithoutMention', 'reply_without_mention')),

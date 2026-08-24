@@ -28,6 +28,7 @@ function selectProfile(label: string) { auth.selectProfile(profileNameMap.value.
 <template>
   <WorkspaceShell
     :user-name="userName"
+    :pairing-user-name="auth.user?.username || ''"
     :profile-name="auth.activeProfile?.agentName || auth.activeProfile?.displayName || profileName"
     :profiles="profileNames"
     :theme="theme.resolvedTheme"

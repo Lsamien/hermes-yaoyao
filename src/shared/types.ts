@@ -241,7 +241,7 @@ export interface GroupLimits {
 }
 
 export const MIN_SUPPORTED_GROUP_PROTOCOL_VERSION = 2
-export const MAX_SUPPORTED_GROUP_PROTOCOL_VERSION = 10
+export const MAX_SUPPORTED_GROUP_PROTOCOL_VERSION = 11
 export const SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL = `v${MIN_SUPPORTED_GROUP_PROTOCOL_VERSION}–v${MAX_SUPPORTED_GROUP_PROTOCOL_VERSION}`
 
 export function isSupportedGroupProtocolVersion(value: number): boolean {
@@ -266,6 +266,8 @@ export interface GroupAgent {
   id: string
   roomId: string
   profile: string
+  nodeId: string
+  nodeLabel: string
   displayName: string
   description: string
   storedSessionId?: string | null
@@ -280,6 +282,22 @@ export interface GroupAgent {
   createdAt: number
   updatedAt: number
   status: GroupAgentStatus
+}
+
+export interface GroupNodeProfile {
+  name: string
+  displayName: string
+  model: string
+}
+
+export interface GroupNode {
+  nodeId: string
+  name: string
+  serverUrl: string
+  fingerprint: string
+  createdAt: number
+  updatedAt: number
+  profiles: GroupNodeProfile[]
 }
 
 export interface GroupMessage {

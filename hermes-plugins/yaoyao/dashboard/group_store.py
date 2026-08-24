@@ -44,7 +44,7 @@ from .group_protocol import (
 )
 
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 _WAL_RETRY_DELAYS = (0.01, 0.02, 0.04, 0.08)
 EVENT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MIN_RETAINED_EVENTS = 100_000
@@ -137,6 +137,9 @@ _SCHEMA_STATEMENTS = (
         id TEXT PRIMARY KEY,
         room_id TEXT NOT NULL REFERENCES group_rooms(id) ON DELETE CASCADE,
         profile TEXT NOT NULL,
+        node_id TEXT NOT NULL DEFAULT 'local',
+        node_label TEXT NOT NULL DEFAULT '',
+        execution_profile TEXT,
         display_name TEXT NOT NULL,
         display_name_key TEXT NOT NULL,
         description TEXT NOT NULL DEFAULT '',
@@ -499,6 +502,9 @@ class GroupStore:
             raw_version = "11"
         if raw_version == "11":
             self._migrate_v11_to_v12(connection)
+            raw_version = "12"
+        if raw_version == "12":
+            self._migrate_v12_to_v13(connection)
         self._validated_schema_version(
             self._metadata_value_from_connection(connection, "schema_version")
         )
@@ -1245,12 +1251,36 @@ class GroupStore:
         )
 
     @staticmethod
+    def _migrate_v12_to_v13(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(group_agents)")
+        }
+        if "node_id" not in columns:
+            connection.execute(
+                "ALTER TABLE group_agents ADD COLUMN node_id "
+                "TEXT NOT NULL DEFAULT 'local'"
+            )
+        if "execution_profile" not in columns:
+            connection.execute(
+                "ALTER TABLE group_agents ADD COLUMN execution_profile TEXT"
+            )
+        if "node_label" not in columns:
+            connection.execute(
+                "ALTER TABLE group_agents ADD COLUMN node_label "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+        connection.execute(
+            "UPDATE group_meta SET value = '13' WHERE key = 'schema_version'"
+        )
+
+    @staticmethod
     def _validate_v8_columns(connection: sqlite3.Connection) -> None:
         expected_columns = {
             "group_meta": {"key", "value"},
             "group_rooms": {"id", "name", "cwd", "instructions", "max_reply_rounds", "orchestration_mode", "created_at", "updated_at", "archived"},
             "group_topics": {"id", "room_id", "title", "last_read_message_seq", "created_at", "updated_at", "archived", "pinned"},
-            "group_agents": {"id", "room_id", "profile", "display_name", "display_name_key", "description", "stored_session_id", "last_context_message_seq", "enabled", "reply_without_mention", "is_host", "model_override", "provider_override", "reasoning_effort_override", "fast_mode_override", "session_config_json", "created_at", "updated_at"},
+            "group_agents": {"id", "room_id", "profile", "node_id", "node_label", "execution_profile", "display_name", "display_name_key", "description", "stored_session_id", "last_context_message_seq", "enabled", "reply_without_mention", "is_host", "model_override", "provider_override", "reasoning_effort_override", "fast_mode_override", "session_config_json", "created_at", "updated_at"},
             "group_agent_topic_state": {"agent_id", "topic_id", "last_context_message_seq", "created_at", "updated_at"},
             "group_messages": {"seq", "id", "room_id", "topic_id", "sender_kind", "sender_id", "sender_name", "root_message_id", "reply_to_message_id", "client_message_id", "content", "reasoning", "tool_state_json", "status", "error", "visible", "created_at", "updated_at"},
             "group_agent_runs": {"id", "room_id", "topic_id", "agent_id", "trigger_message_id", "response_message_id", "root_message_id", "depth", "reply_mode", "required_reply", "status", "runtime_session_id", "requested_model", "requested_provider", "requested_reasoning_effort", "requested_fast_mode", "actual_model", "actual_provider", "actual_reasoning_effort", "actual_fast_mode", "error", "created_at", "updated_at"},
@@ -1264,6 +1294,8 @@ class GroupStore:
             ("group_rooms", "instructions"): ("TEXT", 1, "''"),
             ("group_agents", "reply_without_mention"): ("INTEGER", 1, "0"),
             ("group_agents", "is_host"): ("INTEGER", 1, "0"),
+            ("group_agents", "node_id"): ("TEXT", 1, "'local'"),
+            ("group_agents", "node_label"): ("TEXT", 1, "''"),
             ("group_messages", "visible"): ("INTEGER", 1, "1"),
             ("group_agent_runs", "reply_mode"): ("TEXT", 1, "'mentioned'"),
             ("group_agent_runs", "required_reply"): ("INTEGER", 1, "0"),
@@ -1315,6 +1347,15 @@ class GroupStore:
                 LIMIT 1""",
             """SELECT 1 FROM group_agents
                 WHERE typeof(is_host) != 'integer' OR is_host NOT IN (0, 1)
+                LIMIT 1""",
+            """SELECT 1 FROM group_agents
+                WHERE typeof(node_id) != 'text'
+                   OR typeof(node_label) != 'text'
+                   OR length(node_label) > 100
+                   OR (node_id = 'local' AND execution_profile IS NOT NULL)
+                   OR (node_id != 'local' AND
+                       (execution_profile IS NULL
+                        OR profile != 'node:' || node_id || ':' || execution_profile))
                 LIMIT 1""",
             """SELECT 1 FROM group_rooms AS room
                 LEFT JOIN group_agents AS agent ON agent.room_id = room.id
@@ -6687,11 +6728,21 @@ class GroupStore:
             command,
             {
                 "profile", "displayName", "description", "replyWithoutMention",
-                "isHost",
+                "isHost", "nodeId", "nodeLabel",
                 "model", "provider", "reasoningEffort", "fastMode",
             },
         )
-        profile = self._profile(command.get("profile"))
+        execution_profile = self._profile(command.get("profile"))
+        node_id = self._node_id(command.get("nodeId", "local"))
+        profile = (
+            execution_profile
+            if node_id == "local"
+            else f"node:{node_id}:{execution_profile}"
+        )
+        node_label = command.get("nodeLabel", "")
+        if not isinstance(node_label, str) or len(node_label) > 100:
+            raise ValueError("nodeLabel must be a string up to 100 characters")
+        node_label = " ".join(node_label.split())
         raw_name = command.get("displayName")
         explicit_name = (
             raw_name.strip()
@@ -6699,7 +6750,13 @@ class GroupStore:
             else ""
         )
         display_name, display_name_key = normalize_display_name(
-            explicit_name or self._resolved_agent_name(profile) or profile
+            explicit_name
+            or (
+                self._resolved_agent_name(execution_profile)
+                if node_id == "local"
+                else ""
+            )
+            or execution_profile
         )
         reply_without_mention = command.get("replyWithoutMention", False)
         if not isinstance(reply_without_mention, bool):
@@ -6714,6 +6771,11 @@ class GroupStore:
             raise ValueError("model and provider must both be set or both be null")
         return {
             "profile": profile,
+            "node_id": node_id,
+            "node_label": node_label,
+            "execution_profile": (
+                None if node_id == "local" else execution_profile
+            ),
             "display_name": display_name,
             "display_name_key": display_name_key,
             "description": self._description(command.get("description", "")),
@@ -6767,14 +6829,18 @@ class GroupStore:
         agent_id = str(uuid.uuid4())
         connection.execute(
             """INSERT INTO group_agents
-            (id, room_id, profile, display_name, display_name_key, description,
+            (id, room_id, profile, node_id, node_label, execution_profile,
+             display_name, display_name_key, description,
              reply_without_mention, is_host, model_override, provider_override,
              reasoning_effort_override, fast_mode_override, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 agent_id,
                 room_id,
                 agent["profile"],
+                agent["node_id"],
+                agent["node_label"],
+                agent["execution_profile"],
                 agent["display_name"],
                 agent["display_name_key"],
                 agent["description"],
@@ -6881,7 +6947,9 @@ class GroupStore:
         return {
             "id": row["id"],
             "roomId": row["room_id"],
-            "profile": row["profile"],
+            "profile": row["execution_profile"] or row["profile"],
+            "nodeId": row["node_id"],
+            "nodeLabel": row["node_label"],
             "displayName": row["display_name"],
             "description": row["description"],
             "storedSessionId": row["stored_session_id"],
@@ -7062,6 +7130,21 @@ class GroupStore:
         if not 1 <= len(profile) <= 100:
             raise ValueError("profile must contain 1 to 100 characters")
         return profile
+
+    @staticmethod
+    def _node_id(value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError("nodeId must be a string")
+        normalized = value.strip().lower()
+        if normalized == "local":
+            return normalized
+        try:
+            canonical = str(uuid.UUID(normalized))
+        except ValueError as error:
+            raise ValueError("nodeId must be local or a canonical UUID") from error
+        if canonical != normalized:
+            raise ValueError("nodeId must be local or a canonical UUID")
+        return canonical
 
     @staticmethod
     def _description(value: object) -> str:

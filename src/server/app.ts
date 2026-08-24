@@ -9,6 +9,7 @@ import type { ServerConfig } from './config.js'
 import { loadServerConfig } from './config.js'
 import { errorMessage, HttpError } from './errors.js'
 import { RealtimeLeaseStore } from './leases.js'
+import { NodePairingStore } from './pairing.js'
 import { createApiRouter } from './routes.js'
 import {
   applySecurityHeaders,
@@ -25,6 +26,7 @@ export interface ApplicationOptions {
   fetchImpl?: typeof fetch
   csrfSecret?: Buffer
   leases?: RealtimeLeaseStore
+  pairings?: NodePairingStore
   uploads?: UploadStore
 }
 
@@ -33,6 +35,7 @@ export interface ApplicationRuntime {
   config: ServerConfig
   csrf: CsrfProtection
   leases: RealtimeLeaseStore
+  pairings: NodePairingStore
   upstream: UpstreamClient
   uploads: UploadStore
   close(): void
@@ -71,6 +74,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
   app.proxy = false
   const csrf = new CsrfProtection(persistentCsrfSecret(config.home, options.csrfSecret), Boolean(config.tlsCert))
   const leases = options.leases ?? new RealtimeLeaseStore()
+  const pairings = options.pairings ?? new NodePairingStore(config.home)
   const upstream = new UpstreamClient(config.upstream, options.fetchImpl, Boolean(config.tlsCert))
   const uploads = options.uploads ?? new UploadStore(config.home)
   try {
@@ -134,7 +138,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     },
   }))
 
-  const router = createApiRouter({ config, csrf, upstream, leases, uploads })
+  const router = createApiRouter({ config, csrf, upstream, leases, pairings, uploads })
   app.use(router.routes())
   app.use(router.allowedMethods({ throw: false }))
   app.use(async (ctx, next) => {
@@ -152,6 +156,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     config,
     csrf,
     leases,
+    pairings,
     upstream,
     uploads,
     close: () => uploads.close(),
@@ -171,7 +176,12 @@ export function createNodeServer(runtime: ApplicationRuntime): NodeServerRuntime
         key: readFileSync(config.tlsKey),
       }, runtime.app.callback())
     : createHttpServer(runtime.app.callback())
-  const removeWebSockets = installWebSocketRelay(server, config, runtime.leases)
+  const removeWebSockets = installWebSocketRelay(
+    server,
+    config,
+    runtime.leases,
+    runtime.pairings,
+  )
   return {
     server,
     close: async () => {

@@ -34,7 +34,7 @@ def new_id() -> str:
 
 class GroupHostContractTests(unittest.TestCase):
     def test_protocol_v5_host_fields_are_independent_and_compatible(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 10)
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 11)
         legacy = PROTOCOL.CreateRoomRequest.model_validate({
             "requestId": new_id(),
             "name": "兼容群",
@@ -496,7 +496,7 @@ class GroupHostContractTests(unittest.TestCase):
 
             migrated = GroupStore(path)
             migrated.initialize()
-            self.assertEqual(migrated.schema_version(), 12)
+            self.assertEqual(migrated.schema_version(), 13)
             self.assertTrue(
                 all(
                     room["orchestrationMode"] == "free"
@@ -881,7 +881,7 @@ class GroupHostContractTests(unittest.TestCase):
 
             migrated = GroupStore(path)
             migrated.initialize()
-            self.assertEqual(migrated.schema_version(), 12)
+            self.assertEqual(migrated.schema_version(), 13)
             self.assertEqual(
                 migrated.get_room(room["id"])["orchestrationMode"], "free"
             )

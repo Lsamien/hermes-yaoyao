@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/common/AppIcon.vue'
 import BrandMark from '@/components/common/BrandMark.vue'
+import NodePairingDialog from '@/components/app/NodePairingDialog.vue'
 import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 
 type NavItem = {
@@ -18,6 +19,7 @@ const SIDEBAR_SEARCH_CLOSE_EVENT = 'hermes-yaoyao:sidebar-search-close'
 
 const props = withDefaults(defineProps<{
   userName?: string
+  pairingUserName?: string
   profileName?: string
   profiles?: string[]
   theme?: 'light' | 'dark'
@@ -29,6 +31,7 @@ const props = withDefaults(defineProps<{
   inspectorCloseLabel?: string
 }>(), {
   userName: '',
+  pairingUserName: '',
   profileName: '',
   profiles: () => [],
   theme: 'light',
@@ -53,6 +56,7 @@ const mobileDrawerOpen = ref(false)
 const profileMenuOpen = ref(false)
 const sidebarCollapsed = ref(false)
 const sidebarSearchOpen = ref(false)
+const nodePairingOpen = ref(false)
 const desktopSidebarContext = ref<HTMLElement | null>(null)
 const mobileSidebarContext = ref<HTMLElement | null>(null)
 
@@ -257,6 +261,9 @@ onBeforeUnmount(() => {
           <button class="sidebar-account__utility" type="button" :title="theme === 'dark' ? '切换浅色主题' : '切换深色主题'" @click="emit('toggleTheme')">
             <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="17" />
           </button>
+          <button class="sidebar-account__utility" type="button" title="手机与节点" aria-label="手机与节点" @click="nodePairingOpen = true">
+            <AppIcon name="users" :size="17" />
+          </button>
           <Transition name="menu-fade">
             <div v-if="profileMenuOpen" class="profile-menu">
               <button
@@ -363,6 +370,9 @@ onBeforeUnmount(() => {
           <button class="sidebar-account__utility" type="button" :title="theme === 'dark' ? '切换浅色主题' : '切换深色主题'" @click="emit('toggleTheme')">
             <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="17" />
           </button>
+          <button class="sidebar-account__utility" type="button" title="手机与节点" aria-label="手机与节点" @click="nodePairingOpen = true; mobileDrawerOpen = false">
+            <AppIcon name="users" :size="17" />
+          </button>
           <Transition name="menu-fade">
             <div v-if="profileMenuOpen" class="profile-menu">
               <button
@@ -399,6 +409,8 @@ onBeforeUnmount(() => {
         <slot name="inspector" />
       </aside>
     </Transition>
+
+    <NodePairingDialog :open="nodePairingOpen" :insecure-transport="insecureTransport" :user-name="pairingUserName || userName" @close="nodePairingOpen = false" />
   </div>
 </template>
 
