@@ -17,4 +17,5 @@ export type UiRoom = {
   memberIds?: string[]
   autoReply?: boolean
   replyRounds?: number
+  orchestrationMode?: 'free' | 'host'
 }

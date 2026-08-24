@@ -35,6 +35,7 @@ const props = withDefaults(defineProps<{
   room: UiRoom
   agents: GroupAgent[]
   hostEnabled?: boolean
+  hostFlowEnabled?: boolean
   availableProfiles?: string[]
   modelOptionsByProfile?: Record<string, ModelOption[]>
   modelOptionsLoading?: Record<string, boolean>
@@ -42,7 +43,7 @@ const props = withDefaults(defineProps<{
   agentUpdateError?: Record<string, string>
   managerError?: string
   busy?: boolean
-}>(), { hostEnabled: false, busy: false })
+}>(), { hostEnabled: false, hostFlowEnabled: false, busy: false })
 
 const emit = defineEmits<{
   updateRoom: [patch: Partial<UiRoom>]
@@ -55,12 +56,17 @@ const emit = defineEmits<{
   archiveRoom: []
 }>()
 
-const form = reactive({ name: props.room.name, replyRounds: props.room.replyRounds ?? 3 })
+const form = reactive({
+  name: props.room.name,
+  replyRounds: props.room.replyRounds ?? 3,
+  orchestrationMode: props.room.orchestrationMode ?? 'free' as 'free' | 'host',
+})
 const expandedAgentId = ref('')
 const agentDrafts = reactive<Record<string, AgentDraft>>({})
 const dirtyAgents = reactive(new Set<string>())
 const selectedAgent = computed(() => props.agents.find(agent => agent.id === expandedAgentId.value))
 const hostAgent = computed(() => props.agents.find(agent => agent.isHost))
+const hasActiveAgents = computed(() => props.agents.some(agent => ['queued', 'running', 'awaiting_input'].includes(agent.status)))
 
 function modelKey(provider?: string | null, model?: string | null): string {
   return provider && model ? JSON.stringify([provider, model]) : ''
@@ -92,6 +98,7 @@ function draftFrom(agent: GroupAgent): AgentDraft {
 watch(() => props.room, room => {
   form.name = room.name
   form.replyRounds = room.replyRounds ?? 3
+  form.orchestrationMode = room.orchestrationMode ?? 'free'
 }, { deep: true })
 
 watch(() => props.agents, agents => {
@@ -113,6 +120,7 @@ function saveRoom() {
   emit('updateRoom', {
     name: form.name.trim() || props.room.name,
     replyRounds: replyRounds === -1 ? -1 : Math.min(100, Math.max(1, replyRounds || 1)),
+    ...(props.hostFlowEnabled ? { orchestrationMode: form.orchestrationMode } : {}),
   })
 }
 
@@ -207,6 +215,13 @@ function statusLabel(status: GroupAgent['status']): string {
       <h3>房间</h3>
       <label><span>名称</span><input v-model="form.name" maxlength="80" @change="saveRoom" /></label>
       <label class="rounds"><span>最多回复轮数<small>-1 表示无限</small></span><input v-model.number="form.replyRounds" type="number" min="-1" max="100" aria-label="最多回复轮数" @change="saveRoom" /></label>
+      <label v-if="hostFlowEnabled" class="flow-mode">
+        <span>协作模式<small>主持流程会逐步调度，每轮只允许一位成员执行。</small></span>
+        <select v-model="form.orchestrationMode" aria-label="协作模式" :disabled="busy || hasActiveAgents" :title="hasActiveAgents ? '请等待当前回复完成或先中断 Agent' : ''" @change="saveRoom">
+          <option value="free">自由讨论</option>
+          <option value="host">主持流程</option>
+        </select>
+      </label>
     </section>
 
     <section>
@@ -285,7 +300,7 @@ function statusLabel(status: GroupAgent['status']): string {
             <label><input v-model="agentDrafts[selectedAgent.id].enabled" type="checkbox" aria-label="启用" @change="markDirty(selectedAgent.id)" />启用</label>
             <label><input v-model="agentDrafts[selectedAgent.id].replyWithoutMention" type="checkbox" :aria-label="hostEnabled ? '无需 @ 也回复' : '自动回复'" @change="markDirty(selectedAgent.id)" />{{ hostEnabled ? '无需 @ 也回复' : '自动回复' }}</label>
           </div>
-          <p v-if="hostEnabled" class="host-explanation">{{ selectedAgent.isHost ? '主持人始终处理用户无 @ 消息；此开关仅决定是否自动参与 Agent 发出的无 @ 消息。' : '开启后，该成员会自动参与未明确 @ 的消息；用户无 @ 消息仍由主持人兜底。' }}</p>
+          <p v-if="hostEnabled" class="host-explanation">{{ form.orchestrationMode === 'host' ? '主持流程下此开关暂不触发自动并发；切回自由讨论后继续按原设置生效。' : (selectedAgent.isHost ? '主持人始终处理用户无 @ 消息；此开关仅决定是否自动参与 Agent 发出的无 @ 消息。' : '开启后，该成员会自动参与未明确 @ 的消息；用户无 @ 消息仍由主持人兜底。') }}</p>
           <p v-if="agentUpdateError?.[selectedAgent.id]" class="agent-save-error" role="alert">{{ agentUpdateError[selectedAgent.id] }}</p>
           <div class="editor-actions">
             <button class="quiet-button" type="button" :disabled="busy || !hasAgentChanges(selectedAgent)" @click="resetAgent(selectedAgent)">取消更改</button>
@@ -306,6 +321,7 @@ h3 { margin: 0 0 13px; color: var(--text-secondary); font-size: 10px; font-weigh
 label { display: flex; flex-direction: column; gap: 5px; margin: 0 0 11px; color: var(--text-muted); font-size: 10px; }
 input, textarea, select { width: 100%; padding: 8px 9px; border: 1px solid var(--line); border-radius: 9px; outline: 0; resize: vertical; background: var(--surface-soft); color: var(--text-primary); font-size: 11px; } input:focus, textarea:focus, select:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }
 .rounds { flex-direction: row; align-items: center; justify-content: space-between; }.rounds > span { display: flex; flex-direction: column; gap: 2px; }.rounds small { color: var(--text-muted); font-size: 9px; }.rounds input { width: 62px; text-align: center; }
+.flow-mode { display: grid; grid-template-columns: minmax(0, 1fr) 128px; align-items: center; gap: 10px; }.flow-mode > span { display: flex; flex-direction: column; gap: 2px; color: var(--text-secondary); font-weight: 650; }.flow-mode small { color: var(--text-muted); font-size: 9px; font-weight: 400; line-height: 1.4; }.flow-mode select { margin: 0; padding: 7px 8px; background: var(--surface); }
 .host-selector { display: grid; grid-template-columns: minmax(0, 1fr) 128px; align-items: center; gap: 10px; margin-bottom: 10px; padding: 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }.host-selector > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; color: var(--text-secondary); font-weight: 650; }.host-selector small { color: var(--text-muted); font-size: 9px; font-weight: 400; line-height: 1.4; }.host-selector select { padding: 7px 8px; background: var(--surface); }
 .agent-list { display: flex; flex-direction: column; gap: 7px; }.agent-list article { display: grid; grid-template-columns: 32px minmax(0,1fr) repeat(3, 28px); align-items: center; gap: 7px; padding: 8px; border: 1px solid transparent; border-radius: 10px; background: var(--surface-soft); }
 .agent-avatar { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--accent); color: var(--text-on-solid); font-size: 10px; font-weight: 700; }.agent-avatar i { position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; border: 2px solid var(--surface-soft); border-radius: 50%; background: var(--text-muted); }.agent-avatar .status-running, .agent-avatar .status-queued { background: var(--warning); }.agent-avatar .status-idle { background: var(--success); }.agent-avatar .status-awaiting_input { background: var(--warning); }

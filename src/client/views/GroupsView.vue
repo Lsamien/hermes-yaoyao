@@ -152,7 +152,8 @@ const mentionOptions = computed<ComposerOption[]>(() => [
 const roomSubtitle = computed(() => {
   if (!groups.selectedRoom) return '选择或新建一个群聊'
   const host = hostAgent.value ? `主持人 ${hostAgent.value.displayName || hostAgent.value.profile} · ` : ''
-  return `${groups.selectedRoom.name} · ${host}${groups.agents.length} 个 Agent · 最多 ${groups.selectedRoom.maxReplyRounds} 轮回复`
+  const mode = groups.selectedRoom.orchestrationMode === 'host' ? '主持流程 · ' : ''
+  return `${groups.selectedRoom.name} · ${mode}${host}${groups.agents.length} 个 Agent · 最多 ${groups.selectedRoom.maxReplyRounds} 轮回复`
 })
 const activeAgentIds = computed(() => {
   if (!groups.topicProtocol) {
@@ -313,7 +314,7 @@ async function startTopicFromRoomAction() {
   } catch { /* store publishes the error */ }
 }
 
-async function createRoom(payload: { name: string; profiles: string[]; autoReply: boolean; replyRounds: number; hostProfile?: string }) {
+async function createRoom(payload: { name: string; profiles: string[]; autoReply: boolean; replyRounds: number; hostProfile?: string; orchestrationMode?: 'free' | 'host' }) {
   const hostProfile = payload.hostProfile || payload.profiles[0]
   const detail = await groups.createRoom({
     name: payload.name,
@@ -324,6 +325,7 @@ async function createRoom(payload: { name: string; profiles: string[]; autoReply
       ...(groups.hostProtocol ? { isHost: profile === hostProfile } : {}),
     })),
     maxReplyRounds: payload.replyRounds,
+    ...(groups.hostFlowProtocol ? { orchestrationMode: payload.orchestrationMode ?? 'free' } : {}),
   })
   createOpen.value = false
   await router.push(groupRoute(detail.id, groups.selectedTopicId))
@@ -338,9 +340,13 @@ async function send(payload: ComposerSubmit) {
   } catch { /* store publishes the error */ }
 }
 
-async function updateRoom(patch: { name?: string; replyRounds?: number }) {
+async function updateRoom(patch: { name?: string; replyRounds?: number; orchestrationMode?: 'free' | 'host' }) {
   if (!groups.selectedRoom) return
-  await groups.updateRoom(groups.selectedRoom.id, { name: patch.name, maxReplyRounds: patch.replyRounds })
+  await groups.updateRoom(groups.selectedRoom.id, {
+    name: patch.name,
+    maxReplyRounds: patch.replyRounds,
+    ...(groups.hostFlowProtocol ? { orchestrationMode: patch.orchestrationMode } : {}),
+  })
 }
 
 async function addAgent(profile: string) {
@@ -628,6 +634,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :room="room"
         :agents="groups.agents"
         :host-enabled="groups.hostProtocol"
+        :host-flow-enabled="groups.hostFlowProtocol"
         :available-profiles="availableProfiles"
         :busy="managerBusy"
         :model-options-by-profile="modelOptionsByProfile"
@@ -648,7 +655,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
   </WorkspaceView>
 
   <FloatingResourceSearch section="groups" label="搜索群聊" :items="roomSidebarItems" @select="selectRoom" />
-  <CreateGroupDialog :open="createOpen" :profiles="profiles" :host-enabled="groups.hostProtocol" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
+  <CreateGroupDialog :open="createOpen" :profiles="profiles" :host-enabled="groups.hostProtocol" :host-flow-enabled="groups.hostFlowProtocol" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
   <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="addPreviewToComposer" @source="preview = null" />
   <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" :can-add="uploadsEnabled" @add="addMediaToComposer" />
 

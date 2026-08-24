@@ -248,7 +248,14 @@ export function agentToUi(agent: GroupAgent): UiAgent {
 }
 
 export function roomToUi(room: GroupRoomDetail): UiRoom {
-  return { id: room.id, name: room.name, archived: room.archived, memberIds: room.agents.map(agent => agent.id), replyRounds: room.maxReplyRounds }
+  return {
+    id: room.id,
+    name: room.name,
+    archived: room.archived,
+    memberIds: room.agents.map(agent => agent.id),
+    replyRounds: room.maxReplyRounds,
+    orchestrationMode: room.orchestrationMode,
+  }
 }
 
 export function fileToUi(item: FileLibraryItem): UiLibraryItem {

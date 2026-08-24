@@ -268,7 +268,7 @@ class GroupTopicsContractTests(unittest.TestCase):
             migrated = GroupStore(path)
             migrated.initialize()
 
-            self.assertEqual(migrated.schema_version(), 10)
+            self.assertEqual(migrated.schema_version(), 11)
             with migrated.connection() as connection:
                 topic = connection.execute(
                     "SELECT * FROM group_topics WHERE id = ?", (topic_id,)
@@ -1504,7 +1504,7 @@ class GroupTopicsContractTests(unittest.TestCase):
 
             store = GroupStore(path)
             store.initialize()
-            self.assertEqual(store.schema_version(), 10)
+            self.assertEqual(store.schema_version(), 11)
             with store.connection() as migrated:
                 room = migrated.execute("SELECT * FROM group_rooms").fetchone()
                 agent = migrated.execute("SELECT * FROM group_agents").fetchone()
@@ -1529,7 +1529,9 @@ class GroupTopicsContractTests(unittest.TestCase):
                         (failed_interaction_request,),
                     ).fetchone()[0]
                 )
-            self.assertEqual(dict(room), expected_room)
+            self.assertEqual(
+                dict(room), {**expected_room, "orchestration_mode": "free"}
+            )
             self.assertEqual(dict(agent), {**expected_agent, "is_host": 1})
             self.assertEqual(
                 (room["name"], room["max_reply_rounds"], room["archived"]),

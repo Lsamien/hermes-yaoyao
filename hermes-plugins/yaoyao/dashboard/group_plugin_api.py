@@ -993,6 +993,8 @@ def _create_room_command(request: CreateRoomRequest) -> dict[str, object]:
     command = _command(request)
     if "max_reply_rounds" not in request.model_fields_set:
         command.pop("maxReplyRounds", None)
+    if "orchestration_mode" not in request.model_fields_set:
+        command.pop("orchestrationMode", None)
     agents = command.get("agents")
     if isinstance(agents, list):
         for seed, item in zip(request.agents, agents):
@@ -1048,6 +1050,7 @@ async def capabilities() -> dict[str, object]:
         "latestCursor": latest_cursor,
         "limits": limits_payload(),
         "eventTypes": sorted(EVENT_TYPES),
+        "features": ["hostFlow"],
     }
 
 

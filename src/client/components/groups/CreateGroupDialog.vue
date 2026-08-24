@@ -8,10 +8,12 @@ interface CreateGroupPayload {
   autoReply: boolean
   replyRounds: number
   hostProfile?: string
+  orchestrationMode?: 'free' | 'host'
 }
 
-const props = withDefaults(defineProps<{ open: boolean; profiles: string[]; hostEnabled?: boolean; busy?: boolean }>(), {
+const props = withDefaults(defineProps<{ open: boolean; profiles: string[]; hostEnabled?: boolean; hostFlowEnabled?: boolean; busy?: boolean }>(), {
   hostEnabled: false,
+  hostFlowEnabled: false,
   busy: false,
 })
 const emit = defineEmits<{ close: []; create: [payload: CreateGroupPayload] }>()
@@ -21,6 +23,7 @@ const selected = ref<string[]>([])
 const hostProfile = ref('')
 const autoReply = ref(true)
 const replyRounds = ref(3)
+const orchestrationMode = ref<'free' | 'host'>('free')
 const valid = computed(() => name.value.trim().length > 0
   && selected.value.length >= 1
   && selected.value.length <= 8
@@ -33,6 +36,7 @@ watch(() => props.open, open => {
   hostProfile.value = selected.value[0] ?? ''
   autoReply.value = true
   replyRounds.value = 3
+  orchestrationMode.value = 'free'
 }, { immediate: true })
 
 function toggle(profile: string) {
@@ -50,6 +54,7 @@ function create() {
     replyRounds: replyRounds.value,
   }
   if (props.hostEnabled) payload.hostProfile = hostProfile.value
+  if (props.hostFlowEnabled) payload.orchestrationMode = orchestrationMode.value
   emit('create', payload)
 }
 </script>
@@ -74,8 +79,15 @@ function create() {
               <option v-for="profile in selected" :key="profile" :value="profile">{{ profile }}</option>
             </select>
           </label>
+          <label v-if="hostFlowEnabled" class="host-picker">
+            <span>协作模式<small>主持流程由主持人逐步选择下一位成员，避免多人并发造成上下文分叉。</small></span>
+            <select v-model="orchestrationMode" aria-label="协作模式">
+              <option value="free">自由讨论</option>
+              <option value="host">主持流程</option>
+            </select>
+          </label>
           <div class="dialog-settings">
-            <label><input v-model="autoReply" type="checkbox" :aria-label="hostEnabled ? '所有成员无需 @ 也回复' : '启用自动回复'" />{{ hostEnabled ? '所有成员无需 @ 也回复' : '启用自动回复' }}</label>
+            <label><input v-model="autoReply" type="checkbox" :aria-label="hostEnabled ? '所有成员无需 @ 也回复' : '启用自动回复'" />{{ hostEnabled ? (orchestrationMode === 'host' ? '自由讨论时无需 @ 也回复' : '所有成员无需 @ 也回复') : '启用自动回复' }}</label>
             <label>最多轮数 <input v-model.number="replyRounds" type="number" min="1" max="12" /></label>
           </div>
           <footer><button class="quiet-button" type="button" @click="emit('close')">取消</button><button class="solid-button" type="button" :disabled="!valid || busy" @click="create">{{ busy ? '创建中…' : '创建群聊' }}</button></footer>

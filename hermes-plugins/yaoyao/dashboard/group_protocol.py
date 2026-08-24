@@ -38,6 +38,7 @@ CONTEXT_CHARACTER_BUDGET = 32_000
 REASONING_EFFORTS = frozenset({
     "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
 })
+ORCHESTRATION_MODES = frozenset({"free", "host"})
 
 # These literals address the room as a whole and must never become a member
 # display-name or alias target.  Keep the stable wire spelling for existing
@@ -137,6 +138,9 @@ class CreateRoomRequest(GroupModel):
     max_reply_rounds: StrictInt = Field(
         default=DEFAULT_MAX_REPLY_ROUNDS, alias="maxReplyRounds"
     )
+    orchestration_mode: Literal["free", "host"] = Field(
+        default="free", alias="orchestrationMode"
+    )
     agents: list[AgentSeed] = Field(min_length=1, max_length=MAX_AGENTS_PER_ROOM)
 
     @field_validator("max_reply_rounds")
@@ -156,8 +160,13 @@ class UpdateRoomRequest(GroupModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     cwd: str | None = Field(default=None, max_length=4096)
     max_reply_rounds: StrictInt | None = Field(default=None, alias="maxReplyRounds")
+    orchestration_mode: Literal["free", "host"] | None = Field(
+        default=None, alias="orchestrationMode"
+    )
 
-    @field_validator("name", "cwd", "max_reply_rounds", mode="before")
+    @field_validator(
+        "name", "cwd", "max_reply_rounds", "orchestration_mode", mode="before"
+    )
     @classmethod
     def reject_explicit_null(cls, value: Any) -> Any:
         if value is None:
@@ -166,8 +175,13 @@ class UpdateRoomRequest(GroupModel):
 
     @model_validator(mode="after")
     def require_change(self) -> "UpdateRoomRequest":
-        if not ({"name", "cwd", "max_reply_rounds"} & self.model_fields_set):
-            raise ValueError("Room update requires name, cwd, or maxReplyRounds")
+        if not (
+            {"name", "cwd", "max_reply_rounds", "orchestration_mode"}
+            & self.model_fields_set
+        ):
+            raise ValueError(
+                "Room update requires name, cwd, maxReplyRounds, or orchestrationMode"
+            )
         return self
 
     @field_validator("max_reply_rounds")

@@ -52,6 +52,28 @@ describe('group host controls', () => {
     await wrapper.get('input[placeholder="例如：产品评审"]').setValue('v4 房间')
     await wrapper.get('.solid-button').trigger('click')
     expect(wrapper.emitted('create')?.[0]?.[0]).not.toHaveProperty('hostProfile')
+    expect(wrapper.emitted('create')?.[0]?.[0]).not.toHaveProperty('orchestrationMode')
+    wrapper.unmount()
+  })
+
+  it('offers host flow only when the server advertises the capability', async () => {
+    const wrapper = mount(CreateGroupDialog, {
+      attachTo: document.body,
+      props: {
+        open: true,
+        profiles: ['yaoyao', 'yaoer'],
+        hostEnabled: true,
+        hostFlowEnabled: true,
+      },
+      global: { stubs: { teleport: true } },
+    })
+    await wrapper.get('input[placeholder="例如：产品评审"]').setValue('顺序协作')
+    await wrapper.get<HTMLSelectElement>('select[aria-label="协作模式"]').setValue('host')
+    await wrapper.get('.solid-button').trigger('click')
+    expect(wrapper.emitted('create')?.[0]?.[0]).toMatchObject({
+      name: '顺序协作',
+      orchestrationMode: 'host',
+    })
     wrapper.unmount()
   })
 
@@ -97,5 +119,23 @@ describe('group host controls', () => {
     expect(removeHost.element.disabled).toBe(true)
     expect(removeHost.attributes('title')).toContain('已启用成员')
     expect(wrapper.get('[role="alert"]').text()).toBe('需要另一位已启用成员')
+  })
+
+  it('emits a room update when switching collaboration mode', async () => {
+    const first = agent('agent-1', 'yaoyao', '夭夭', true, false)
+    const wrapper = mount(GroupManager, {
+      props: {
+        room: { id: 'room-1', name: '群聊', memberIds: [first.id], replyRounds: 3, orchestrationMode: 'free' },
+        agents: [first],
+        hostEnabled: true,
+        hostFlowEnabled: true,
+      },
+    })
+    await wrapper.get<HTMLSelectElement>('select[aria-label="协作模式"]').setValue('host')
+    expect(wrapper.emitted('updateRoom')?.[0]?.[0]).toEqual({
+      name: '群聊',
+      replyRounds: 3,
+      orchestrationMode: 'host',
+    })
   })
 })

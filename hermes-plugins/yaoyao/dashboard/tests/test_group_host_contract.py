@@ -34,7 +34,7 @@ def new_id() -> str:
 
 class GroupHostContractTests(unittest.TestCase):
     def test_protocol_v5_host_fields_are_independent_and_compatible(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 8)
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 10)
         legacy = PROTOCOL.CreateRoomRequest.model_validate({
             "requestId": new_id(),
             "name": "兼容群",
@@ -61,6 +61,11 @@ class GroupHostContractTests(unittest.TestCase):
             "isHost": True,
         })
         self.assertIs(update.is_host, True)
+        flow = PROTOCOL.UpdateRoomRequest.model_validate({
+            "requestId": new_id(),
+            "orchestrationMode": "host",
+        })
+        self.assertEqual(flow.orchestration_mode, "host")
 
         with self.assertRaisesRegex(ValueError, "only one host"):
             PROTOCOL.CreateRoomRequest.model_validate({
@@ -491,7 +496,16 @@ class GroupHostContractTests(unittest.TestCase):
 
             migrated = GroupStore(path)
             migrated.initialize()
-            self.assertEqual(migrated.schema_version(), 8)
+            self.assertEqual(migrated.schema_version(), 11)
+            self.assertTrue(
+                all(
+                    room["orchestrationMode"] == "free"
+                    for room in (
+                        migrated.get_room(preferred_room["id"]),
+                        migrated.get_room(disabled_room["id"]),
+                    )
+                )
+            )
             with migrated.connection() as connection:
                 after_counts = {
                     table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -624,6 +638,7 @@ class GroupHostContractTests(unittest.TestCase):
             state = ORCHESTRATOR._RuntimeState(
                 run_id=new_id(),
                 room_id=new_id(),
+                topic_id=new_id(),
                 agent_id=new_id(),
                 runtime_id="runtime",
                 generation=1,
@@ -663,6 +678,155 @@ class GroupHostContractTests(unittest.TestCase):
             return store.upserts
 
         return await complete(clarify=False), await complete(clarify=True)
+
+    def test_host_flow_uses_one_turn_token_and_returns_members_to_host(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room({
+                "requestId": new_id(),
+                "name": "主持流程群",
+                "cwd": "",
+                "orchestrationMode": "host",
+                "agents": [
+                    {"profile": "host", "displayName": "主持人", "isHost": True},
+                    {"profile": "one", "displayName": "成员一"},
+                    {"profile": "two", "displayName": "成员二"},
+                ],
+            })
+            agents = {agent["profile"]: agent for agent in room["agents"]}
+
+            first = self._send(
+                store,
+                room["id"],
+                "@所有人 按依赖推进",
+                [agents["one"]["id"], agents["two"]["id"]],
+            )
+            second = self._send(store, room["id"], "第二个请求", [])
+            self.assertEqual(
+                self._run_modes(first), {agents["host"]["id"]: "automatic"}
+            )
+            self.assertEqual(
+                self._run_modes(second), {agents["host"]["id"]: "automatic"}
+            )
+            claimed = store.claim_next_runnable_run()
+            self.assertEqual(claimed["rootMessageId"], first["message"]["id"])
+            self.assertIs(
+                store.read_run_projection(claimed["id"])["run"]["requiredReply"],
+                True,
+            )
+            self.assertIsNone(store.claim_next_runnable_run())
+            with self.assertRaisesRegex(
+                STORE_MODULE.GroupConflictError, "runs are active"
+            ):
+                store.update_room(
+                    room["id"],
+                    {"requestId": new_id(), "orchestrationMode": "free"},
+                )
+            store.transition_run(claimed["id"], "failed", error="测试释放令牌")
+            self.assertEqual(
+                store.claim_next_runnable_run()["rootMessageId"],
+                second["message"]["id"],
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room({
+                "requestId": new_id(),
+                "name": "逐步委派群",
+                "cwd": "",
+                "orchestrationMode": "host",
+                "agents": [
+                    {"profile": "host", "displayName": "主持人", "isHost": True},
+                    {"profile": "one", "displayName": "成员一"},
+                    {"profile": "two", "displayName": "成员二"},
+                ],
+            })
+            agents = {agent["profile"]: agent for agent in room["agents"]}
+            source = self._insert_completed_source(
+                store,
+                room["id"],
+                agents["host"]["id"],
+                content="@成员一 先处理，@成员二 等待",
+            )
+            delegated = store.complete_cascade(source)
+            self.assertEqual(delegated["runCount"], 1)
+            delegated_run = store.get_run(delegated["runIds"][0])
+            self.assertEqual(delegated_run["agentId"], agents["one"]["id"])
+            with store.connection() as connection:
+                required_reply = connection.execute(
+                    "SELECT required_reply FROM group_agent_runs WHERE id = ?",
+                    (delegated_run["id"],),
+                ).fetchone()[0]
+            self.assertEqual(required_reply, 0)
+            self.assertEqual(delegated_run["depth"], 1)
+            self.assertEqual(delegated["systemMessageCount"], 1)
+
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room({
+                "requestId": new_id(),
+                "name": "主持复核群",
+                "cwd": "",
+                "orchestrationMode": "host",
+                "agents": [
+                    {"profile": "host", "displayName": "主持人", "isHost": True},
+                    {"profile": "worker", "displayName": "执行者"},
+                    {"profile": "other", "displayName": "其他成员"},
+                ],
+            })
+            agents = {agent["profile"]: agent for agent in room["agents"]}
+            source = self._insert_completed_source(
+                store,
+                room["id"],
+                agents["worker"]["id"],
+                content="结果完成，@其他成员 可以继续",
+            )
+            reviewed = store.complete_cascade(source)
+            self.assertEqual(reviewed["runCount"], 1)
+            review_run = store.get_run(reviewed["runIds"][0])
+            self.assertEqual(review_run["agentId"], agents["host"]["id"])
+            self.assertEqual(review_run["replyMode"], "automatic")
+            self.assertEqual(review_run["depth"], 0)
+            self.assertIs(
+                store.get_message(review_run["responseMessageId"])["visible"], True
+            )
+            claimed = store.claim_next_runnable_run()
+            projection = store.read_run_projection(claimed["id"])
+            self.assertIs(projection["run"]["requiredReply"], True)
+            prompt = ORCHESTRATOR.build_run_prompt(
+                projection, room["agents"]
+            )
+            self.assertIn("当前唯一发言令牌", prompt)
+            self.assertIn("禁止 @all", prompt)
+
+    def test_v10_migration_adds_free_orchestration_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "group.db"
+            store = GroupStore(path)
+            store.initialize()
+            room = store.create_room({
+                "requestId": new_id(),
+                "name": "旧版房间",
+                "cwd": "",
+                "agents": [{"profile": "host", "isHost": True}],
+            })
+            with store.connection() as connection:
+                connection.execute(
+                    "ALTER TABLE group_rooms DROP COLUMN orchestration_mode"
+                )
+                connection.execute(
+                    "UPDATE group_meta SET value = '10' WHERE key = 'schema_version'"
+                )
+
+            migrated = GroupStore(path)
+            migrated.initialize()
+            self.assertEqual(migrated.schema_version(), 11)
+            self.assertEqual(
+                migrated.get_room(room["id"])["orchestrationMode"], "free"
+            )
 
     @staticmethod
     def _send(

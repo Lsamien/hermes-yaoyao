@@ -42,6 +42,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             state = ORCHESTRATOR._RuntimeState(
                 run_id=request_id(),
                 room_id=request_id(),
+                topic_id=request_id(),
                 agent_id=request_id(),
                 runtime_id="runtime-effective-model",
                 generation=1,
@@ -337,7 +338,7 @@ class GroupSettingsContractTests(unittest.TestCase):
                 )
 
     def test_protocol_v5_advertises_reply_round_contract(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 8)
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 10)
         self.assertEqual(
             PROTOCOL.limits_payload()["defaultMaxReplyRounds"], 3
         )
@@ -711,7 +712,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             self._create_v1_database(path)
             store = GroupStore(path)
             store.initialize()
-            self.assertEqual(store.schema_version(), 8)
+            self.assertEqual(store.schema_version(), 11)
             self.assertEqual(store.journal_epoch(), "11111111-1111-4111-8111-111111111111")
             with store.connection() as connection:
                 room = connection.execute("SELECT * FROM group_rooms").fetchone()
@@ -1035,6 +1036,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             state = ORCHESTRATOR._RuntimeState(
                 run_id=str(uuid.uuid4()),
                 room_id=str(uuid.uuid4()),
+                topic_id=str(uuid.uuid4()),
                 agent_id=str(uuid.uuid4()),
                 runtime_id="runtime",
                 generation=1,
@@ -1102,6 +1104,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             state = ORCHESTRATOR._RuntimeState(
                 run_id=str(uuid.uuid4()),
                 room_id=str(uuid.uuid4()),
+                topic_id=str(uuid.uuid4()),
                 agent_id=str(uuid.uuid4()),
                 runtime_id="runtime",
                 generation=1,
@@ -1191,6 +1194,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             state = ORCHESTRATOR._RuntimeState(
                 run_id=str(uuid.uuid4()),
                 room_id=str(uuid.uuid4()),
+                topic_id=str(uuid.uuid4()),
                 agent_id=str(uuid.uuid4()),
                 runtime_id="runtime",
                 generation=1,
@@ -1260,6 +1264,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             state = ORCHESTRATOR._RuntimeState(
                 run_id=str(uuid.uuid4()),
                 room_id=str(uuid.uuid4()),
+                topic_id=str(uuid.uuid4()),
                 agent_id=str(uuid.uuid4()),
                 runtime_id="runtime",
                 generation=1,
@@ -1309,6 +1314,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             state = ORCHESTRATOR._RuntimeState(
                 run_id=str(uuid.uuid4()),
                 room_id=str(uuid.uuid4()),
+                topic_id=str(uuid.uuid4()),
                 agent_id=str(uuid.uuid4()),
                 runtime_id="runtime",
                 generation=1,
@@ -1556,6 +1562,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             state = ORCHESTRATOR._RuntimeState(
                 run_id=str(uuid.uuid4()),
                 room_id=str(uuid.uuid4()),
+                topic_id=str(uuid.uuid4()),
                 agent_id=str(uuid.uuid4()),
                 runtime_id="runtime",
                 generation=1,

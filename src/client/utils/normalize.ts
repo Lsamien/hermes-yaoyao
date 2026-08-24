@@ -340,6 +340,7 @@ export function normalizeGroupCapabilities(value: unknown): GroupCapabilities {
       maxAgentDisplayNameLength: number(pick(limits, 'maxAgentDisplayNameLength', 'max_agent_display_name_length'), 100),
     },
     eventTypes: values(pick(source, 'eventTypes', 'event_types')).map(value => string(value)).filter(Boolean),
+    features: values(source.features).map(value => string(value)).filter(Boolean),
   }
 }
 
@@ -429,6 +430,7 @@ export function normalizeGroupTopic(value: unknown): GroupTopicSummary {
 export function normalizeGroupRoom(value: unknown): GroupRoomSummary {
   const source = record(value)
   const rawAgents = source.agents
+  const orchestrationMode = string(pick(source, 'orchestrationMode', 'orchestration_mode'))
   return {
     id: string(source.id), name: string(source.name, '未命名群聊'), cwd: string(source.cwd),
     createdAt: number(pick(source, 'createdAt', 'created_at')), updatedAt: number(pick(source, 'updatedAt', 'updated_at')),
@@ -437,6 +439,7 @@ export function normalizeGroupRoom(value: unknown): GroupRoomSummary {
     unreadCount: number(pick(source, 'unreadCount', 'unread_count')),
     activeRunCount: number(pick(source, 'activeRunCount', 'active_run_count')),
     maxReplyRounds: number(pick(source, 'maxReplyRounds', 'max_reply_rounds'), 3),
+    orchestrationMode: orchestrationMode === 'host' ? 'host' : 'free',
   }
 }
 
@@ -456,7 +459,7 @@ export function normalizeGroupRoomDetail(value: unknown): GroupRoomDetail {
   const summary = normalizeGroupRoom(source)
   return {
     id: summary.id, name: summary.name, cwd: summary.cwd, createdAt: summary.createdAt, updatedAt: summary.updatedAt,
-    archived: summary.archived, maxReplyRounds: summary.maxReplyRounds,
+    archived: summary.archived, maxReplyRounds: summary.maxReplyRounds, orchestrationMode: summary.orchestrationMode,
     agents: values(source.agents).map(normalizeGroupAgent), runs: values(source.runs).map(normalizeGroupRun),
     pendingInteractions: values(pick(source, 'pendingInteractions', 'pending_interactions')).map(normalizeGroupInteraction),
     latestCursor: number(pick(source, 'latestCursor', 'latest_cursor')),

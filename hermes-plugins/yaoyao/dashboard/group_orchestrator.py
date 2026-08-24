@@ -374,6 +374,9 @@ def build_run_prompt(
             "description": _required_string_allowing_empty(
                 agent.get("description", ""), "projection.agent.description"
             ),
+            "isHost": _required_bool(
+                agent.get("isHost", False), "projection.agent.isHost"
+            ),
         },
         "messages": _strict_json_copy(messages, "projection.messages"),
         "omittedSummary": _strict_json_copy(
@@ -383,6 +386,10 @@ def build_run_prompt(
             "id": _required_string(room.get("id"), "projection.room.id"),
             "name": _required_string(room.get("name"), "projection.room.name"),
             "maxReplyRounds": room.get("maxReplyRounds", 3),
+            "orchestrationMode": _required_string(
+                room.get("orchestrationMode", "free"),
+                "projection.room.orchestrationMode",
+            ),
         },
         "run": {
             "id": _required_string(run.get("id"), "projection.run.id"),
@@ -429,7 +436,15 @@ def build_run_prompt(
         allow_nan=False,
     )
     automatic_rule = ""
-    if envelope["run"]["requiredReply"]:
+    host_flow = envelope["room"]["orchestrationMode"] == "host"
+    if envelope["run"]["requiredReply"] and host_flow:
+        automatic_rule = (
+            "你持有本话题当前唯一发言令牌，必须公开处理。请根据最新上下文动态决定下一步："
+            "若要委派，只能使用成员列表中的一个精确 @显示名；禁止 @all，禁止一次 @ 多人；"
+            "若任务已经完成，直接给出最终答复且不要 @任何成员；也可以发起澄清请求。"
+            "禁止保持静默，禁止输出任何 YAOYAO_NO_REPLY 标记。"
+        )
+    elif envelope["run"]["requiredReply"]:
         automatic_rule = (
             "你是本房间唯一主持人。该用户消息没有有效 @，你必须公开处理；"
             "禁止保持静默，禁止输出任何 YAOYAO_NO_REPLY 标记。必须三选一："
@@ -440,9 +455,19 @@ def build_run_prompt(
             f"若触发内容与自己的职责无关，禁止调用工具、禁止@成员，且完整答复只能是"
             f"{_NO_REPLY_TOKEN}；正常答复绝不能包含该标记。"
         )
+    elif host_flow and not envelope["agent"]["isHost"]:
+        automatic_rule = (
+            "你正在执行主持人委派的当前步骤。只回答本步骤，不要 @任何成员；"
+            "完成后系统会把结果交还主持人复核并决定下一步。"
+        )
+    collaboration_rule = (
+        "主持流程中只有主持人可以调度下一位成员。"
+        if host_flow
+        else "仅在确实需要成员协作时，使用成员列表中的精确 @显示名 或 @all 发起下一轮。"
+    )
     return (
         "你正在 Hermes 多设备群聊中回复。只输出要发送到公共房间的答复；"
-        "仅在确实需要成员协作时，使用成员列表中的精确 @显示名 或 @all 发起下一轮。\n"
+        f"{collaboration_rule}\n"
         f"{automatic_rule}\n"
         f"runId={envelope['run']['id']} roomId={envelope['room']['id']} "
         f"agentId={envelope['agent']['id']}\n"

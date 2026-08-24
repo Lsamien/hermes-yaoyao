@@ -256,6 +256,7 @@ export interface GroupCapabilities {
   latestCursor: number
   limits: GroupLimits
   eventTypes: string[]
+  features?: string[]
 }
 
 export type GroupAgentStatus = 'idle' | 'queued' | 'running' | 'awaiting_input' | 'unknown'
@@ -351,6 +352,7 @@ export interface GroupRoomSummary {
   unreadCount: number
   activeRunCount?: number
   maxReplyRounds: number
+  orchestrationMode?: 'free' | 'host'
 }
 
 export interface GroupRoomDetail extends Omit<GroupRoomSummary, 'agentCount' | 'lastMessage' | 'unreadCount'> {

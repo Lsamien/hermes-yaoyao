@@ -32,6 +32,7 @@ from .group_protocol import (
     MAX_PLUGIN_CONCURRENCY,
     MAX_ROOM_CONCURRENCY,
     MAX_TOOL_STATE_BYTES,
+    ORCHESTRATION_MODES,
     is_reserved_mention_alias,
     normalize_display_name,
     normalize_interaction_id,
@@ -41,7 +42,7 @@ from .group_protocol import (
 )
 
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 _WAL_RETRY_DELAYS = (0.01, 0.02, 0.04, 0.08)
 EVENT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MIN_RETAINED_EVENTS = 100_000
@@ -112,6 +113,7 @@ _SCHEMA_STATEMENTS = (
         name TEXT NOT NULL,
         cwd TEXT NOT NULL DEFAULT '',
         max_reply_rounds INTEGER NOT NULL DEFAULT 3,
+        orchestration_mode TEXT NOT NULL DEFAULT 'free',
         created_at REAL NOT NULL,
         updated_at REAL NOT NULL,
         archived INTEGER NOT NULL DEFAULT 0
@@ -487,6 +489,9 @@ class GroupStore:
             raw_version = "9"
         if raw_version == "9":
             self._migrate_v9_to_v10(connection)
+            raw_version = "10"
+        if raw_version == "10":
+            self._migrate_v10_to_v11(connection)
         self._validated_schema_version(
             self._metadata_value_from_connection(connection, "schema_version")
         )
@@ -1203,10 +1208,25 @@ class GroupStore:
         )
 
     @staticmethod
+    def _migrate_v10_to_v11(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(group_rooms)")
+        }
+        if "orchestration_mode" not in columns:
+            connection.execute(
+                "ALTER TABLE group_rooms ADD COLUMN orchestration_mode "
+                "TEXT NOT NULL DEFAULT 'free'"
+            )
+        connection.execute(
+            "UPDATE group_meta SET value = '11' WHERE key = 'schema_version'"
+        )
+
+    @staticmethod
     def _validate_v8_columns(connection: sqlite3.Connection) -> None:
         expected_columns = {
             "group_meta": {"key", "value"},
-            "group_rooms": {"id", "name", "cwd", "max_reply_rounds", "created_at", "updated_at", "archived"},
+            "group_rooms": {"id", "name", "cwd", "max_reply_rounds", "orchestration_mode", "created_at", "updated_at", "archived"},
             "group_topics": {"id", "room_id", "title", "last_read_message_seq", "created_at", "updated_at", "archived", "pinned"},
             "group_agents": {"id", "room_id", "profile", "display_name", "display_name_key", "description", "stored_session_id", "last_context_message_seq", "enabled", "reply_without_mention", "is_host", "model_override", "provider_override", "reasoning_effort_override", "fast_mode_override", "session_config_json", "created_at", "updated_at"},
             "group_agent_topic_state": {"agent_id", "topic_id", "last_context_message_seq", "created_at", "updated_at"},
@@ -1218,6 +1238,7 @@ class GroupStore:
         }
         exact_specs = {
             ("group_rooms", "max_reply_rounds"): ("INTEGER", 1, "3"),
+            ("group_rooms", "orchestration_mode"): ("TEXT", 1, "'free'"),
             ("group_agents", "reply_without_mention"): ("INTEGER", 1, "0"),
             ("group_agents", "is_host"): ("INTEGER", 1, "0"),
             ("group_messages", "visible"): ("INTEGER", 1, "1"),
@@ -1255,6 +1276,10 @@ class GroupStore:
                    OR (max_reply_rounds != -1 AND
                        (max_reply_rounds < 1 OR
                         max_reply_rounds > {MAX_FINITE_REPLY_ROUNDS}))
+                LIMIT 1""",
+            """SELECT 1 FROM group_rooms
+                WHERE typeof(orchestration_mode) != 'text'
+                   OR orchestration_mode NOT IN ('free', 'host')
                 LIMIT 1""",
             """SELECT 1 FROM group_agents
                 WHERE typeof(reply_without_mention) != 'integer'
@@ -1649,7 +1674,15 @@ class GroupStore:
 
     def create_room(self, command: Mapping[str, object]) -> dict[str, object]:
         command = self._command(
-            command, {"requestId", "name", "cwd", "maxReplyRounds", "agents"}
+            command,
+            {
+                "requestId",
+                "name",
+                "cwd",
+                "maxReplyRounds",
+                "orchestrationMode",
+                "agents",
+            },
         )
         request_id = self._command_request_id(command)
 
@@ -1659,14 +1692,18 @@ class GroupStore:
             max_reply_rounds = normalize_max_reply_rounds(
                 command.get("maxReplyRounds", DEFAULT_MAX_REPLY_ROUNDS)
             )
+            orchestration_mode = self._orchestration_mode(
+                command.get("orchestrationMode", "free")
+            )
             agents = self._new_agents(command.get("agents"))
             now = self._now()
             room_id = str(uuid.uuid4())
             connection.execute(
                 """INSERT INTO group_rooms
-                (id, name, cwd, max_reply_rounds, created_at, updated_at, archived)
-                VALUES (?, ?, ?, ?, ?, ?, 0)""",
-                (room_id, name, cwd, max_reply_rounds, now, now),
+                (id, name, cwd, max_reply_rounds, orchestration_mode,
+                 created_at, updated_at, archived)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0)""",
+                (room_id, name, cwd, max_reply_rounds, orchestration_mode, now, now),
             )
             for agent in agents:
                 self._insert_agent(connection, room_id, agent, now)
@@ -1740,7 +1777,8 @@ class GroupStore:
         ):
             raise ValueError("limit must be an integer from 1 to 100")
         cursor_values = self._decode_cursor(cursor) if cursor is not None else None
-        query = """SELECT id, name, cwd, max_reply_rounds, created_at, updated_at, archived,
+        query = """SELECT id, name, cwd, max_reply_rounds, orchestration_mode,
+            created_at, updated_at, archived,
             (SELECT COUNT(*) FROM group_agents WHERE room_id = group_rooms.id) AS agent_count,
             (SELECT COUNT(*) FROM group_topics WHERE room_id = group_rooms.id) AS topic_count
             FROM group_rooms WHERE archived = ?"""
@@ -1889,17 +1927,22 @@ class GroupStore:
     ) -> dict[str, object]:
         canonical_room_id = self._canonical_uuid(room_id, "roomId")
         command = self._command(
-            command, {"requestId", "name", "cwd", "maxReplyRounds"}
+            command,
+            {"requestId", "name", "cwd", "maxReplyRounds", "orchestrationMode"},
         )
         request_id = self._command_request_id(command)
         changes = {
-            key for key in ("name", "cwd", "maxReplyRounds") if key in command
+            key
+            for key in ("name", "cwd", "maxReplyRounds", "orchestrationMode")
+            if key in command
         }
         if not changes:
-            raise ValueError("Room update requires name, cwd, or maxReplyRounds")
+            raise ValueError(
+                "Room update requires name, cwd, maxReplyRounds, or orchestrationMode"
+            )
 
         def action(connection: sqlite3.Connection) -> dict[str, object]:
-            self._active_room(connection, canonical_room_id)
+            current_room = self._active_room(connection, canonical_room_id)
             values: list[object] = []
             assignments: list[str] = []
             if "name" in changes:
@@ -1911,6 +1954,22 @@ class GroupStore:
             if "maxReplyRounds" in changes:
                 assignments.append("max_reply_rounds = ?")
                 values.append(normalize_max_reply_rounds(command["maxReplyRounds"]))
+            if "orchestrationMode" in changes:
+                next_mode = self._orchestration_mode(command["orchestrationMode"])
+                if next_mode != current_room["orchestration_mode"]:
+                    active = connection.execute(
+                        """SELECT 1 FROM group_agent_runs
+                        WHERE room_id = ?
+                          AND status IN ('queued', 'running', 'awaiting_input')
+                        LIMIT 1""",
+                        (canonical_room_id,),
+                    ).fetchone()
+                    if active is not None:
+                        raise GroupConflictError(
+                            "Cannot change orchestration mode while runs are active"
+                        )
+                assignments.append("orchestration_mode = ?")
+                values.append(next_mode)
             assignments.append("updated_at = ?")
             values.extend((self._now(), canonical_room_id))
             connection.execute(
@@ -2648,7 +2707,7 @@ class GroupStore:
             payload["topicId"] = canonical_topic_id
 
         def action(connection: sqlite3.Connection) -> dict[str, object]:
-            self._active_room(connection, canonical_room_id)
+            room = self._active_room(connection, canonical_room_id)
             agents: list[tuple[sqlite3.Row, str, bool]] = []
             room_agents = connection.execute(
                 """SELECT * FROM group_agents WHERE room_id = ?
@@ -2667,7 +2726,10 @@ class GroupStore:
                 for agent_id in dict.fromkeys([*agent_ids, *parsed_ids])
                 if agent_id in agents_by_id and agents_by_id[agent_id]["enabled"]
             ]
-            if explicit_agent_ids:
+            if room["orchestration_mode"] == "host":
+                host = self._room_host(connection, canonical_room_id)
+                agents.append((host, "automatic", True))
+            elif explicit_agent_ids:
                 agents.extend(
                     (agents_by_id[agent_id], "mentioned", False)
                     for agent_id in explicit_agent_ids
@@ -2897,6 +2959,8 @@ class GroupStore:
                  AND agent.room_id = candidate.room_id
                 JOIN group_messages AS trigger_message
                   ON trigger_message.id = candidate.trigger_message_id
+                JOIN group_messages AS root_message
+                  ON root_message.id = candidate.root_message_id
                 WHERE candidate.status = 'queued'
                   AND room.archived = 0
                   AND agent.enabled = 1
@@ -2910,7 +2974,17 @@ class GroupStore:
                     WHERE occupied_room.room_id = candidate.room_id
                       AND occupied_room.status IN ('running', 'awaiting_input')
                   ) < ?
-                ORDER BY trigger_message.seq ASC,
+                  AND (
+                    room.orchestration_mode != 'host'
+                    OR NOT EXISTS (
+                      SELECT 1 FROM group_agent_runs AS occupied_topic
+                      WHERE occupied_topic.topic_id = candidate.topic_id
+                        AND occupied_topic.status IN ('running', 'awaiting_input')
+                    )
+                  )
+                ORDER BY CASE WHEN room.orchestration_mode = 'host'
+                              THEN root_message.seq ELSE trigger_message.seq END ASC,
+                         trigger_message.seq ASC,
                          candidate.created_at ASC,
                          candidate.id ASC
                 LIMIT 1""",
@@ -3462,7 +3536,38 @@ class GroupStore:
             "ORDER BY created_at ASC, id ASC",
             (source["room_id"],),
         ).fetchall()
-        if source_message["visible"]:
+        room = self._active_room(connection, source["room_id"])
+        source_agent = next(
+            (agent for agent in agents if agent["id"] == source["agent_id"]), None
+        )
+        if source_agent is None:
+            raise GroupStoreError("Cascade source Agent is missing")
+        if room["orchestration_mode"] == "host" and source_message["visible"]:
+            if source_agent["is_host"]:
+                target_ids, warnings = self._plan_cascade_mentions(
+                    source_message["content"],
+                    agents,
+                    source_agent_id=source["agent_id"],
+                    include_automatic=False,
+                )
+                explicit_ids = list(target_ids)
+                if len(target_ids) > 1:
+                    warnings.append({
+                        "code": "mention",
+                        "message": "主持流程每轮只调度一位成员，已采用第一个 @ 目标",
+                    })
+                    target_ids = target_ids[:1]
+                    explicit_ids = explicit_ids[:1]
+            else:
+                host = next(
+                    (agent for agent in agents if agent["is_host"] and agent["enabled"]),
+                    None,
+                )
+                if host is None:
+                    raise GroupStoreError("Host flow has no enabled host Agent")
+                target_ids, warnings = [str(host["id"])], []
+                explicit_ids = []
+        elif source_message["visible"]:
             target_ids, warnings = self._plan_cascade_mentions(
                 source_message["content"],
                 agents,
@@ -4103,7 +4208,13 @@ class GroupStore:
         ).fetchall()
         agents_by_id = {agent["id"]: agent for agent in room_agents}
         warning_texts = list(requested_warnings)
-        next_depth = int(source["depth"]) + 1
+        source_agent = agents_by_id.get(source["agent_id"])
+        if source_agent is None:
+            raise GroupStoreError("Cascade source Agent is missing")
+        host_review = (
+            room["orchestration_mode"] == "host" and not source_agent["is_host"]
+        )
+        next_depth = int(source["depth"]) + (0 if host_review else 1)
         max_reply_rounds = int(room["max_reply_rounds"])
         if max_reply_rounds != -1 and next_depth >= max_reply_rounds:
             warning_texts.append("Cascade depth limit reached")
@@ -4146,7 +4257,8 @@ class GroupStore:
             )
             if reply_mode not in {"mentioned", "automatic"}:
                 raise GroupStoreError("Stored cascade plan is corrupt")
-            visible = reply_mode == "mentioned"
+            required_reply = bool(host_review and agent["is_host"])
+            visible = reply_mode == "mentioned" or required_reply
             response_id = str(uuid.uuid4())
             run_id = str(uuid.uuid4())
             connection.execute(
@@ -4179,7 +4291,7 @@ class GroupStore:
                  requested_fast_mode, actual_model, actual_provider,
                  actual_reasoning_effort, actual_fast_mode, error, created_at,
                  updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'queued', NULL,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', NULL,
                         ?, ?, ?, ?, NULL, NULL, NULL, NULL, '', ?, ?)""",
                 (
                     run_id,
@@ -4191,6 +4303,7 @@ class GroupStore:
                     source["root_message_id"],
                     next_depth,
                     reply_mode,
+                    int(required_reply),
                     agent["model_override"],
                     agent["provider_override"],
                     agent["reasoning_effort_override"],
@@ -5497,7 +5610,8 @@ class GroupStore:
         created_at: float,
     ) -> None:
         room = connection.execute(
-            """SELECT id, name, cwd, max_reply_rounds, created_at, updated_at, archived,
+            """SELECT id, name, cwd, max_reply_rounds, orchestration_mode,
+            created_at, updated_at, archived,
             (SELECT COUNT(*) FROM group_agents WHERE room_id = group_rooms.id)
                 AS agent_count,
             (SELECT COUNT(*) FROM group_topics WHERE room_id = group_rooms.id)
@@ -6217,6 +6331,12 @@ class GroupStore:
             raise ValueError(f"{field} must not be blank")
         return value
 
+    @staticmethod
+    def _orchestration_mode(value: object) -> str:
+        if not isinstance(value, str) or value not in ORCHESTRATION_MODES:
+            raise ValueError("orchestrationMode must be free or host")
+        return value
+
     @classmethod
     def _mention_agent_ids(cls, value: object) -> list[str]:
         if not isinstance(value, list):
@@ -6498,6 +6618,7 @@ class GroupStore:
             "name": row["name"],
             "cwd": row["cwd"],
             "maxReplyRounds": row["max_reply_rounds"],
+            "orchestrationMode": row["orchestration_mode"],
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
             "archived": bool(row["archived"]),
@@ -6510,6 +6631,7 @@ class GroupStore:
             "name": row["name"],
             "cwd": row["cwd"],
             "maxReplyRounds": row["max_reply_rounds"],
+            "orchestrationMode": row["orchestration_mode"],
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
             "archived": False,
