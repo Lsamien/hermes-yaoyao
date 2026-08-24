@@ -18,7 +18,7 @@ from pydantic import (
 )
 
 
-PROTOCOL_VERSION = 9
+PROTOCOL_VERSION = 10
 MAX_AGENTS_PER_ROOM = 8
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_TOOL_STATE_BYTES = 256 * 1024
@@ -178,15 +178,24 @@ class UpdateRoomRequest(GroupModel):
 
 class UpdateTopicRequest(GroupModel):
     request_id: UUID = Field(alias="requestId")
-    title: str = Field(min_length=1, max_length=120)
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    pinned: StrictBool | None = None
 
     @field_validator("title")
     @classmethod
-    def normalize_title(cls, value: str) -> str:
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = " ".join(value.split()).strip()
         if not normalized:
             raise ValueError("title must not be blank")
         return normalized
+
+    @model_validator(mode="after")
+    def require_change(self) -> "UpdateTopicRequest":
+        if not ({"title", "pinned"} & self.model_fields_set):
+            raise ValueError("Topic update requires title or pinned")
+        return self
 
 
 class MarkTopicReadRequest(GroupModel):

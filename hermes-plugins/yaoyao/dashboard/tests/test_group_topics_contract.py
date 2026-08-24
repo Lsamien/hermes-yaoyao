@@ -37,7 +37,7 @@ def new_id() -> str:
 
 class GroupTopicsContractTests(unittest.TestCase):
     def test_protocol_and_router_advertise_topics(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 9)
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 10)
         self.assertIn("topic.updated", PROTOCOL.EVENT_TYPES)
         self.assertIn("room.activity", PROTOCOL.EVENT_TYPES)
         request = PROTOCOL.SendMessageRequest.model_validate({
@@ -268,7 +268,7 @@ class GroupTopicsContractTests(unittest.TestCase):
             migrated = GroupStore(path)
             migrated.initialize()
 
-            self.assertEqual(migrated.schema_version(), 9)
+            self.assertEqual(migrated.schema_version(), 10)
             with migrated.connection() as connection:
                 topic = connection.execute(
                     "SELECT * FROM group_topics WHERE id = ?", (topic_id,)
@@ -454,6 +454,7 @@ class GroupTopicsContractTests(unittest.TestCase):
                     "latestMessageSeq",
                     "lastReadMessageSeq",
                     "archived",
+                    "pinned",
                     "createdAt",
                     "updatedAt",
                 },
@@ -1503,7 +1504,7 @@ class GroupTopicsContractTests(unittest.TestCase):
 
             store = GroupStore(path)
             store.initialize()
-            self.assertEqual(store.schema_version(), 9)
+            self.assertEqual(store.schema_version(), 10)
             with store.connection() as migrated:
                 room = migrated.execute("SELECT * FROM group_rooms").fetchone()
                 agent = migrated.execute("SELECT * FROM group_agents").fetchone()

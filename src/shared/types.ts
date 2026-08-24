@@ -241,7 +241,7 @@ export interface GroupLimits {
 }
 
 export const MIN_SUPPORTED_GROUP_PROTOCOL_VERSION = 2
-export const MAX_SUPPORTED_GROUP_PROTOCOL_VERSION = 9
+export const MAX_SUPPORTED_GROUP_PROTOCOL_VERSION = 10
 export const SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL = `v${MIN_SUPPORTED_GROUP_PROTOCOL_VERSION}–v${MAX_SUPPORTED_GROUP_PROTOCOL_VERSION}`
 
 export function isSupportedGroupProtocolVersion(value: number): boolean {
@@ -297,6 +297,14 @@ export interface GroupMessage {
   toolState: JsonValue[]
   status: GroupMessageStatus
   error: string
+  execution?: {
+    requestedModel?: string | null
+    requestedReasoningEffort?: string | null
+    requestedFastMode?: boolean | null
+    actualModel?: string | null
+    actualReasoningEffort?: string | null
+    actualFastMode?: boolean | null
+  } | null
   createdAt: number
   updatedAt: number
 }
@@ -368,6 +376,7 @@ export interface GroupTopicSummary {
   createdAt: number
   updatedAt: number
   archived?: boolean
+  pinned?: boolean
 }
 
 export interface GroupRoomActivity {

@@ -41,7 +41,7 @@ from .group_protocol import (
 )
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 _WAL_RETRY_DELAYS = (0.01, 0.02, 0.04, 0.08)
 EVENT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MIN_RETAINED_EVENTS = 100_000
@@ -124,6 +124,7 @@ _SCHEMA_STATEMENTS = (
         created_at REAL NOT NULL,
         updated_at REAL NOT NULL,
         archived INTEGER NOT NULL DEFAULT 0,
+        pinned INTEGER NOT NULL DEFAULT 0,
         UNIQUE(room_id, id)
     )""",
     """CREATE TABLE IF NOT EXISTS group_agents (
@@ -235,7 +236,7 @@ _SCHEMA_STATEMENTS = (
         created_at REAL NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS idx_group_rooms_ordering ON group_rooms(archived, updated_at DESC, id DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_group_topics_room_ordering ON group_topics(room_id, archived, updated_at DESC, id DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_group_topics_room_ordering ON group_topics(room_id, archived, pinned DESC, updated_at DESC, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_group_messages_room_seq ON group_messages(room_id, seq)",
     "CREATE INDEX IF NOT EXISTS idx_group_messages_topic_seq ON group_messages(topic_id, seq)",
     "CREATE INDEX IF NOT EXISTS idx_group_agent_runs_room ON group_agent_runs(room_id)",
@@ -483,6 +484,9 @@ class GroupStore:
             raw_version = "8"
         if raw_version == "8":
             self._migrate_v8_to_v9(connection)
+            raw_version = "9"
+        if raw_version == "9":
+            self._migrate_v9_to_v10(connection)
         self._validated_schema_version(
             self._metadata_value_from_connection(connection, "schema_version")
         )
@@ -1180,11 +1184,30 @@ class GroupStore:
         )
 
     @staticmethod
+    def _migrate_v9_to_v10(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(group_topics)")
+        }
+        if "pinned" not in columns:
+            connection.execute(
+                "ALTER TABLE group_topics ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
+            )
+        connection.execute("DROP INDEX IF EXISTS idx_group_topics_room_ordering")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_group_topics_room_ordering "
+            "ON group_topics(room_id, archived, pinned DESC, updated_at DESC, id DESC)"
+        )
+        connection.execute(
+            "UPDATE group_meta SET value = '10' WHERE key = 'schema_version'"
+        )
+
+    @staticmethod
     def _validate_v8_columns(connection: sqlite3.Connection) -> None:
         expected_columns = {
             "group_meta": {"key", "value"},
             "group_rooms": {"id", "name", "cwd", "max_reply_rounds", "created_at", "updated_at", "archived"},
-            "group_topics": {"id", "room_id", "title", "last_read_message_seq", "created_at", "updated_at", "archived"},
+            "group_topics": {"id", "room_id", "title", "last_read_message_seq", "created_at", "updated_at", "archived", "pinned"},
             "group_agents": {"id", "room_id", "profile", "display_name", "display_name_key", "description", "stored_session_id", "last_context_message_seq", "enabled", "reply_without_mention", "is_host", "model_override", "provider_override", "reasoning_effort_override", "fast_mode_override", "session_config_json", "created_at", "updated_at"},
             "group_agent_topic_state": {"agent_id", "topic_id", "last_context_message_seq", "created_at", "updated_at"},
             "group_messages": {"seq", "id", "room_id", "topic_id", "sender_kind", "sender_id", "sender_name", "root_message_id", "reply_to_message_id", "client_message_id", "content", "reasoning", "tool_state_json", "status", "error", "visible", "created_at", "updated_at"},
@@ -1206,6 +1229,7 @@ class GroupStore:
             ("group_agent_topic_state", "last_context_message_seq"): ("INTEGER", 1, "0"),
             ("group_topics", "last_read_message_seq"): ("INTEGER", 1, "0"),
             ("group_topics", "archived"): ("INTEGER", 1, "0"),
+            ("group_topics", "pinned"): ("INTEGER", 1, "0"),
         }
         for table, required in expected_columns.items():
             rows = list(connection.execute(f"PRAGMA table_info({table})"))
@@ -1374,8 +1398,8 @@ class GroupStore:
                 "group_rooms(archived, updated_at DESC, id DESC)",
             ),
             "idx_group_topics_room_ordering": (
-                [("room_id", 0), ("updated_at", 1), ("id", 1)],
-                "group_topics(room_id, updated_at DESC, id DESC)",
+                [("room_id", 0), ("archived", 0), ("pinned", 1), ("updated_at", 1), ("id", 1)],
+                "group_topics(room_id, archived, pinned DESC, updated_at DESC, id DESC)",
             ),
             "idx_group_messages_room_seq": (
                 [("room_id", 0), ("seq", 0)],
@@ -1789,7 +1813,7 @@ class GroupStore:
         if cursor_values is not None:
             query += " AND ((topic.updated_at < ?) OR (topic.updated_at = ? AND topic.id < ?))"
             params.extend((cursor_values[0], cursor_values[0], cursor_values[1]))
-        query += " ORDER BY topic.updated_at DESC, topic.id DESC LIMIT ?"
+        query += " ORDER BY topic.pinned DESC, topic.updated_at DESC, topic.id DESC LIMIT ?"
         params.append(limit + 1)
         with self.read_transaction() as connection:
             self._room_detail(connection, canonical_room_id, include_archived=True)
@@ -1803,6 +1827,20 @@ class GroupStore:
                 canonical_room_id, last["updated_at"], last["id"]
             )
         return CursorPage(items=items, next_cursor=next_cursor)
+
+    def list_pinned_topics(self, *, limit: int) -> CursorPage:
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+            raise ValueError("limit must be an integer from 1 to 100")
+        with self.read_transaction() as connection:
+            rows = connection.execute(
+                """SELECT id, room_id FROM group_topics
+                WHERE archived = 0 AND pinned = 1
+                ORDER BY updated_at DESC, id DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+            items = [self._topic_summary_by_id(connection, row["room_id"], row["id"])
+                     for row in rows]
+        return CursorPage(items=items, next_cursor=None)
 
     def room_activity(self, room_id: str) -> dict[str, object]:
         canonical_room_id = self._canonical_uuid(room_id, "roomId")
@@ -1896,18 +1934,31 @@ class GroupStore:
     ) -> dict[str, object]:
         canonical_room_id = self._canonical_uuid(room_id, "roomId")
         canonical_topic_id = self._canonical_uuid(topic_id, "topicId")
-        command = self._command(command, {"requestId", "title"})
+        command = self._command(command, {"requestId", "title", "pinned"})
         request_id = self._command_request_id(command)
-        title = self._topic_title(self._string(command, "title"))
+        if not ({"title", "pinned"} & set(command)):
+            raise ValueError("Topic update requires title or pinned")
 
         def action(connection: sqlite3.Connection) -> dict[str, object]:
             self._active_room(connection, canonical_room_id)
             self._active_topic(connection, canonical_room_id, canonical_topic_id)
+            assignments: list[str] = []
+            values: list[object] = []
+            if "title" in command:
+                assignments.append("title = ?")
+                values.append(self._topic_title(self._string(command, "title")))
+            if "pinned" in command:
+                if not isinstance(command["pinned"], bool):
+                    raise ValueError("pinned must be a boolean")
+                assignments.append("pinned = ?")
+                values.append(int(command["pinned"]))
             now = self._now()
+            assignments.append("updated_at = ?")
+            values.extend((now, canonical_topic_id, canonical_room_id))
             connection.execute(
-                """UPDATE group_topics SET title = ?, updated_at = ?
-                WHERE id = ? AND room_id = ?""",
-                (title, now, canonical_topic_id, canonical_room_id),
+                f"UPDATE group_topics SET {', '.join(assignments)} "
+                "WHERE id = ? AND room_id = ?",
+                values,
             )
             topic = self._topic_summary_by_id(
                 connection, canonical_room_id, canonical_topic_id
@@ -6479,6 +6530,7 @@ class GroupStore:
             "latestMessageSeq": int(row["latest_message_seq"]),
             "lastReadMessageSeq": int(row["last_read_message_seq"]),
             "archived": bool(row["archived"]),
+            "pinned": bool(row["pinned"]),
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }

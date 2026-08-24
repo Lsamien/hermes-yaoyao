@@ -202,6 +202,11 @@ export function groupMessageToUi(message: GroupMessage): UiMessage {
     const status: UiToolCall['status'] = rawStatus === 'completed' ? 'success' : rawStatus === 'failed' ? 'error' : ['running', 'pending', 'success', 'error'].includes(rawStatus) ? rawStatus as UiToolCall['status'] : 'success'
     return { id: string(value.id, `${message.id}:tool:${index}`), name: string(value.name ?? value.tool, '工具调用'), status, input: value.input ?? value.arguments, output: value.output ?? value.result }
   })
+  const execution = message.execution
+  const model = execution?.actualModel || execution?.requestedModel
+  const reasoning = execution?.actualReasoningEffort || execution?.requestedReasoningEffort
+  const fast = execution?.actualFastMode ?? execution?.requestedFastMode
+  const metadata = model ? `${fast ? '⚡ ' : ''}${model}${reasoning ? ` · ${reasoning}` : ''}` : undefined
   return {
     id: message.id,
     role: message.senderKind === 'human' ? 'user' : message.senderKind === 'agent' ? 'assistant' : 'system',
@@ -212,6 +217,7 @@ export function groupMessageToUi(message: GroupMessage): UiMessage {
     status: message.status === 'completed' ? 'settled' : message.status === 'queued' ? 'pending' : message.status === 'streaming' ? 'streaming' : message.status === 'failed' ? 'failed' : message.status === 'unknown' ? 'unknown-receipt' : 'settled',
     error: message.error,
     tools,
+    metadata,
   }
 }
 

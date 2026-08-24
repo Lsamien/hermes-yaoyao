@@ -1075,6 +1075,13 @@ async def list_topics(
     return {"items": page.items, "nextCursor": page.next_cursor}
 
 
+async def list_pinned_topics(
+    limit: int = Query(default=100, ge=1, le=100),
+) -> dict[str, object]:
+    page = await _store_call("list_pinned_topics", limit=limit)
+    return {"items": page.items, "nextCursor": page.next_cursor}
+
+
 async def update_topic(
     room_id: UUID, topic_id: UUID, request: UpdateTopicRequest
 ) -> dict[str, object]:
@@ -1298,6 +1305,7 @@ def _build_router() -> APIRouter:
     )
     built.add_api_route("/capabilities", capabilities, methods=["GET"])
     built.add_api_route("/rooms", list_rooms, methods=["GET"])
+    built.add_api_route("/topics/pinned", list_pinned_topics, methods=["GET"])
     built.add_api_route("/rooms", create_room, methods=["POST"])
     built.add_api_route("/rooms/{room_id}", get_room, methods=["GET"])
     built.add_api_route("/rooms/{room_id}", update_room, methods=["PATCH"])

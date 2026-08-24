@@ -50,15 +50,23 @@ const expandedRoomIds = ref(new Set<string>())
 const archivedOverlayOpen = ref(false)
 const archivedRoomList = ref<GroupRoomSummary[]>([])
 const archivedTopicList = ref<GroupTopicSummary[]>([])
+const pinnedTopicsExpanded = ref(true)
 
 const activeRooms = computed(() => groups.rooms.filter(room => !room.archived))
 const roomSidebarItems = computed(() => activeRooms.value.map(roomSidebarItem))
+const pinnedTopics = computed(() => groups.pinnedTopics.filter(topic => !topic.archived).sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id)))
 function topicSidebarItemId(roomId: string, topicId: string): string { return `topic:${roomId}:${topicId}` }
 function topicFromSidebarItemId(id: string): { roomId: string; topicId: string } | undefined {
   const match = /^topic:([^:]+):([^:]+)$/.exec(id)
   return match ? { roomId: match[1]!, topicId: match[2]! } : undefined
 }
-const sidebarItems = computed<SidebarItem[]>(() => activeRooms.value.flatMap(room => {
+const sidebarItems = computed<SidebarItem[]>(() => {
+  const pinned: SidebarItem[] = pinnedTopics.value.length ? [{
+    id: 'pinned-topics', title: '话题置顶', subtitle: `${pinnedTopics.value.length} 个置顶话题`, section: '话题置顶', icon: 'branch', expandable: true, expanded: pinnedTopicsExpanded.value, showMore: false,
+  }, ...(!pinnedTopicsExpanded.value ? [] : pinnedTopics.value.map(topic => ({
+    id: topicSidebarItemId(topic.roomId, topic.id), title: topic.title, subtitle: activeRooms.value.find(room => room.id === topic.roomId)?.name || topic.preview, meta: '已置顶', section: '话题置顶', icon: 'branch' as const, nested: true, showMore: false, active: topic.id === groups.selectedTopicId,
+  })))] : []
+  return [...pinned, ...activeRooms.value.flatMap(room => {
   const roomItem = roomSidebarItem(room)
   const expanded = groups.topicProtocol && expandedRoomIds.value.has(room.id)
   roomItem.expandable = groups.topicProtocol
@@ -89,8 +97,9 @@ const sidebarItems = computed<SidebarItem[]>(() => activeRooms.value.flatMap(roo
       active: true,
     })
   }
-  return items
-}))
+    return items
+  })]
+})
 const messages = computed(() => groups.messages.map(groupMessageToUi))
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
 const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
@@ -184,6 +193,7 @@ async function selectTopic(id: string) {
 }
 
 async function selectSidebarItem(id: string) {
+  if (id === 'pinned-topics') return
   const topic = topicFromSidebarItemId(id)
   if (topic) {
     if (topic.roomId !== groups.selectedRoomId) {
@@ -206,6 +216,7 @@ function expandRoom(roomId: string) {
 }
 
 async function toggleRoomTopics(roomId: string) {
+  if (roomId === 'pinned-topics') { pinnedTopicsExpanded.value = !pinnedTopicsExpanded.value; return }
   if (!groups.topicProtocol) return
   if (expandedRoomIds.value.has(roomId)) {
     const next = new Set(expandedRoomIds.value)
@@ -227,7 +238,7 @@ async function openRoomManager(id: string) {
 function openRoomActions(roomId: string, event: MouseEvent) {
   const topic = topicFromSidebarItemId(roomId)
   const width = 174
-  const height = topic ? 46 : 80
+  const height = topic ? 80 : 80
   const inset = 8
   if (topic) {
     roomActionMenu.value = {
@@ -384,6 +395,14 @@ async function archiveTopicFromAction() {
   closeRoomActions()
   if (!action?.topicId) return
   await groups.archiveTopic(action.roomId, action.topicId)
+}
+
+async function toggleTopicPinnedFromAction() {
+  const action = roomActionMenu.value
+  closeRoomActions()
+  if (!action?.topicId) return
+  const topic = groups.topicsForRoom(action.roomId).find(item => item.id === action.topicId)
+  await groups.setTopicPinned(action.roomId, action.topicId, !topic?.pinned)
 }
 
 async function archiveRoomFromAction() {
@@ -594,7 +613,10 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
   <Teleport to="body">
     <Transition name="group-menu">
       <section v-if="roomActionMenu" class="group-room-actions" :style="roomActionMenuStyle" role="menu" aria-label="群聊房间操作" @contextmenu.prevent>
-        <button v-if="roomActionMenu.topicId" class="group-action-row danger" role="menuitem" type="button" @click="archiveTopicFromAction"><AppIcon name="archive" :size="14" />归档话题</button>
+        <template v-if="roomActionMenu.topicId">
+          <button class="group-action-row" role="menuitem" type="button" @click="toggleTopicPinnedFromAction"><AppIcon name="branch" :size="14" />{{ groups.topicsForRoom(roomActionMenu!.roomId).find(item => item.id === roomActionMenu!.topicId)?.pinned ? '取消置顶' : '置顶话题' }}</button>
+          <button class="group-action-row danger" role="menuitem" type="button" @click="archiveTopicFromAction"><AppIcon name="archive" :size="14" />归档话题</button>
+        </template>
         <template v-else>
           <button class="group-action-row" role="menuitem" type="button" @click="startTopicFromRoomAction"><AppIcon name="plus" :size="14" />新建话题</button>
           <button class="group-action-row danger" role="menuitem" type="button" @click="archiveRoomFromAction"><AppIcon name="archive" :size="14" />归档群聊</button>

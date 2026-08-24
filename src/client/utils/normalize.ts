@@ -375,7 +375,7 @@ export function normalizeGroupMessage(value: unknown): GroupMessage {
     clientMessageId: string(pick(source, 'clientMessageId', 'client_message_id')) || null,
     content: string(source.content), reasoning: string(source.reasoning), toolState: values(pick(source, 'toolState', 'tool_state')) as JsonValue[],
     status: ['queued', 'streaming', 'completed', 'failed', 'interrupted'].includes(status) ? status : 'unknown',
-    error: string(source.error), createdAt: number(pick(source, 'createdAt', 'created_at')), updatedAt: number(pick(source, 'updatedAt', 'updated_at')),
+    error: string(source.error), execution: source.execution ? record(source.execution) as GroupMessage['execution'] : null, createdAt: number(pick(source, 'createdAt', 'created_at')), updatedAt: number(pick(source, 'updatedAt', 'updated_at')),
   }
 }
 
@@ -422,6 +422,7 @@ export function normalizeGroupTopic(value: unknown): GroupTopicSummary {
     createdAt: number(pick(source, 'createdAt', 'created_at')),
     updatedAt: number(pick(source, 'updatedAt', 'updated_at')),
     archived: bool(source.archived),
+    pinned: bool(source.pinned),
   }
 }
 

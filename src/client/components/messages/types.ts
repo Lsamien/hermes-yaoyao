@@ -34,6 +34,7 @@ export type UiMessage = {
   profile?: string
   timelineKind?: 'delegation-complete' | 'system'
   timelineMetadata?: Record<string, unknown>
+  metadata?: string
 }
 
 export type UiInteraction = {

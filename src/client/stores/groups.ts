@@ -7,9 +7,9 @@ import type {
 import {
   addGroupAgent, approveGroupInteraction as approveApi, archiveGroupRoom as archiveApi, archiveGroupTopic as archiveTopicApi,
   clarifyGroupInteraction as clarifyApi, createGroupRoom as createApi, getGroupCapabilities,
-  getGroupMessages, getGroupRoom, getGroupRooms, getGroupTopics, interruptGroupAgent as interruptApi, markGroupTopicRead,
+  getGroupMessages, getGroupRoom, getGroupRooms, getGroupTopics, getPinnedGroupTopics, interruptGroupAgent as interruptApi, markGroupTopicRead,
   removeGroupAgent as removeAgentApi, restoreGroupRoom as restoreRoomApi, restoreGroupTopic as restoreTopicApi, sendGroupMessage as sendApi, updateGroupAgent as updateAgentApi,
-  updateGroupRoom as updateRoomApi, uploadGroupFiles, type AgentSeed,
+  updateGroupRoom as updateRoomApi, updateGroupTopic as updateTopicApi, uploadGroupFiles, type AgentSeed,
 } from '@/api/groups'
 import { GroupEventSocket } from '@/api/realtime'
 import { ScopedCache } from '@/utils/cache'
@@ -42,6 +42,7 @@ export const useGroupsStore = defineStore('groups', () => {
   const protocol = shallowRef<GroupProtocolState>(initialProtocol())
   const selectedRoomId = ref<string>()
   const selectedTopicId = ref<string>()
+  const pinnedTopics = ref<GroupTopicSummary[]>([])
   const connectionState = ref<RealtimeConnectionState>('idle')
   const isLoading = ref(false)
   const isSending = ref(false)
@@ -131,6 +132,10 @@ export const useGroupsStore = defineStore('groups', () => {
     }
   }
 
+  async function loadPinnedTopics(): Promise<void> {
+    pinnedTopics.value = (await getPinnedGroupTopics()).items
+  }
+
   async function connectEvents(anchor: GroupCapabilities, expectedGeneration: number): Promise<void> {
     await socket.connect({
       epoch: anchor.journalEpoch,
@@ -207,6 +212,8 @@ export const useGroupsStore = defineStore('groups', () => {
           throw new Error(`群聊协议版本不兼容：支持 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}，服务器返回 v${anchor.protocolVersion || 'unknown'}`)
         }
         const loadedRooms = await loadRooms()
+        if (expectedGeneration !== generation) return
+        await loadPinnedTopics()
         if (expectedGeneration !== generation) return
         capabilities.value = anchor
         protocol.value = {
@@ -476,6 +483,17 @@ export const useGroupsStore = defineStore('groups', () => {
     await saveCache()
   }
 
+  async function setTopicPinned(roomId: string, topicId: string, pinned: boolean): Promise<GroupTopicSummary> {
+    const topic = await updateTopicApi(roomId, topicId, { pinned })
+    const current = protocol.value.topicsByRoom[roomId] ?? []
+    protocol.value = { ...protocol.value, topicsByRoom: { ...protocol.value.topicsByRoom, [roomId]: upsertGroupTopic(current, topic) } }
+    pinnedTopics.value = pinned
+      ? upsertGroupTopic(pinnedTopics.value, topic)
+      : pinnedTopics.value.filter(item => item.id !== topic.id)
+    await saveCache()
+    return topic
+  }
+
   async function restoreTopic(roomId: string, topicId: string): Promise<GroupTopicSummary> {
     const topic = await restoreTopicApi(roomId, topicId)
     const current = protocol.value.topicsByRoom[roomId] ?? []
@@ -715,7 +733,7 @@ export const useGroupsStore = defineStore('groups', () => {
     availability, capabilities, topicProtocol, hostProtocol, activityProtocol, rooms, selectedRoomId, selectedRoom, topics, topicsForRoom, loadRoomTopics, selectedTopicId, selectedTopic,
     messages, agents, pendingInteractions,
     connectionState, isLoading, isSending, error, hasMoreBefore,
-    start, stop, refresh, selectRoom, selectTopic, startNewTopic, createRoom, updateRoom, archiveRoom, restoreRoom, archiveTopic, restoreTopic, archivedRooms, archivedTopics, addAgent, updateAgent,
+    pinnedTopics, start, stop, refresh, selectRoom, selectTopic, startNewTopic, createRoom, updateRoom, archiveRoom, restoreRoom, archiveTopic, restoreTopic, setTopicPinned, loadPinnedTopics, archivedRooms, archivedTopics, addAgent, updateAgent,
     removeAgent, sendMessage, loadOlder, interruptAgent, approveInteraction, clarifyInteraction,
   }
 })
