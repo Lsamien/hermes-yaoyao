@@ -341,7 +341,6 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleSessionActionPointer)
   document.removeEventListener('keydown', handleSessionActionKey)
-  chat.disconnect()
 })
 
 watch(() => auth.activeProfile?.name, async (profile, previous) => {

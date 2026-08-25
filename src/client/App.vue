@@ -31,6 +31,10 @@ watch(() => theme.resolvedTheme, value => {
 
 watch(pageTitle, value => { document.title = value }, { immediate: true })
 
+watch(() => auth.isAuthenticated, authenticated => {
+  if (authenticated) void chat.connect().catch(() => undefined)
+})
+
 onMounted(() => auth.bootstrap())
 </script>
 

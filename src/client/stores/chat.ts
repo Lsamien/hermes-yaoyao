@@ -21,6 +21,42 @@ import { useAuthStore } from './auth'
 
 interface CachedHistory { messages: ChatMessage[]; total: number; savedAt: number }
 const historyCache = new ScopedCache<CachedHistory>('chat-history-v1')
+const INFLIGHT_SESSION_STORAGE_PREFIX = 'hermes-yaoyao:inflight-chat-sessions:'
+
+interface InflightSessionMarker {
+  profile: string
+  sessionId: string
+}
+
+function sessionStorageForInFlightSessions(): Storage | undefined {
+  if (typeof window === 'undefined') return undefined
+  try { return window.sessionStorage } catch { return undefined }
+}
+
+function readInflightSessionMarkers(accountId: string): InflightSessionMarker[] {
+  const storage = sessionStorageForInFlightSessions()
+  if (!storage) return []
+  try {
+    const value: unknown = JSON.parse(storage.getItem(`${INFLIGHT_SESSION_STORAGE_PREFIX}${accountId}`) ?? '[]')
+    if (!Array.isArray(value)) return []
+    return value.flatMap(item => {
+      const marker = record(item)
+      const profile = string(marker.profile)
+      const sessionId = string(marker.sessionId)
+      return profile && sessionId ? [{ profile, sessionId }] : []
+    })
+  } catch { return [] }
+}
+
+function writeInflightSessionMarkers(accountId: string, markers: InflightSessionMarker[]): void {
+  const storage = sessionStorageForInFlightSessions()
+  if (!storage) return
+  try {
+    const key = `${INFLIGHT_SESSION_STORAGE_PREFIX}${accountId}`
+    if (markers.length) storage.setItem(key, JSON.stringify(markers))
+    else storage.removeItem(key)
+  } catch { /* Storage can be unavailable in privacy-restricted browsers. */ }
+}
 
 function emptyRoute(profile: string, sessionId: string): ChatRouteState {
   return {
@@ -72,6 +108,7 @@ export const useChatStore = defineStore('chat', () => {
   let modelLoadGeneration = 0
   let unreadLoadGeneration = 0
   let reconnectResumePromise: Promise<unknown> | undefined
+  let persistedRecoveryPromise: Promise<void> | undefined
   let hasConnectedOnce = false
   const runtimePromises = new Map<string, Promise<ChatRouteState>>()
 
@@ -123,6 +160,42 @@ export const useChatStore = defineStore('chat', () => {
     }, delay)
   }
 
+  function accountId(): string { return auth.user?.id ?? 'anonymous' }
+
+  function updateInflightMarker(state: ChatRouteState): void {
+    const markers = readInflightSessionMarkers(accountId())
+    const matches = (marker: InflightSessionMarker) => marker.profile === state.route.profile
+      && marker.sessionId === state.route.sessionId
+    const shouldKeep = state.isStreaming || state.isQueued || Boolean(state.pendingApproval) || Boolean(state.pendingClarification)
+    const next = shouldKeep
+      ? [...markers.filter(marker => !matches(marker)), { profile: state.route.profile, sessionId: state.route.sessionId }]
+      : markers.filter(marker => !matches(marker))
+    writeInflightSessionMarkers(accountId(), next)
+  }
+
+  function clearInflightMarker(profile: string, sessionId: string): void {
+    const markers = readInflightSessionMarkers(accountId())
+    writeInflightSessionMarkers(accountId(), markers.filter(marker => marker.profile !== profile || marker.sessionId !== sessionId))
+  }
+
+  function recoverPersistedInflightSessions(): Promise<void> | undefined {
+    if (!auth.isAuthenticated || persistedRecoveryPromise) return persistedRecoveryPromise
+    const markers = readInflightSessionMarkers(accountId())
+    if (!markers.length) return undefined
+    const operation = Promise.all(markers.map(async marker => {
+      const state = ensureRoute(marker.profile, marker.sessionId)
+      try {
+        const resumed = await ensureRuntime(state)
+        updateInflightMarker(resumed)
+      } catch {
+        // Keep the marker. A transient reconnect failure must not turn into an
+        // accidental interruption before Hermes's disconnect grace expires.
+      }
+    })).then(() => undefined)
+    persistedRecoveryPromise = operation.finally(() => { persistedRecoveryPromise = undefined })
+    return persistedRecoveryPromise
+  }
+
   socket.onState((state, reason) => {
     connectionState.value = state
     if (state === 'ready') {
@@ -135,6 +208,7 @@ export const useChatStore = defineStore('chat', () => {
           .catch(cause => { active.error = errorMessage(cause) })
           .finally(() => { reconnectResumePromise = undefined })
       }
+      void recoverPersistedInflightSessions()
     }
     if (state === 'failed') {
       runtimeRoutes.clear()
@@ -206,6 +280,7 @@ export const useChatStore = defineStore('chat', () => {
       ...event, session_id: state.route.sessionId, profile: state.route.profile, payload: attributedPayload,
     })
     routes[key] = updated
+    updateInflightMarker(updated)
     if (['message.complete', 'run.completed'].includes(event.type)) {
       void refreshContextUsage(updated).catch(() => undefined)
     }
@@ -525,6 +600,8 @@ export const useChatStore = defineStore('chat', () => {
       choices: Array.isArray(clarification.choices) ? clarification.choices.map(String) : undefined,
       payload: clarification as Record<string, JsonValue>,
     }
+    if (storedId !== initialState.route.sessionId) clearInflightMarker(initialState.route.profile, initialState.route.sessionId)
+    updateInflightMarker(migrated)
     return migrated
   }
 
@@ -636,6 +713,7 @@ export const useChatStore = defineStore('chat', () => {
           state.isStreaming = true
         }
       }
+      updateInflightMarker(state)
       // The optimistic row remains local, but the sidebar is refreshed only
       // after a 9119 receipt and keeps the order returned by the server.
       void loadSessions(state.route.profile).catch(() => undefined)
@@ -655,6 +733,7 @@ export const useChatStore = defineStore('chat', () => {
     await socket.request('session.interrupt', { session_id: current.runtimeSessionId! }, 15_000)
     current.isStreaming = false
     current.isQueued = false
+    clearInflightMarker(current.route.profile, current.route.sessionId)
   }
 
   async function respondToApproval(requestId: string, approved: boolean | 'once' | 'session' | 'always' | 'deny'): Promise<void> {
