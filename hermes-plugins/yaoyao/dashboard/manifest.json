@@ -3,7 +3,7 @@
   "label": "夭夭",
   "description": "文件归档、Agent 名称、语音设置与多设备群聊",
   "icon": "FolderOpen",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "tab": { "path": "/yaoyao-files", "position": "after:files" },
   "entry": "dist/index.js",
   "css": "dist/style.v1.4.0.css",

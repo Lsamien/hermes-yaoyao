@@ -5,7 +5,7 @@
 仓库同时归档了夭夭的 Hermes Dashboard 插件，位于
 [`hermes-plugins/yaoyao/dashboard`](hermes-plugins/yaoyao/dashboard)。Web 工作台和该插件是两个独立部署单元：前者运行在 `8800`，后者由已运行的 Hermes Dashboard 在 `9119` 加载。
 
-当前发布版本：**Git `v0.1.0` / 夭夭 Web `0.1.0` / Hermes Dashboard 插件 `1.7.0`**。
+当前发布版本：**Git `v0.1.1` / 夭夭 Web `0.1.1` / Hermes Dashboard 插件 `1.7.1`**。
 
 需要由自动化 Agent 部署或升级时，请直接使用 [Agent 安装手册](docs/agent-install.md)。其中包含固定版本校验、备份、同步、单一 Dashboard 重载与验证步骤。
 
@@ -87,7 +87,7 @@ npm run dev
 
 ## 手机扫码与跨节点 Agent
 
-插件 `1.7.0` 与当前 Web 服务共同提供 Hermes 节点配对。每台参与设备都需要安装相同版本的夭夭插件并运行 Web 服务：
+插件 `1.7.1` 与当前 Web 服务共同提供 Hermes 节点配对。每台参与设备都需要安装相同版本的夭夭插件并运行 Web 服务：
 
 1. 在目标 Hermes 的夭夭 Web 左下角打开“手机与节点”。
 2. 输入一次 Hermes 密码并生成两分钟有效、只能使用一次的二维码；密码只用于创建独立设备会话，不会保存。
