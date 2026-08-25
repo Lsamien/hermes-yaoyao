@@ -72,7 +72,9 @@ const timelineRows = computed(() => buildMessageTimelineRows(props.messages))
 const showThinkingIndicator = computed(() => {
   if (!props.thinking) return false
   const current = [...props.messages].reverse().find(message => message.role === 'assistant' && message.status === 'streaming')
-  return !current?.content.trim() && !current?.reasoning?.trim() && !current?.tools?.length
+  // A tool trace is progress detail, not assistant prose. Keep the bottom
+  // activity indicator visible while that tool-only stream segment is active.
+  return !current?.content.trim() && !current?.reasoning?.trim()
 })
 let copyResetTimer: number | undefined
 let thinkingTimer: number | undefined

@@ -717,8 +717,9 @@ test('keeps streamed text below sealed interim commentary and its tool trace', a
   const current = page.locator('.message--assistant').filter({ hasText: '配置检查完成。' }).last()
   const trace = page.locator('.turn-trace').last()
   await expect(interim).toBeVisible()
-  await expect(current).toBeVisible()
   await expect(trace).toHaveClass(/turn-trace--running/)
+  await expect(page.locator('.thinking-indicator')).toBeVisible()
+  await expect(current).toBeVisible()
 
   const [interimBox, traceBox, currentBox] = await Promise.all([
     interim.boundingBox(), trace.boundingBox(), current.boundingBox(),

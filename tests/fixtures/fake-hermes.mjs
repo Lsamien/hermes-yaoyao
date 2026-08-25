@@ -265,8 +265,8 @@ server.on('upgrade', (request, socket, head) => {
             setTimeout(() => {
               emit('tool.complete', { tool_id: 'fake-tool', name: 'terminal', result: { output: '/tmp' } })
               emit('message.delta', { text: '配置检查完成。' })
-            }, 300)
-            setTimeout(() => emit('message.complete', { text: '配置检查完成。', status: 'complete' }), 2_000)
+            }, 800)
+            setTimeout(() => emit('message.complete', { text: '配置检查完成。', status: 'complete' }), 2_500)
             return
           }
           client.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'message.start', session_id: requestFrame.params.session_id, profile: 'yaoyao' } }))
