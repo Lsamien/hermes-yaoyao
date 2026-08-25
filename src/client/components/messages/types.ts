@@ -24,6 +24,7 @@ export type UiMessage = {
   id: string
   role: 'user' | 'assistant' | 'system' | 'tool'
   author?: string
+  isRemoteAgent?: boolean
   content: string
   reasoning?: string
   createdAt?: string | number | Date

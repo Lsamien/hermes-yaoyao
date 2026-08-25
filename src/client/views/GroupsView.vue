@@ -133,10 +133,17 @@ const sidebarItems = computed<SidebarItem[]>(() => {
   }
   return items
 })
-const messages = computed(() => groups.messages.map(groupMessageToUi))
+const messages = computed(() => groups.messages.map(message => groupMessageToUi(message, groups.agents)))
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
 const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
 const agents = computed(() => groups.agents.map(agentToUi))
+function serverAddress(value: string): string {
+  try { return new URL(value).host }
+  catch { return value.replace(/^https?:\/\//i, '').replace(/\/.*$/, '') }
+}
+const remoteServerAddresses = computed(() => Object.fromEntries(groups.nodes
+  .filter(node => node.nodeId && node.serverUrl)
+  .map(node => [node.nodeId, serverAddress(node.serverUrl)])))
 const hostAgent = computed(() => groups.hostProtocol ? groups.agents.find(agent => agent.isHost) : undefined)
 const connected = computed(() => ['connected', 'ready'].includes(groups.connectionState))
 const activeInteraction = computed(() => groupInteraction(groups.pendingInteractions[0]))
@@ -680,6 +687,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :model-options-by-profile="modelOptionsByProfile"
         :model-options-loading="modelOptionsLoading"
         :model-options-error="modelOptionsError"
+        :remote-server-addresses="remoteServerAddresses"
         :agent-update-error="agentUpdateError"
         :manager-error="managerError"
         @update-room="updateRoom"

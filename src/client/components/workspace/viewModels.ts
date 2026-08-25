@@ -195,7 +195,7 @@ export function roomSidebarItem(room: GroupRoomSummary): SidebarItem {
   }
 }
 
-export function groupMessageToUi(message: GroupMessage): UiMessage {
+export function groupMessageToUi(message: GroupMessage, agents: GroupAgent[] = []): UiMessage {
   const tools = (message.toolState || []).map((entry, index) => {
     const value = record(entry)
     const rawStatus = string(value.status, 'success')
@@ -207,10 +207,14 @@ export function groupMessageToUi(message: GroupMessage): UiMessage {
   const reasoning = execution?.actualReasoningEffort || execution?.requestedReasoningEffort
   const fast = execution?.actualFastMode ?? execution?.requestedFastMode
   const metadata = model ? `${fast ? '⚡ ' : ''}${model}${reasoning ? ` · ${reasoning}` : ''}` : undefined
+  const sender = message.senderKind === 'agent'
+    ? agents.find(agent => agent.id === message.senderId)
+    : undefined
   return {
     id: message.id,
     role: message.senderKind === 'human' ? 'user' : message.senderKind === 'agent' ? 'assistant' : 'system',
-    author: message.senderName,
+    author: sender?.displayName || message.senderName,
+    isRemoteAgent: message.senderKind === 'agent' && sender != null && sender.nodeId !== 'local',
     content: message.content,
     reasoning: message.reasoning,
     createdAt: message.createdAt < 10_000_000_000 ? message.createdAt * 1000 : message.createdAt,

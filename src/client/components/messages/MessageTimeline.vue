@@ -278,7 +278,7 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
             </template>
             <template v-else>
             <div v-if="message.role !== 'assistant' || showAssistantIdentity" class="message__meta">
-              <strong>{{ message.role === 'user' ? '你' : message.author || message.profile || (message.role === 'assistant' ? 'Agent' : '系统') }}</strong>
+              <strong><AppIcon v-if="message.isRemoteAgent" class="message__remote-agent" name="globe" :size="12" />{{ message.role === 'user' ? '你' : message.author || message.profile || (message.role === 'assistant' ? 'Agent' : '系统') }}</strong>
               <span v-if="message.metadata" class="message__execution">{{ message.metadata }}</span>
               <time>{{ formatTime(message.createdAt) }}</time>
               <span v-if="message.status && !['settled', 'streaming'].includes(message.status)">{{ { preparing: '准备中', attached: '附件已就绪', pending: '等待回执', accepted: '已接收', streaming: '生成中', settled: '已完成', failed: '发送失败', 'unknown-receipt': '回执未知' }[message.status] }}</span>
@@ -388,7 +388,7 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
 .message { position: relative; display: flex; max-width: 100%; gap: 10px; margin: 0 0 21px; }
 .message__avatar { display: grid; place-items: center; width: 27px; height: 27px; flex: 0 0 27px; border-radius: 9px; background: var(--accent); color: var(--text-on-solid); font-size: 10px; font-weight: 700; }
 .message__body { position: relative; min-width: 0; max-width: min(680px, calc(100% - 37px)); }
-.message__meta { display: flex; min-height: 20px; align-items: center; gap: 7px; color: var(--text-muted); font-size: 9px; }.message__meta strong { color: var(--text-primary); font-size: 11px; font-weight: 600; }.message__meta span { color: var(--warning); }.message__meta .message__execution { overflow: hidden; max-width: 230px; color: var(--text-secondary); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.message__meta { display: flex; min-height: 20px; align-items: center; gap: 7px; color: var(--text-muted); font-size: 9px; }.message__meta strong { display: inline-flex; align-items: center; color: var(--text-primary); font-size: 11px; font-weight: 600; }.message__remote-agent { margin-right: 4px; color: var(--accent); }.message__meta span { color: var(--warning); }.message__meta .message__execution { overflow: hidden; max-width: 230px; color: var(--text-secondary); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .message__content { color: var(--text-primary); }
 .message--user { justify-content: flex-end; margin-top: 27px; }
 .message--user .message__body { max-width: min(610px, 76%); padding: 11px 15px; border-radius: 20px 20px 6px 20px; background: #eceff3; }

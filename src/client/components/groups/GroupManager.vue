@@ -42,6 +42,7 @@ const props = withDefaults(defineProps<{
   modelOptionsByProfile?: Record<string, ModelOption[]>
   modelOptionsLoading?: Record<string, boolean>
   modelOptionsError?: Record<string, string>
+  remoteServerAddresses?: Record<string, string>
   agentUpdateError?: Record<string, string>
   managerError?: string
   busy?: boolean
@@ -141,6 +142,8 @@ function canRemoveAgent(agent: GroupAgent): boolean {
   return props.agents.some(candidate => candidate.id !== agent.id && candidate.enabled)
 }
 
+function isRemoteAgent(agent: GroupAgent): boolean { return agent.nodeId !== 'local' }
+
 function removeAgentTitle(agent: GroupAgent): string {
   return canRemoveAgent(agent) ? '移除' : agent.isHost ? '需要另一位已启用成员才能移除主持人' : '房间必须保留至少一位成员'
 }
@@ -180,7 +183,7 @@ function agentPatch(agent: GroupAgent): AgentSettingsPatch {
   const patch: AgentSettingsPatch = {}
   const displayName = draft.displayName.trim()
   const description = draft.description.trim()
-  if (displayName !== agent.displayName) patch.displayName = displayName
+  if (isRemoteAgent(agent) && displayName !== agent.displayName) patch.displayName = displayName
   if (description !== agent.description) patch.description = description
   if (draft.enabled !== agent.enabled) patch.enabled = draft.enabled
   if (draft.replyWithoutMention !== agent.replyWithoutMention) patch.replyWithoutMention = draft.replyWithoutMention
@@ -276,7 +279,7 @@ function statusLabel(status: GroupAgent['status']): string {
         <fieldset class="agent-editor">
           <legend class="sr-only">{{ selectedAgent.displayName }} Agent 设置</legend>
           <div class="editor-grid">
-            <label><span>显示名称</span><input v-model="agentDrafts[selectedAgent.id].displayName" maxlength="100" aria-label="显示名称" @input="markDirty(selectedAgent.id)" /></label>
+            <label v-if="isRemoteAgent(selectedAgent)"><span>群内名称<small>仅影响此群，会同步到其他设备；不修改远端 Agent 名称。</small></span><input v-model="agentDrafts[selectedAgent.id].displayName" maxlength="100" aria-label="群内名称" @input="markDirty(selectedAgent.id)" /></label>
             <label><span>职责说明</span><textarea v-model="agentDrafts[selectedAgent.id].description" rows="3" maxlength="500" aria-label="职责说明" @input="markDirty(selectedAgent.id)" /></label>
             <label>
               <span>模型</span>
@@ -302,6 +305,7 @@ function statusLabel(status: GroupAgent['status']): string {
               </select>
             </label>
           </div>
+          <p v-if="isRemoteAgent(selectedAgent) && remoteServerAddresses?.[selectedAgent.nodeId]" class="remote-agent-address">远程地址 · {{ remoteServerAddresses[selectedAgent.nodeId] }}</p>
           <div class="editor-toggles">
             <label><input v-model="agentDrafts[selectedAgent.id].enabled" type="checkbox" aria-label="启用" @change="markDirty(selectedAgent.id)" />启用</label>
             <label><input v-model="agentDrafts[selectedAgent.id].replyWithoutMention" type="checkbox" :aria-label="hostEnabled ? '无需 @ 也回复' : '自动回复'" @change="markDirty(selectedAgent.id)" />{{ hostEnabled ? '无需 @ 也回复' : '自动回复' }}</label>
@@ -335,6 +339,7 @@ input, textarea, select { width: 100%; padding: 8px 9px; border: 1px solid var(-
 .agent-action { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; }.agent-action:hover { background: var(--surface-hover); color: var(--text-primary); }.agent-action.danger:hover { color: var(--danger); }.agent-action:disabled { cursor: not-allowed; opacity: .25; }
 .agent-settings-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--text-primary) 24%, transparent); }.agent-settings-dialog { width: min(100%, 520px); max-height: min(720px, calc(100vh - 48px)); overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: 0 24px 72px color-mix(in srgb, var(--text-primary) 24%, transparent); }.agent-settings-dialog header { min-height: 68px; padding: 0 20px; border-bottom: 1px solid var(--line); border-radius: 16px 16px 0 0; }.agent-settings-close { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }.agent-settings-close:hover { background: var(--surface-hover); color: var(--text-primary); }.agent-editor { display: block; min-width: 0; margin: 0; padding: 20px; border: 0; }.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }.editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }.editor-grid > label:nth-child(1), .editor-grid > label:nth-child(2) { grid-column: 1 / -1; }.editor-grid label:last-child { margin-bottom: 7px; }.editor-note { margin: -1px 2px 0; color: var(--text-muted); font-size: 9px; }.editor-note.error { color: var(--danger); }
 .editor-toggles { display: flex; align-items: center; gap: 16px; padding: 3px 0 12px; }.editor-toggles label { display: flex; flex-direction: row; align-items: center; gap: 5px; margin: 0; color: var(--text-secondary); }.editor-toggles input { width: auto; margin: 0; accent-color: var(--accent); }
+.remote-agent-address { margin: 0 0 10px; overflow-wrap: anywhere; color: var(--text-muted); font-size: 9px; line-height: 1.5; }
 .host-explanation { margin: -4px 0 12px; color: var(--text-muted); font-size: 9px; line-height: 1.5; }
 .agent-save-error { margin: 0 0 10px; color: var(--danger); font-size: 9px; line-height: 1.45; }
 .editor-actions { display: flex; justify-content: flex-end; gap: 7px; }.editor-actions button { min-height: 30px; padding: 0 10px; border-radius: 8px; cursor: pointer; font-size: 10px; }.editor-actions button:disabled { cursor: not-allowed; opacity: .35; }.save-agent { border: 1px solid var(--accent); background: var(--accent); color: var(--text-on-solid); }

@@ -1,9 +1,10 @@
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
-import type { GroupAgent } from '@shared/types'
+import type { GroupAgent, GroupMessage } from '@shared/types'
 import CreateGroupDialog from '@/components/groups/CreateGroupDialog.vue'
 import GroupManager from '@/components/groups/GroupManager.vue'
+import { groupMessageToUi } from '@/components/workspace/viewModels'
 
 const profiles = (...names: string[]) => names.map(name => ({
   id: `local|${name}`, profile: name, displayName: name, nodeId: 'local', nodeLabel: '当前 Hermes',
@@ -190,6 +191,65 @@ describe('group host controls', () => {
     await instructions.trigger('change')
     expect(wrapper.emitted('updateRoom')?.at(-1)?.[0]).toMatchObject({
       instructions: '新规则\n输出中文',
+    })
+  })
+
+  it('only allows remote Agents to rename themselves within the room', async () => {
+    const local = agent('agent-1', 'yaoyao', '夭夭', false, false)
+    const remote = {
+      ...agent('agent-2', 'yaoer', '远端夭夭', false, false),
+      nodeId: '11111111-1111-4111-8111-111111111111',
+      nodeLabel: '工作室 Mac',
+    }
+    const wrapper = mount(GroupManager, {
+      props: {
+        room: { id: 'room-1', name: '群聊', memberIds: [local.id, remote.id], replyRounds: 3 },
+        agents: [local, remote],
+        remoteServerAddresses: { [remote.nodeId]: '192.168.1.20:9119' },
+      },
+      global: { stubs: { teleport: true } },
+    })
+
+    await wrapper.get('button[aria-label="设置远端夭夭"]').trigger('click')
+    const remoteName = wrapper.get<HTMLInputElement>('input[aria-label="群内名称"]')
+    await remoteName.setValue('群内审查员')
+    await wrapper.get('.save-agent').trigger('click')
+    expect(wrapper.emitted('updateAgent')?.at(-1)).toEqual([
+      remote.id,
+      { displayName: '群内审查员' },
+    ])
+    expect(wrapper.text()).toContain('192.168.1.20:9119')
+
+    await wrapper.get('button[aria-label="设置夭夭"]').trigger('click')
+    expect(wrapper.find('input[aria-label="群内名称"]').exists()).toBe(false)
+  })
+
+  it('uses the synced remote Agent name and marks its topic message', () => {
+    const remote = {
+      ...agent('agent-remote', 'reviewer', '群内审查员', false, false),
+      nodeId: '11111111-1111-4111-8111-111111111111',
+      nodeLabel: '工作室 Mac',
+    }
+    const message: GroupMessage = {
+      seq: 1,
+      id: 'message-1',
+      roomId: 'room-1',
+      senderKind: 'agent',
+      senderId: remote.id,
+      senderName: '旧名称',
+      rootMessageId: 'message-1',
+      content: '已完成',
+      reasoning: '',
+      toolState: [],
+      status: 'completed',
+      error: '',
+      createdAt: 1,
+      updatedAt: 1,
+    }
+
+    expect(groupMessageToUi(message, [remote])).toMatchObject({
+      author: '群内审查员',
+      isRemoteAgent: true,
     })
   })
 })
