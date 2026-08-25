@@ -53,6 +53,12 @@ function pick(source: UnknownRecord, ...keys: string[]): unknown {
   return undefined
 }
 
+function jsonRecord(value: unknown): UnknownRecord {
+  const direct = record(value)
+  if (Object.keys(direct).length || typeof value !== 'string') return direct
+  try { return record(JSON.parse(value)) } catch { return {} }
+}
+
 export function normalizeUser(value: unknown): CurrentUser {
   const source = record(value)
   const id = string(pick(source, 'id', 'user_id', 'userId')) || string(pick(source, 'email', 'username')) || 'local'
@@ -103,6 +109,7 @@ export function normalizeModel(value: unknown): ModelOption {
 
 export function normalizeSession(value: unknown, fallbackProfile?: string): SessionSummary {
   const source = record(value)
+  const modelConfig = jsonRecord(pick(source, 'model_config', 'modelConfig'))
   const startedAt = number(pick(source, 'started_at', 'startedAt', 'created_at', 'createdAt'))
   const updatedAt = number(pick(source, 'last_active', 'lastActive', 'updated_at', 'updatedAt'), startedAt)
   const id = string(pick(source, 'id', 'session_id', 'sessionId', 'stored_session_id', 'storedSessionId'))
@@ -112,8 +119,8 @@ export function normalizeSession(value: unknown, fallbackProfile?: string): Sess
     source: string(source.source, 'cli'),
     title: string(source.title, '未命名会话'),
     preview: string(source.preview) || undefined,
-    model: string(source.model) || undefined,
-    provider: string(source.provider) || undefined,
+    model: string(source.model ?? modelConfig.model) || undefined,
+    provider: string(source.provider ?? modelConfig.provider) || undefined,
     agent: string(source.agent) || undefined,
     messageCount: number(pick(source, 'message_count', 'messageCount')),
     toolCallCount: number(pick(source, 'tool_call_count', 'toolCallCount')),

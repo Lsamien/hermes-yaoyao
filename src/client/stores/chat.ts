@@ -4,7 +4,7 @@ import type {
   ChatAttachment, ChatMessage, ChatRouteState, JsonValue, ModelOption, RealtimeConnectionState, SessionSummary,
 } from '@shared/types'
 import {
-  deleteSession as deleteSessionApi, getMessages, getSessions, getSessionUnread, markSessionRead, updateSession,
+  deleteSession as deleteSessionApi, getMessages, getSession, getSessions, getSessionUnread, markSessionRead, updateSession,
 } from '@/api/sessions'
 import { getModels } from '@/api/profiles'
 import { ChatRpcSocket, RpcError } from '@/api/realtime'
@@ -15,7 +15,7 @@ import { createId, routeKey } from '@/utils/id'
 import { applyChatEvent, mergeChatMessages } from '@/utils/messageReducer'
 import { bool, normalizeChatMessage, number, record, string, values } from '@/utils/normalize'
 import { appendSessionPage, pinnedSessionsFirst } from '@/utils/sessionOrder'
-import { modelForSession } from '@/utils/sessionModel'
+import { modelForSession, modelSelectionFromSessionInfo } from '@/utils/sessionModel'
 import { moveSessionFastMode, readSessionFastMode, writeSessionFastMode } from '@/utils/sessionPreferences'
 import { useAuthStore } from './auth'
 
@@ -145,6 +145,27 @@ export const useChatStore = defineStore('chat', () => {
     if (resolved) selectedModel.value = resolved
   }
 
+  function restoreSelectedSessionModel(key: string): void {
+    const activeKey = activeSessionId.value && activeProfileName.value
+      ? routeKey(activeProfileName.value, activeSessionId.value)
+      : undefined
+    if (key === activeKey) syncSelectedModel(activeSession.value?.model, activeSession.value?.provider)
+  }
+
+  function reconcileSessionModel(profile: string, sessionId: string, model: string, provider?: string): void {
+    const key = routeKey(profile, sessionId)
+    const sessionIndex = sessions.value.findIndex(session => session.id === sessionId && session.profile === profile)
+    if (sessionIndex >= 0) {
+      sessions.value.splice(sessionIndex, 1, {
+        ...sessions.value[sessionIndex], model, provider,
+      })
+    }
+    const activeKey = activeSessionId.value && activeProfileName.value
+      ? routeKey(activeProfileName.value, activeSessionId.value)
+      : undefined
+    if (key === activeKey && !desiredModelRoutes.has(key)) syncSelectedModel(model, provider)
+  }
+
   function cacheScope(profile: string): string {
     return `${auth.user?.id ?? 'anonymous'}:${profile}`
   }
@@ -266,6 +287,10 @@ export const useChatStore = defineStore('chat', () => {
       if (storedId && storedId !== state.route.sessionId) {
         state = migrateRoute(key, storedId, runtimeId)
         key = routeKey(state.route.profile, storedId)
+      }
+      const liveSelection = modelSelectionFromSessionInfo(payload)
+      if (liveSelection) {
+        reconcileSessionModel(state.route.profile, state.route.sessionId, liveSelection.model, liveSelection.provider)
       }
     }
     const info = record(payload.info)
@@ -749,8 +774,20 @@ export const useChatStore = defineStore('chat', () => {
       const target = routes[modelConfirmation.routeKey]
       if (!target) throw new Error('模型确认请求已失效')
       const modelState = await ensureRuntime(target)
-      if (choice !== 'deny') {
-        await configureModel(modelState, modelConfirmation.model, true)
+      if (choice === 'deny') {
+        desiredModelRoutes.delete(modelConfirmation.routeKey)
+        restoreSelectedSessionModel(modelConfirmation.routeKey)
+      } else {
+        try {
+          if (await configureModel(modelState, modelConfirmation.model, true)) {
+            desiredModelRoutes.delete(modelConfirmation.routeKey)
+          }
+        } catch (cause) {
+          desiredModelRoutes.delete(modelConfirmation.routeKey)
+          restoreSelectedSessionModel(modelConfirmation.routeKey)
+          modelState.pendingApproval = undefined
+          throw cause
+        }
       }
       modelState.pendingApproval = undefined
       return
@@ -815,6 +852,16 @@ export const useChatStore = defineStore('chat', () => {
       ?? models.value.find(model => model.isDefault) ?? models.value[0]
   }
 
+  async function refreshActiveSessionModel(): Promise<void> {
+    const state = activeRouteState.value
+    if (!state || state.route.sessionId.startsWith('draft-')) return
+    const expectedKey = routeKey(state.route.profile, state.route.sessionId)
+    const refreshed = await getSession(state.route.sessionId, state.route.profile)
+    const current = activeRouteState.value
+    if (!current || routeKey(current.route.profile, current.route.sessionId) !== expectedKey || !refreshed.model) return
+    reconcileSessionModel(current.route.profile, current.route.sessionId, refreshed.model, refreshed.provider)
+  }
+
   async function configureModel(state: ChatRouteState, model: ModelOption, confirmsExpensiveModel: boolean): Promise<boolean> {
     const result = resultRecord(await socket.request('config.set', {
       session_id: state.runtimeSessionId!,
@@ -855,7 +902,13 @@ export const useChatStore = defineStore('chat', () => {
     const key = routeKey(state.route.profile, state.route.sessionId)
     desiredModelRoutes.add(key)
     if (!state.runtimeSessionId) return
-    if (await configureModel(state, model, false)) desiredModelRoutes.delete(key)
+    try {
+      if (await configureModel(state, model, false)) desiredModelRoutes.delete(key)
+    } catch (cause) {
+      desiredModelRoutes.delete(key)
+      restoreSelectedSessionModel(key)
+      throw cause
+    }
   }
 
   async function setFastMode(enabled: boolean): Promise<void> {
@@ -902,6 +955,6 @@ export const useChatStore = defineStore('chat', () => {
     error, models, selectedModel, reasoningEffort, fastMode, contextUsage, pendingApproval, pendingClarification, unreadCounts,
     loadSessions, loadMoreSessions, selectSession, loadOlder, createSession, connect, disconnect, send, interrupt,
     respondToApproval, respondToClarification, branchSession, renameSession, setSessionPinned, removeSession,
-    loadModels, setModel, setFastMode, refreshContextUsage, loadUnread, markRead, switchProfile,
+    loadModels, setModel, setFastMode, refreshActiveSessionModel, refreshContextUsage, loadUnread, markRead, switchProfile,
   }
 })

@@ -48,6 +48,7 @@ const composer = ref<InstanceType<typeof ComposerShell> | null>(null)
 const timeline = ref<InstanceType<typeof MessageTimeline> | null>(null)
 const headerSessionMenuButton = ref<HTMLButtonElement | null>(null)
 const restoringRouteProfile = ref('')
+let modelSyncTimer: number | undefined
 
 const sessions = computed(() => [...chat.sessions]
   .filter(session => !['cron', 'ios_group'].includes(session.source)))
@@ -333,6 +334,10 @@ onMounted(async () => {
   document.addEventListener('keydown', handleSessionActionKey)
   await refreshSessions()
   await Promise.allSettled([chat.loadModels(auth.activeProfile?.name), chat.connect()])
+  void chat.refreshActiveSessionModel().catch(() => undefined)
+  modelSyncTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') void chat.refreshActiveSessionModel().catch(() => undefined)
+  }, 3_000)
   await revealSourceMessage()
   const pendingFile = await consumeLibraryItemForComposer()
   if (pendingFile) composer.value?.attachFiles([pendingFile])
@@ -341,6 +346,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleSessionActionPointer)
   document.removeEventListener('keydown', handleSessionActionKey)
+  if (modelSyncTimer !== undefined) window.clearInterval(modelSyncTimer)
 })
 
 watch(() => auth.activeProfile?.name, async (profile, previous) => {
@@ -365,6 +371,7 @@ watch(() => auth.activeProfile?.name, async (profile, previous) => {
 
 watch(() => chat.activeSessionId, async id => {
   const profile = chat.activeProfileName || auth.activeProfile?.name || ''
+  if (id) void chat.refreshActiveSessionModel().catch(() => undefined)
   if (!id || (route.params.sessionId === id && routeProfile() === profile)) return
   await router.replace(sessionLocation(id, profile))
 })
