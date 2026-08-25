@@ -37,6 +37,22 @@ describe('chat message reducer', () => {
     expect(merged[0].stage).toBe('settled')
   })
 
+  it('keeps history and a realtime assistant reply in chronological order', () => {
+    const optimistic = { ...message('local-user', '新问题', 'client-1'), timestamp: 30, stage: 'pending' as const }
+    const older = { ...message('history-user', '旧问题'), timestamp: 10, sequence: 10 }
+    const newer = {
+      ...message('history-answer', '旧回答'), role: 'assistant' as const, timestamp: 20, sequence: 11,
+    }
+    const streamed = {
+      ...message('stream-answer', '新回答'), role: 'assistant' as const, timestamp: 31, stage: 'streaming' as const, isStreaming: true,
+    }
+
+    const merged = mergeChatMessages([optimistic], [newer, older], 'snapshot')
+    expect(mergeChatMessages(merged, [streamed]).map(item => item.id)).toEqual([
+      'history-user', 'history-answer', 'local-user', 'stream-answer',
+    ])
+  })
+
   it('replaces a cached iOS marker with an attachment-only normalized message', () => {
     const cached = message('ios-file', '[用户附加文件：车位.pdf]\n@file:`attachments/车位.pdf`')
     const normalized = {

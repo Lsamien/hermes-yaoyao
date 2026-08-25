@@ -6,6 +6,30 @@ import { bool, number, record, string } from './normalize'
 
 type MergePosition = 'append' | 'prepend' | 'snapshot'
 
+function messageTime(message: ChatMessage): number {
+  return message.timestamp < 10_000_000_000 ? message.timestamp * 1000 : message.timestamp
+}
+
+/**
+ * Keep the conversation in its canonical chronological order even when a
+ * history snapshot races a realtime event.  Sequence is preferred when both
+ * rows carry one; otherwise timestamps retain the order supplied by Hermes.
+ */
+export function orderChatMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages
+    .map((message, index) => ({ message, index }))
+    .sort((left, right) => {
+      const leftSequence = left.message.sequence
+      const rightSequence = right.message.sequence
+      if (leftSequence !== undefined && rightSequence !== undefined && leftSequence !== rightSequence) {
+        return leftSequence - rightSequence
+      }
+      const timeDelta = messageTime(left.message) - messageTime(right.message)
+      return timeDelta || left.index - right.index
+    })
+    .map(({ message }) => message)
+}
+
 function sameMessage(left: ChatMessage, right: ChatMessage): boolean {
   if (left.id && right.id && left.id === right.id) return true
   return Boolean(left.clientMessageId && right.clientMessageId && left.clientMessageId === right.clientMessageId)
@@ -35,7 +59,7 @@ export function mergeChatMessages(existing: ChatMessage[], incoming: ChatMessage
     if (index < 0) result.push(message)
     else result[index] = mergeOne(result[index], message)
   }
-  return result
+  return orderChatMessages(result)
 }
 
 function payloadRecord(event: RpcEventFrame['params']): Record<string, unknown> {

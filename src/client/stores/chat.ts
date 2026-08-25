@@ -202,9 +202,13 @@ export const useChatStore = defineStore('chat', () => {
       persistFastMode(state)
     }
     const attributedPayload = { ...payload, session_id: state.route.sessionId } as JsonValue
-    routes[key] = applyChatEvent(state, {
+    const updated = applyChatEvent(state, {
       ...event, session_id: state.route.sessionId, profile: state.route.profile, payload: attributedPayload,
     })
+    routes[key] = updated
+    if (['message.complete', 'run.completed'].includes(event.type)) {
+      void refreshContextUsage(updated).catch(() => undefined)
+    }
   })
 
   async function connect(): Promise<void> {
@@ -374,6 +378,10 @@ export const useChatStore = defineStore('chat', () => {
     // The runtime is attached lazily by send/interrupt/usage, or when a known
     // in-flight turn reconnects. REST history remains authoritative here.
     if (!state.historySynced) await loadHistory(state)
+    // Context usage comes from the realtime runtime rather than the REST
+    // history response.  Fetch it when opening an existing session so the
+    // composer does not stay at zero until a later event happens to include it.
+    void refreshContextUsage(state).catch(() => undefined)
     const refreshed = sessions.value.find(item => item.id === sessionId && item.profile === selectedProfile)
     syncSelectedModel(refreshed?.model, refreshed?.provider)
   }
@@ -791,10 +799,9 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function refreshContextUsage(): Promise<void> {
-    const state = activeRouteState.value
-    if (!state) return
-    const current = await ensureRuntime(state)
+  async function refreshContextUsage(initialState = activeRouteState.value): Promise<void> {
+    if (!initialState || initialState.route.sessionId.startsWith('draft-')) return
+    const current = await ensureRuntime(initialState)
     const usage = resultRecord(await socket.request('session.usage', { session_id: current.runtimeSessionId! }))
     current.usage = {
       inputTokens: number(usage.input_tokens ?? usage.input) || undefined,
