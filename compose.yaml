@@ -22,7 +22,9 @@ services:
       HERMES_YAOYAO_HOST: 0.0.0.0
       HERMES_YAOYAO_PORT: 8800
       HERMES_YAOYAO_UPSTREAM: "${HERMES_YAOYAO_UPSTREAM:-http://host.docker.internal:9119}"
-      HERMES_YAOYAO_ALLOWED_HOSTS: "${HERMES_YAOYAO_ALLOWED_HOSTS:-}"
+      # Permit localhost access when the published host port differs from the
+      # container's fixed 8800 port; configured public host names remain opt-in.
+      HERMES_YAOYAO_ALLOWED_HOSTS: "localhost,127.0.0.1,${HERMES_YAOYAO_ALLOWED_HOSTS:-}"
       HERMES_YAOYAO_ALLOW_INSECURE_LAN: "1"
       HERMES_YAOYAO_SUPERVISE_DASHBOARD: "0"
       HERMES_YAOYAO_HOME: /var/lib/hermes-yaoyao

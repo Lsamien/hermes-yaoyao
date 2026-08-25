@@ -163,6 +163,11 @@ docker compose --env-file docker.env up -d --build
 - 将 CSRF 密钥、设备配对信息和上传索引保存在命名卷 `hermes-yaoyao_yaoyao-data`；
 - 以非 root 用户和只读根文件系统运行容器。
 
+若本机 `8800` 已被占用，只需在 `docker.env` 中将
+`HERMES_YAOYAO_PUBLISHED_PORT` 改为未占用端口（例如 `8801`），再重新执行
+`docker compose --env-file docker.env up -d`。容器内服务和默认发布端口仍为
+`8800`，并且 Compose 已允许通过 `localhost` 和 `127.0.0.1` 使用这个替代端口。
+
 查看状态与日志：
 
 ```bash
