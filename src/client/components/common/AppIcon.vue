@@ -1,7 +1,6 @@
 <script setup lang="ts">
 type IconName =
   | 'chat'
-  | 'bots'
   | 'groups'
   | 'files'
   | 'artifacts'
@@ -67,14 +66,12 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 18 })
       <path d="M8 18h-3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-5l-6 4z" />
       <path d="M8 9h8M8 13h5" />
     </template>
-    <template v-else-if="name === 'bots'">
-      <rect x="4" y="7" width="16" height="12" rx="3" />
-      <path d="M12 3v4M9 12h.01M15 12h.01M9 16h6" />
-    </template>
     <template v-else-if="name === 'groups'">
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+      <circle cx="12" cy="7" r="3.25" fill="currentColor" stroke="none" />
+      <path d="M5.9 20.5c.55-3.9 2.74-5.85 6.1-5.85s5.55 1.95 6.1 5.85" fill="currentColor" stroke="none" />
+      <circle cx="5.1" cy="9.2" r="2.35" fill="currentColor" stroke="none" opacity=".82" />
+      <circle cx="18.9" cy="9.2" r="2.35" fill="currentColor" stroke="none" opacity=".82" />
+      <path d="M1.7 20.5c.38-2.85 1.8-4.38 4.25-4.6M22.3 20.5c-.38-2.85-1.8-4.38-4.25-4.6" fill="currentColor" stroke="none" opacity=".82" />
     </template>
     <template v-else-if="name === 'files'">
       <path d="M4 4a2 2 0 0 1 2-2h5l2 3h5a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />

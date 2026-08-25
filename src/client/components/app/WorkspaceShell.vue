@@ -10,7 +10,7 @@ type NavItem = {
   key: 'chat' | 'groups' | 'files'
   label: string
   path: string
-  icon: 'bots' | 'groups' | 'files'
+  icon: 'chat' | 'groups' | 'files'
 }
 
 const SIDEBAR_COLLAPSED_KEY = 'hermes-yaoyao:sidebar-collapsed'
@@ -61,7 +61,7 @@ const desktopSidebarContext = ref<HTMLElement | null>(null)
 const mobileSidebarContext = ref<HTMLElement | null>(null)
 
 const navItems: NavItem[] = [
-  { key: 'chat', label: '对话', path: '/chat', icon: 'bots' },
+  { key: 'chat', label: '对话', path: '/chat', icon: 'chat' },
   { key: 'groups', label: '群聊', path: '/groups', icon: 'groups' },
   { key: 'files', label: '文件库', path: '/files', icon: 'files' },
 ]
@@ -97,10 +97,6 @@ function closeMenus(event: MouseEvent) {
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
   try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0') } catch { /* optional persistence */ }
-}
-
-function navIcon(key: NavItem['key']): 'bots' | 'folder' | 'people' {
-  return key === 'groups' ? 'people' : key === 'files' ? 'folder' : 'bots'
 }
 
 async function openSidebarSearch(host: HTMLElement | null) {
@@ -225,7 +221,7 @@ onBeforeUnmount(() => {
           :title="item.label"
           @click="navigate(item.path)"
         >
-          <YaoYaoSidebarIcon :name="navIcon(item.key)" />
+          <AppIcon :name="item.icon" :size="18" />
           <span>{{ item.label }}</span>
         </button>
       </nav>
