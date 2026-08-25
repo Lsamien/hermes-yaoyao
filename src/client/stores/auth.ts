@@ -100,8 +100,16 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function refreshProfileAvatars(): Promise<void> {
+    const avatars = await authApi.fetchProfileAvatars(profiles.value)
+    profiles.value = profiles.value.map(profile => ({
+      ...profile,
+      ...(avatars[profile.name] ? { agentAvatar: avatars[profile.name] } : {}),
+    }))
+  }
+
   return {
     status, user, profiles, activeProfileName, activeProfile, csrfToken, error, authRequired, insecureLan, groupUploadsEnabled,
-    isAuthenticated, bootstrap, login, logout, selectProfile, refreshProfiles, expire,
+    isAuthenticated, bootstrap, login, logout, selectProfile, refreshProfiles, refreshProfileAvatars, expire,
   }
 })

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL } from '@shared/types'
 import type { GroupAgent, GroupRoomSummary, GroupTopicSummary, ModelOption } from '@shared/types'
 import AppIcon from '@/components/common/AppIcon.vue'
+import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ComposerShell from '@/components/composer/ComposerShell.vue'
@@ -137,6 +138,9 @@ const messages = computed(() => groups.messages.map(message => groupMessageToUi(
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
 const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
 const agents = computed(() => groups.agents.map(agentToUi))
+const agentAvatars = computed(() => Object.fromEntries(auth.profiles.flatMap(profile =>
+  profile.agentAvatar ? [[profile.name, profile.agentAvatar] as const] : []
+)))
 function serverAddress(value: string): string {
   try { return new URL(value).host }
   catch { return value.replace(/^https?:\/\//i, '').replace(/\/.*$/, '') }
@@ -651,6 +655,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :show-tools="showThinking"
         :interaction="activeInteraction"
         :mention-names="mentionNames"
+        :agent-avatars="agentAvatars"
         :empty-title="groups.topicProtocol ? '开始一个新话题' : '让多个 Agent 一起工作'"
         :empty-description="groups.topicProtocol ? '第一条消息会创建独立话题，各话题分别保留 Agent 上下文。' : '使用 @ 提及指定 Agent，或直接发送消息触发已启用自动回复的成员。'"
         @load-older="groups.loadOlder"
@@ -663,7 +668,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         <template #header-actions>
           <div class="group-header-actions">
             <span v-if="hostAgent" class="group-host-chip" :title="`用户未明确 @ 时由 ${hostAgent.displayName || hostAgent.profile} 负责回应`">主持人 {{ hostAgent.displayName || hostAgent.profile }}</span>
-            <div class="group-avatars" aria-label="群聊成员"><span v-for="agent in agents.slice(0, 4)" :key="agent.id" :title="agent.isHost ? `${agent.name} · 主持人` : agent.name" :class="{ host: agent.isHost }">{{ agent.name.slice(0, 1).toUpperCase() }}</span><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
+            <div class="group-avatars" aria-label="群聊成员"><AgentAvatar v-for="agent in agents.slice(0, 4)" :key="agent.id" :name="agent.name" :avatar="agentAvatars[agent.profile || ''] || ''" :size="24" :title="agent.isHost ? `${agent.name} · 主持人` : agent.name" :class="{ host: agent.isHost }" /><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
             <button class="icon-button" type="button" title="管理群聊" aria-label="管理群聊" :disabled="!groups.selectedRoom" @click="openSelectedRoomManager"><AppIcon name="dots" /></button>
           </div>
         </template>

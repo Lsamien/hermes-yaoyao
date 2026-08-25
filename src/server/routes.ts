@@ -125,29 +125,22 @@ function normalizedProfiles(value: JsonObject): unknown[] {
 
 function profilesWithHermesBotNames(profiles: unknown[], pluginProfiles: JsonObject | undefined): unknown[] {
   const items = Array.isArray(pluginProfiles?.profiles) ? pluginProfiles.profiles : []
-  const identities = new Map<string, { name?: string; avatar?: string }>()
+  const identities = new Map<string, string>()
   for (const entry of items) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
     const profile = entry as JsonObject
     const name = typeof profile.name === 'string' ? profile.name : ''
     const botName = typeof profile.botName === 'string' ? profile.botName.trim() : ''
-    const avatar = typeof profile.avatar === 'string' && profile.avatar.startsWith('data:image/')
-      ? profile.avatar
-      : ''
-    if (name && (botName || avatar)) identities.set(name, {
-      ...(botName ? { name: botName } : {}),
-      ...(avatar ? { avatar } : {}),
-    })
+    if (name && botName) identities.set(name, botName)
   }
   return profiles.map(entry => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry
     const profile = entry as JsonObject
     const name = typeof profile.name === 'string' ? profile.name : typeof profile.profile === 'string' ? profile.profile : ''
-    const identity = identities.get(name)
-    return identity ? {
+    const agentName = identities.get(name)
+    return agentName ? {
       ...profile,
-      ...(identity.name ? { agentName: identity.name } : {}),
-      ...(identity.avatar ? { agentAvatar: identity.avatar } : {}),
+      agentName,
     } : profile
   })
 }

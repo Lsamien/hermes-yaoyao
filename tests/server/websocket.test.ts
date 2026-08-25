@@ -191,6 +191,11 @@ describe('WebSocket relay', () => {
     }))
     await wsMessage(socket)
     socket.send(JSON.stringify({
+      id: 'profile-avatar', method: 'profiles.set_asset',
+      params: { name: 'default', asset: 'avatar', data: 'data:image/png;base64,AA==' },
+    }))
+    await wsMessage(socket)
+    socket.send(JSON.stringify({
       id: 'hidden-bot', method: 'session.create',
       params: {
         profile: 'default', title: 'Bot Chat', source: 'ios_bot_group',
@@ -205,7 +210,11 @@ describe('WebSocket relay', () => {
       id: 'profile-meta', method: 'profiles.configure',
       params: { name: 'default' },
     })
-    expect(pairedFrames[2]).toMatchObject({
+    expect(pairedFrames[2]).toEqual({
+      id: 'profile-avatar', method: 'profiles.set_asset',
+      params: { name: 'default', asset: 'avatar', data: 'data:image/png;base64,AA==' },
+    })
+    expect(pairedFrames[3]).toMatchObject({
       id: 'hidden-bot', method: 'session.create',
       params: { profile: 'default', source: 'ios_bot_group', hidden: true },
     })

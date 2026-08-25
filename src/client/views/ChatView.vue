@@ -55,6 +55,9 @@ const agentNames = computed(() => new Map(auth.profiles.map(profile => [
   profile.name,
   profile.agentName || profile.displayName || profile.name,
 ])))
+const agentAvatars = computed(() => Object.fromEntries(auth.profiles.flatMap(profile =>
+  profile.agentAvatar ? [[profile.name, profile.agentAvatar] as const] : []
+)))
 const sidebarItems = computed(() => sessions.value.map(session => sessionSidebarItem(
   session,
   chat.unreadCounts[session.id] ?? 0,
@@ -409,6 +412,7 @@ watch(() => chat.activeSessionId, async id => {
         :show-tools="showThinking"
         :thinking="chat.isSending || chat.isStreaming"
         :show-assistant-identity="false"
+        :agent-avatars="agentAvatars"
         :interaction="interaction"
         empty-logo
         transparent-header

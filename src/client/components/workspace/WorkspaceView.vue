@@ -25,7 +25,7 @@ const identityError = ref('')
 
 async function logout() { await auth.logout() }
 function selectProfile(name: string) { auth.selectProfile(name) }
-async function saveIdentity(input: { title: string; avatarDataURL: string | null }) {
+async function saveIdentity(input: { title: string; avatarDataURL?: string | null }) {
   const profile = auth.activeProfile
   if (!profile) return
   identityBusy.value = true
@@ -33,6 +33,7 @@ async function saveIdentity(input: { title: string; avatarDataURL: string | null
   try {
     await updateProfileIdentity(profile, input)
     await auth.refreshProfiles()
+    await auth.refreshProfileAvatars()
     identityOpen.value = false
   } catch (cause) {
     identityError.value = cause instanceof Error ? cause.message : '保存 Agent 身份失败'
@@ -40,9 +41,19 @@ async function saveIdentity(input: { title: string; avatarDataURL: string | null
     identityBusy.value = false
   }
 }
-function refreshOnFocus() { void auth.refreshProfiles().catch(() => undefined) }
-onMounted(() => window.addEventListener('focus', refreshOnFocus))
-onBeforeUnmount(() => window.removeEventListener('focus', refreshOnFocus))
+async function refreshOnFocus() {
+  await auth.refreshProfiles()
+  await auth.refreshProfileAvatars()
+}
+function refreshOnWindowFocus() { void refreshOnFocus().catch(() => undefined) }
+function openIdentity() {
+  void auth.refreshProfileAvatars().finally(() => { identityOpen.value = true })
+}
+onMounted(() => {
+  window.addEventListener('focus', refreshOnWindowFocus)
+  void auth.refreshProfileAvatars().catch(() => undefined)
+})
+onBeforeUnmount(() => window.removeEventListener('focus', refreshOnWindowFocus))
 </script>
 
 <template>
@@ -61,7 +72,7 @@ onBeforeUnmount(() => window.removeEventListener('focus', refreshOnFocus))
     @logout="logout"
     @toggle-theme="theme.toggle"
     @select-profile="selectProfile"
-    @edit-profile="identityOpen = true"
+    @edit-profile="openIdentity"
     @close-inspector="emit('closeInspector')"
   >
     <template #sidebar-action><slot name="sidebar-action" /></template>

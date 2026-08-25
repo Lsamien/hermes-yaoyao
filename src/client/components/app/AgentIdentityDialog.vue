@@ -7,11 +7,12 @@ import AppIcon from '@/components/common/AppIcon.vue'
 const props = defineProps<{ open: boolean; profile?: Profile; busy?: boolean; error?: string }>()
 const emit = defineEmits<{
   close: []
-  save: [input: { title: string; avatarDataURL: string | null }]
+  save: [input: { title: string; avatarDataURL?: string | null }]
 }>()
 
 const title = ref('')
 const avatarDataURL = ref<string | null>(null)
+const avatarTouched = ref(false)
 const localError = ref('')
 const fileInput = ref<HTMLInputElement>()
 
@@ -19,6 +20,7 @@ watch(() => [props.open, props.profile] as const, () => {
   if (!props.open) return
   title.value = props.profile?.agentName || props.profile?.displayName || props.profile?.name || ''
   avatarDataURL.value = props.profile?.agentAvatar || null
+  avatarTouched.value = false
   localError.value = ''
 }, { immediate: true })
 
@@ -57,6 +59,7 @@ async function chooseAvatar(event: Event) {
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('请选择 PNG、JPEG 或 WebP 图片')
     if (file.size > 10 * 1024 * 1024) throw new Error('图片不能超过 10 MB')
     avatarDataURL.value = await resizeImage(await readImage(file))
+    avatarTouched.value = true
     localError.value = ''
   } catch (cause) {
     localError.value = cause instanceof Error ? cause.message : '处理头像失败'
@@ -71,7 +74,7 @@ function submit() {
     localError.value = '请输入 Agent 名称'
     return
   }
-  emit('save', { title: normalized, avatarDataURL: avatarDataURL.value })
+  emit('save', { title: normalized, ...(avatarTouched.value ? { avatarDataURL: avatarDataURL.value } : {}) })
 }
 </script>
 
@@ -81,7 +84,7 @@ function submit() {
       <div v-if="open && profile" class="identity-layer" @mousedown.self="emit('close')">
         <form class="identity-dialog" @submit.prevent="submit">
           <header><div><small>AGENT 身份</small><h2>编辑 {{ profile.name }}</h2></div><button class="icon-button" type="button" aria-label="关闭" :disabled="busy" @click="emit('close')"><AppIcon name="close" /></button></header>
-          <div class="identity-avatar"><AgentAvatar :name="title || profile.name" :avatar="avatarDataURL || ''" :size="76" /><div><strong>头像</strong><small>会压缩为 256 px，并同步到所有设备。</small><p><button class="quiet-button" type="button" :disabled="busy" @click="fileInput?.click()"><AppIcon name="image" :size="14" />选择图片</button><button v-if="avatarDataURL" class="quiet-button" type="button" :disabled="busy" @click="avatarDataURL = null">移除</button></p></div><input ref="fileInput" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" @change="chooseAvatar" /></div>
+          <div class="identity-avatar"><AgentAvatar :name="title || profile.name" :avatar="avatarDataURL || ''" :size="76" /><div><strong>Desktop Bots 头像</strong><small>会压缩为 256 px，并写入 Desktop 原生 Agent 头像；所有设备同步。</small><p><button class="quiet-button" type="button" :disabled="busy" @click="fileInput?.click()"><AppIcon name="image" :size="14" />选择图片</button><button v-if="avatarDataURL" class="quiet-button" type="button" :disabled="busy" @click="avatarDataURL = null; avatarTouched = true">移除</button></p></div><input ref="fileInput" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" @change="chooseAvatar" /></div>
           <label>名称<input v-model="title" :disabled="busy" maxlength="100" autocomplete="off" /></label>
           <p v-if="localError || error" class="identity-error" role="alert">{{ localError || error }}</p>
           <footer><button class="quiet-button" type="button" :disabled="busy" @click="emit('close')">取消</button><button class="primary-button" type="submit" :disabled="busy">{{ busy ? '正在同步…' : '保存并同步' }}</button></footer>

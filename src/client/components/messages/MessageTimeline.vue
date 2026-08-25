@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
+import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import InteractionCard from './InteractionCard.vue'
 import MarkdownContent from './MarkdownContent.vue'
@@ -29,6 +30,7 @@ const props = withDefaults(defineProps<{
   showAssistantIdentity?: boolean
   interaction?: UiInteraction | null
   mentionNames?: string[]
+  agentAvatars?: Record<string, string>
   thinking?: boolean
 }>(), {
   title: '',
@@ -47,6 +49,7 @@ const props = withDefaults(defineProps<{
   showAssistantIdentity: true,
   interaction: null,
   mentionNames: () => [],
+  agentAvatars: () => ({}),
   thinking: false,
 })
 
@@ -256,7 +259,7 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
             'message--assistant-anonymous': message.role === 'assistant' && !showAssistantIdentity,
           }]"
         >
-          <div v-if="message.role !== 'user' && (message.role !== 'assistant' || showAssistantIdentity)" class="message__avatar">{{ (message.author || message.profile || (message.role === 'assistant' ? '夭' : '系')).slice(0, 1).toUpperCase() }}</div>
+          <AgentAvatar v-if="message.role !== 'user' && (message.role !== 'assistant' || showAssistantIdentity)" class="message__avatar" :name="message.author || message.profile || (message.role === 'assistant' ? '夭' : '系')" :avatar="message.profile ? agentAvatars[message.profile] || '' : ''" :size="27" />
           <div class="message__body">
             <template v-if="message.timelineKind === 'delegation-complete'">
               <details class="delegation-event">

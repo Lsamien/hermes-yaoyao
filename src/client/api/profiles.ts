@@ -4,12 +4,13 @@ import { normalizeModel, normalizeProfile, record, values } from '@/utils/normal
 import { ChatRpcSocket } from './realtime'
 
 const MAX_AGENT_NAME_LENGTH = 100
-const MAX_AGENT_AVATAR_LENGTH = 512_000
+const MAX_AGENT_AVATAR_LENGTH = 2_800_000
 const avatarDataURLPattern = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/i
 
 export type ProfileIdentityInput = {
   title: string
-  avatarDataURL: string | null
+  /** Undefined means the user did not change the native Desktop avatar. */
+  avatarDataURL?: string | null
 }
 
 function jsonObject(value: unknown): Record<string, JsonValue> {
@@ -30,17 +31,17 @@ function validateIdentity(input: ProfileIdentityInput): ProfileIdentityInput {
   if (!title || title.length > MAX_AGENT_NAME_LENGTH || /[\u0000-\u001f\u007f]/.test(title)) {
     throw new Error(`Agent 名称应为 1 至 ${MAX_AGENT_NAME_LENGTH} 个字符`)
   }
-  const avatarDataURL = input.avatarDataURL?.trim() || null
+  const avatarDataURL = input.avatarDataURL === undefined ? undefined : input.avatarDataURL?.trim() || null
   if (avatarDataURL && (avatarDataURL.length > MAX_AGENT_AVATAR_LENGTH || !avatarDataURLPattern.test(avatarDataURL))) {
-    throw new Error('头像必须是小于 375 KB 的 PNG、JPEG 或 WebP 图片')
+    throw new Error('头像必须是小于 2 MB 的 PNG、JPEG 或 WebP 图片')
   }
   return { title, avatarDataURL }
 }
 
 /**
- * Hermes owns this metadata in profile.yaml. Reading it immediately before the
- * write preserves Bot chat bindings and lets the upstream revision guard
- * reject a concurrent edit instead of silently overwriting it.
+ * Desktop Bots owns both values: its title lives in the Hermes metadata
+ * namespace and its avatar is the native profile asset. Reading metadata
+ * before writing preserves Bot chat bindings.
  */
 export async function updateProfileIdentity(profile: Profile, input: ProfileIdentityInput): Promise<void> {
   const identity = validateIdentity(input)
@@ -52,8 +53,6 @@ export async function updateProfileIdentity(profile: Profile, input: ProfileIden
     if (!current) throw new Error('该 Agent 已不存在，请刷新后重试')
     const uiMeta = jsonObject(current.ui_meta)
     const botMeta: Record<string, JsonValue> = { ...jsonObject(uiMeta['hermes-bots']), title: identity.title }
-    if (identity.avatarDataURL) botMeta.avatar = identity.avatarDataURL
-    else delete botMeta.avatar
     const revisions = jsonObject(current.ui_meta_revisions)
     const revision = revisions['hermes-bots']
     await control.request('profiles.configure', {
@@ -61,6 +60,37 @@ export async function updateProfileIdentity(profile: Profile, input: ProfileIden
       ui_meta: { 'hermes-bots': botMeta },
       ...(typeof revision === 'number' ? { ui_meta_expected_revisions: { 'hermes-bots': revision } } : {}),
     })
+    if (identity.avatarDataURL !== undefined) {
+      await control.request('profiles.set_asset', {
+        name: profile.name,
+        asset: 'avatar',
+        ...(identity.avatarDataURL ? { data: identity.avatarDataURL } : { clear: true }),
+      })
+    }
+  } finally {
+    control.close()
+  }
+}
+
+/** Fetch the native Desktop Bots avatar asset for every profile that has one. */
+export async function getProfileAvatarDataURLs(profiles: Profile[]): Promise<Record<string, string>> {
+  if (!profiles.length) return {}
+  const allowed = new Set(profiles.map(profile => profile.name))
+  const control = new ChatRpcSocket()
+  await control.connect()
+  try {
+    const listed = await control.request('profiles.list', { include_sessions: false })
+    const names = readProfileEntries(listed)
+      .filter(item => allowed.has(String(item.name ?? '')) && item.has_avatar === true)
+      .map(item => String(item.name))
+    const entries = await Promise.all(names.map(async name => {
+      const asset = jsonObject(await control.request('profiles.get_asset', { name, asset: 'avatar' }))
+      const data = typeof asset.data === 'string' ? asset.data : ''
+      return data && data.length <= MAX_AGENT_AVATAR_LENGTH && avatarDataURLPattern.test(data)
+        ? [name, data] as const
+        : undefined
+    }))
+    return Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => entry !== undefined))
   } finally {
     control.close()
   }

@@ -20,6 +20,7 @@ const CHAT_METHODS = new Set([
   'profiles.configure',
   'profiles.get_asset',
   'profiles.list',
+  'profiles.set_asset',
   'prompt.submit',
   'session.branch',
   'session.close',
@@ -235,6 +236,17 @@ function checkedChatFrame(data: RawData, isBinary: boolean, paired = false): str
     params = {
       name: safeString(params.name, 'profile name', true)!,
       asset: safeString(params.asset, 'profile asset', true)!,
+    }
+  }
+  if (request.method === 'profiles.set_asset') {
+    const clear = params.clear === true
+    const data = typeof params.data === 'string' ? params.data.trim() : ''
+    if (!clear && !data) throw new HttpError(400, 'profile asset data is required')
+    if (data.length > 2_800_000) throw new HttpError(413, 'profile asset exceeds 2 MiB')
+    params = {
+      name: safeString(params.name, 'profile name', true)!,
+      asset: safeString(params.asset, 'profile asset', true)!,
+      ...(clear ? { clear: true } : { data }),
     }
   }
   if (request.method === 'profiles.configure') {

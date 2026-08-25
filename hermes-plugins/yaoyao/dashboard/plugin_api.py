@@ -100,31 +100,6 @@ def _hermes_bot_name(profile: Optional[str], profile_home: Optional[Path] = None
     return ""
 
 
-def _hermes_bot_avatar(profile: Optional[str], profile_home: Optional[Path] = None) -> str:
-    """Read the avatar stored with the Hermes-owned Bot metadata."""
-    try:
-        import yaml  # type: ignore
-
-        path = (profile_home or _profile_home(profile)) / "profile.yaml"
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else {}
-        if not isinstance(raw, dict):
-            return ""
-        ui_meta = raw.get("ui_meta")
-        bot_meta = ui_meta.get("hermes-bots") if isinstance(ui_meta, dict) else None
-        avatar = bot_meta.get("avatar") if isinstance(bot_meta, dict) else None
-        if not isinstance(avatar, str):
-            return ""
-        avatar = avatar.strip()
-        if len(avatar) > 512_000 or not avatar.startswith("data:image/"):
-            return ""
-        return avatar
-    except (OSError, TypeError, ValueError):
-        pass
-    except Exception as error:
-        log.warning("Hermes Bot avatar load failed for %s: %s", profile, error)
-    return ""
-
-
 def _load_group_plugin_api():
     module_path = Path(_THIS_DIR) / "group_plugin_api.py"
     module_name = (
@@ -300,7 +275,7 @@ def _to_file_library_item(it: dict) -> dict:
 def list_profiles():
     """Profiles with an existing state.db (i.e. ones the poller watches).
 
-    Returns ``[{name, label, botName, avatar, isDefault}]``. ``botName`` comes from
+    Returns ``[{name, label, botName, isDefault}]``. ``botName`` comes from
     Hermes Bot Mode (then the core profile display name), never YaoYao's
     legacy Agent-name setting. ``default`` is always first when present.
     """
@@ -308,7 +283,6 @@ def list_profiles():
     out = []
     for name, home in pairs:
         bot_name = _hermes_bot_name(name, Path(home))
-        avatar = _hermes_bot_avatar(name, Path(home))
         out.append(
             {
                 "name": name,
@@ -317,7 +291,6 @@ def list_profiles():
                 # Compatibility alias for older YaoYao clients. Its value is
                 # still Hermes-owned Bot metadata, not agent_settings.json.
                 "agentName": bot_name,
-                "avatar": avatar,
                 "isDefault": name == "default",
             }
         )
