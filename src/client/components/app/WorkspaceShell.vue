@@ -99,6 +99,10 @@ function toggleSidebar() {
   try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0') } catch { /* optional persistence */ }
 }
 
+function navIcon(key: NavItem['key']): 'chat' | 'folder' | 'people' {
+  return key === 'groups' ? 'people' : key === 'files' ? 'folder' : 'chat'
+}
+
 async function openSidebarSearch(host: HTMLElement | null) {
   if (sidebarCollapsed.value) {
     sidebarCollapsed.value = false
@@ -221,7 +225,7 @@ onBeforeUnmount(() => {
           :title="item.label"
           @click="navigate(item.path)"
         >
-          <AppIcon :name="item.icon" :size="18" />
+          <YaoYaoSidebarIcon :name="navIcon(item.key)" />
           <span>{{ item.label }}</span>
         </button>
       </nav>
