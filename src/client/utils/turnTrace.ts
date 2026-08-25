@@ -63,6 +63,10 @@ export function buildMessageTimelineRows(messages: UiMessage[]): MessageTimeline
       if (segment.length && nextOwner !== owner) flush()
       owner = nextOwner
       segment.push(message)
+      // An interim/final assistant bubble is a real timeline boundary. Keep
+      // later running tools and text below it instead of hoisting their trace
+      // above the earlier visible message merely because the author matches.
+      if (hasVisibleMessage(message)) flush()
       continue
     }
     flush()

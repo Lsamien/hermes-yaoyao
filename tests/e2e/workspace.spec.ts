@@ -708,6 +708,28 @@ test('shows a thinking animation after submit until output starts', async ({ pag
   await expect(page.locator('.thinking-indicator')).toHaveCount(0)
 })
 
+test('keeps streamed text below sealed interim commentary and its tool trace', async ({ page }) => {
+  await page.goto('/chat/session-demo?profile=yaoyao')
+  await page.locator('.composer-textarea').fill('验证流式分段')
+  await page.getByRole('button', { name: '发送消息' }).click()
+
+  const interim = page.locator('.message--assistant').filter({ hasText: '我先检查配置。' }).last()
+  const current = page.locator('.message--assistant').filter({ hasText: '配置检查完成。' }).last()
+  const trace = page.locator('.turn-trace').last()
+  await expect(interim).toBeVisible()
+  await expect(current).toBeVisible()
+  await expect(trace).toHaveClass(/turn-trace--running/)
+
+  const [interimBox, traceBox, currentBox] = await Promise.all([
+    interim.boundingBox(), trace.boundingBox(), current.boundingBox(),
+  ])
+  expect(interimBox?.y).toBeLessThan(traceBox?.y ?? 0)
+  expect(traceBox?.y).toBeLessThan(currentBox?.y ?? 0)
+
+  await expect(trace).toHaveClass(/turn-trace--success/)
+  await expect(page.getByText('配置检查完成。', { exact: true })).toHaveCount(1)
+})
+
 test('keeps the canonical logo and yaoyao-webui composer geometry', async ({ page }) => {
   const logo = page.locator('.rail__brand img')
   await expect(logo).toHaveAttribute('src', '/brand/AppIcon-1024.png')

@@ -253,9 +253,25 @@ server.on('upgrade', (request, socket, head) => {
       if (requestFrame.method === 'prompt.submit') {
         respond({ status: 'accepted' })
         setTimeout(() => {
-          client.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'message.start', session_id: requestFrame.params.session_id, profile: 'yaoyao', payload: { message_id: 'stream-demo' } } }))
-          client.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'message.delta', session_id: requestFrame.params.session_id, profile: 'yaoyao', payload: { message_id: 'stream-demo', delta: '这是来自假 Gateway 的流式回复。' } } }))
-          client.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'message.complete', session_id: requestFrame.params.session_id, profile: 'yaoyao', payload: { message_id: 'stream-demo', text: '这是来自假 Gateway 的流式回复。', status: 'complete' } } }))
+          const emit = (type, payload) => client.send(JSON.stringify({
+            jsonrpc: '2.0', method: 'event',
+            params: { type, session_id: requestFrame.params.session_id, profile: 'yaoyao', ...(payload ? { payload } : {}) },
+          }))
+          if (requestFrame.params.text === '验证流式分段') {
+            emit('message.start')
+            emit('message.delta', { text: '我先检查配置。' })
+            emit('message.interim', { text: '我先检查配置。', already_streamed: true })
+            emit('tool.start', { tool_id: 'fake-tool', name: 'terminal', arguments: { command: 'pwd' } })
+            setTimeout(() => {
+              emit('tool.complete', { tool_id: 'fake-tool', name: 'terminal', result: { output: '/tmp' } })
+              emit('message.delta', { text: '配置检查完成。' })
+            }, 300)
+            setTimeout(() => emit('message.complete', { text: '配置检查完成。', status: 'complete' }), 2_000)
+            return
+          }
+          client.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'message.start', session_id: requestFrame.params.session_id, profile: 'yaoyao' } }))
+          client.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'message.delta', session_id: requestFrame.params.session_id, profile: 'yaoyao', payload: { text: '这是来自假 Gateway 的流式回复。' } } }))
+          client.send(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'message.complete', session_id: requestFrame.params.session_id, profile: 'yaoyao', payload: { text: '这是来自假 Gateway 的流式回复。', status: 'complete' } } }))
         }, 1200)
         return
       }

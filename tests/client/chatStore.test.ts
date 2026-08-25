@@ -117,6 +117,46 @@ describe('chat message reducer', () => {
     expect(current.messages[1]).toMatchObject({ id: 'assistant-new', content: '回答', isStreaming: true })
   })
 
+  it('seals interim commentary so later streamed text stays at the bottom of the turn', () => {
+    const initial = { ...state(), messages: [{ ...message('user-new', '检查项目'), timestamp: 100 }] }
+    let current = applyChatEvent(initial, event('message.start', {}))
+    current = applyChatEvent(current, event('message.delta', { text: '我先读取配置。', timestamp: 101 }))
+    current = applyChatEvent(current, event('message.interim', { text: '我先读取配置。', timestamp: 102 }))
+    current = applyChatEvent(current, event('tool.start', { tool_id: 'tool-1', name: 'read_file' }))
+    current = applyChatEvent(current, event('tool.complete', { tool_id: 'tool-1', name: 'read_file', result: 'ok' }))
+    current = applyChatEvent(current, event('message.delta', { text: '配置没有问题。', timestamp: 105 }))
+
+    expect(current.messages.map(item => item.content)).toEqual(['检查项目', '我先读取配置。', '配置没有问题。'])
+    expect(current.messages[1]).toMatchObject({ role: 'assistant', isStreaming: false })
+    expect(current.messages[2]).toMatchObject({ role: 'assistant', isStreaming: true })
+    expect(current.messages[2].toolCalls).toEqual([
+      expect.objectContaining({ id: 'tool-1', status: 'completed' }),
+    ])
+  })
+
+  it('preserves interim commentary after the final answer completes', () => {
+    const initial = { ...state(), messages: [{ ...message('user-new', '执行'), timestamp: 100 }] }
+    let current = applyChatEvent(initial, event('message.start', {}))
+    current = applyChatEvent(current, event('message.delta', { text: '开始执行。' }))
+    current = applyChatEvent(current, event('message.interim', { text: '开始执行。' }))
+    current = applyChatEvent(current, event('message.delta', { text: '执行完成。' }))
+    current = applyChatEvent(current, event('message.complete', { text: '执行完成。' }))
+
+    expect(current.messages.map(item => item.content)).toEqual(['执行', '开始执行。', '执行完成。'])
+    expect(current.messages.slice(1).every(item => item.isStreaming === false)).toBe(true)
+  })
+
+  it('settles an identical completion onto the sealed interim instead of duplicating it', () => {
+    const initial = { ...state(), messages: [{ ...message('user-new', '执行'), timestamp: 100 }] }
+    let current = applyChatEvent(initial, event('message.start', {}))
+    current = applyChatEvent(current, event('message.delta', { text: '已经完成。' }))
+    current = applyChatEvent(current, event('message.interim', { text: '已经完成。', already_streamed: true }))
+    current = applyChatEvent(current, event('message.complete', { text: '已经完成。' }))
+
+    expect(current.messages.map(item => item.content)).toEqual(['执行', '已经完成。'])
+    expect(current.messages[1]).toMatchObject({ stage: 'settled', isStreaming: false })
+  })
+
   it('treats message.complete status=error as a failed terminal row', () => {
     let current = applyChatEvent(state(), event('message.start', { message_id: 'assistant-1' }))
     current = applyChatEvent(current, event('message.complete', {

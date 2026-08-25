@@ -99,6 +99,47 @@ function settleSupersededStreams(messages: ChatMessage[], current?: ChatMessage)
     : message)
 }
 
+function streamingSegmentId(state: ChatRouteState): string {
+  const latestUser = lastUserMessage(state.messages)
+  return `stream:${state.route.profile}:${state.route.sessionId}:${latestUser?.id ?? 'orphan'}:${createId('segment')}`
+}
+
+function sealInterimMessage(state: ChatRouteState, payload: Record<string, unknown>): ChatMessage[] {
+  const content = string(payload.output ?? payload.text ?? payload.content)
+  if (!content.trim()) return state.messages
+
+  const current = lastStreamingAssistant(state.messages)
+  const occurredAt = number(payload.timestamp ?? payload.created_at, Date.now() / 1000)
+  const sealedId = current?.id ?? streamingSegmentId(state)
+  const sealed: ChatMessage = {
+    ...(current ?? {}),
+    id: sealedId,
+    clientMessageId: current?.clientMessageId ?? (sealedId.startsWith('stream:') ? sealedId : undefined),
+    sessionId: state.route.sessionId,
+    profile: state.route.profile,
+    role: 'assistant',
+    content,
+    timestamp: current?.timestamp ?? occurredAt,
+    stage: 'settled',
+    isStreaming: false,
+    raw: payload as JsonValue,
+  }
+  const nextId = streamingSegmentId(state)
+  const next: ChatMessage = {
+    id: nextId,
+    clientMessageId: nextId,
+    sessionId: state.route.sessionId,
+    profile: state.route.profile,
+    role: 'assistant',
+    content: '',
+    timestamp: occurredAt,
+    stage: 'streaming',
+    isStreaming: true,
+    raw: { stream_interim_continuation: true },
+  }
+  return mergeChatMessages(mergeChatMessages(state.messages, [sealed]), [next])
+}
+
 function toolFromEvent(payload: Record<string, unknown>, status: ToolCall['status']): ToolCall {
   return {
     id: string(payload.tool_call_id ?? payload.toolCallId ?? payload.tool_id ?? payload.id, createId('tool')),
@@ -135,13 +176,32 @@ function updateStreamingMessage(
   // turn may never receive a terminal event, so reusing any older streaming row
   // would make the new answer render above the new prompt.
   const current = lastStreamingAssistant(state.messages, mode === 'start')
-  const latestUser = lastUserMessage(state.messages)
-  const fallbackId = current?.id
-    ?? `stream:${state.route.profile}:${state.route.sessionId}:${latestUser?.id ?? 'orphan'}`
+  const fallbackId = current?.id ?? streamingSegmentId(state)
   const id = eventMessageId(payload, fallbackId)
   const existing = state.messages.find(message => message.id === id) ?? current
   const delta = string(payload.delta ?? payload.text_delta ?? payload.content_delta)
   const full = string(payload.output ?? payload.text ?? payload.content)
+  const emptyInterimContinuation = mode === 'complete'
+    && existing === current
+    && bool(record(current?.raw).stream_interim_continuation)
+    && !current?.content.trim()
+    && !current?.reasoning?.trim()
+    && !current?.toolCalls?.length
+  if (emptyInterimContinuation && current) {
+    const currentIndex = state.messages.indexOf(current)
+    const previous = state.messages.slice(0, currentIndex).reverse()
+      .find(message => message.role === 'assistant')
+    const previousContent = previous?.content.trim() ?? ''
+    const continuesPrevious = Boolean(full && previousContent
+      && (full === previousContent || full.startsWith(previousContent) || previousContent.startsWith(full)))
+    if (previous && (!full || bool(payload.response_previewed) || continuesPrevious)) {
+      return orderChatMessages(state.messages
+        .filter(message => message !== current)
+        .map(message => message === previous && full
+          ? { ...message, content: full, stage: 'settled', isStreaming: false, raw: payload as JsonValue }
+          : message))
+    }
+  }
   let content = existing?.content ?? ''
   let reasoning = existing?.reasoning
   if (mode === 'delta') content += delta || full
@@ -186,6 +246,13 @@ export function applyChatEvent(state: ChatRouteState, event: RpcEventFrame['para
     case 'content.delta':
     case 'assistant.delta':
       next.messages = updateStreamingMessage(state, payload, 'delta')
+      next.isStreaming = true
+      break
+    case 'message.interim':
+      // Hermes emits this after commentary that precedes a tool call. Seal the
+      // visible text in place and start a fresh segment, otherwise later deltas
+      // keep rewriting the older bubble until message.complete replaces it.
+      next.messages = sealInterimMessage(state, payload)
       next.isStreaming = true
       break
     case 'reasoning.delta':

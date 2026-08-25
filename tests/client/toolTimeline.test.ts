@@ -69,6 +69,24 @@ describe('ordinary chat tool timeline', () => {
     expect(rows[2]?.kind === 'message' ? rows[2].message : undefined).toMatchObject({ content: '检查完成', reasoning: undefined, tools: undefined })
   })
 
+  it('keeps a later streaming trace below sealed interim commentary', () => {
+    const rows = buildMessageTimelineRows([
+      { id: 'user', role: 'user', content: '检查项目' },
+      { id: 'interim', role: 'assistant', content: '我先读取配置。', status: 'settled' },
+      {
+        id: 'streaming', role: 'assistant', content: '配置没有问题。', status: 'streaming',
+        tools: [{ id: 'read', name: 'read_file', status: 'running' }],
+      },
+    ])
+
+    expect(rows.map(row => [row.kind, row.id])).toEqual([
+      ['message', 'message:user'],
+      ['message', 'message:interim'],
+      ['trace', 'trace:streaming'],
+      ['message', 'message:streaming'],
+    ])
+  })
+
   it('does not merge assistant traces across agents or system events', () => {
     const rows = buildMessageTimelineRows([
       { id: 'a', role: 'assistant', author: '甲', content: '', reasoning: '甲思考' },
