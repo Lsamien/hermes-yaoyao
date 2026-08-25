@@ -146,6 +146,7 @@ const remoteServerAddresses = computed(() => Object.fromEntries(groups.nodes
   .map(node => [node.nodeId, serverAddress(node.serverUrl)])))
 const hostAgent = computed(() => groups.hostProtocol ? groups.agents.find(agent => agent.isHost) : undefined)
 const connected = computed(() => ['connected', 'ready'].includes(groups.connectionState))
+const synced = computed(() => groups.connectionState === 'ready' && !groups.isLoading)
 const activeInteraction = computed(() => groupInteraction(groups.pendingInteractions[0]))
 const room = computed(() => groups.selectedRoom ? roomToUi(groups.selectedRoom) : null)
 const profiles = computed<GroupProfileOption[]>(() => [
@@ -646,7 +647,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :loading="groups.isLoading"
         :has-older="groups.hasMoreBefore"
         :connected="connected"
-        :synced="!!groups.selectedRoom"
+        :synced="synced"
         :show-tools="showThinking"
         :interaction="activeInteraction"
         :mention-names="mentionNames"
