@@ -2,6 +2,7 @@ export type UiAgent = {
   id: string
   name: string
   profile?: string
+  nodeId?: string
   enabled?: boolean
   status?: 'idle' | 'working' | 'offline' | 'error'
   autoReply?: boolean

@@ -215,6 +215,10 @@ export function groupMessageToUi(message: GroupMessage, agents: GroupAgent[] = [
     role: message.senderKind === 'human' ? 'user' : message.senderKind === 'agent' ? 'assistant' : 'system',
     author: sender?.displayName || message.senderName,
     isRemoteAgent: message.senderKind === 'agent' && sender != null && sender.nodeId !== 'local',
+    // Only local agents share this Web client's Desktop Bots identity map.
+    // Remote nodes keep their own identity and intentionally do not collide by
+    // profile slug with a local agent.
+    profile: sender?.nodeId === 'local' ? sender.profile : undefined,
     content: message.content,
     reasoning: message.reasoning,
     createdAt: message.createdAt < 10_000_000_000 ? message.createdAt * 1000 : message.createdAt,
@@ -244,6 +248,7 @@ export function agentToUi(agent: GroupAgent): UiAgent {
     id: agent.id,
     name: agent.displayName || agent.profile,
     profile: agent.profile,
+    nodeId: agent.nodeId,
     enabled: agent.enabled,
     autoReply: agent.replyWithoutMention,
     isHost: agent.isHost,

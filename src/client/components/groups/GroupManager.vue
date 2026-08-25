@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import type { GroupAgent, ModelOption } from '@shared/types'
 import AppIcon from '@/components/common/AppIcon.vue'
+import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import type { UiRoom } from './types'
 import type { GroupProfileOption } from './types'
 
@@ -44,9 +45,10 @@ const props = withDefaults(defineProps<{
   modelOptionsError?: Record<string, string>
   remoteServerAddresses?: Record<string, string>
   agentUpdateError?: Record<string, string>
+  agentAvatars?: Record<string, string>
   managerError?: string
   busy?: boolean
-}>(), { hostEnabled: false, hostFlowEnabled: false, roomInstructionsEnabled: false, busy: false })
+}>(), { hostEnabled: false, hostFlowEnabled: false, roomInstructionsEnabled: false, busy: false, agentAvatars: () => ({}) })
 
 const emit = defineEmits<{
   updateRoom: [patch: Partial<UiRoom>]
@@ -244,7 +246,7 @@ function statusLabel(status: GroupAgent['status']): string {
       <p v-if="managerError" class="agent-save-error" role="alert">{{ managerError }}</p>
       <div class="agent-list">
         <article v-for="agent in agents" :key="agent.id">
-          <span class="agent-avatar">{{ agent.displayName.slice(0, 1).toUpperCase() }}<i :class="`status-${agent.status}`" /></span>
+          <span class="agent-avatar"><AgentAvatar :name="agent.displayName" :avatar="agent.nodeId === 'local' ? agentAvatars[agent.profile] || '' : ''" :size="32" /><i :class="`status-${agent.status}`" /></span>
           <span class="agent-copy"><span class="agent-name-line"><strong>{{ agent.displayName }}</strong><em v-if="hostEnabled && agent.isHost" class="host-badge">主持人</em></span><small>{{ agent.profile }}<template v-if="agent.nodeId !== 'local'"> · {{ agent.nodeLabel || agent.nodeId.slice(0, 8) }}</template> · {{ statusLabel(agent.status) }}</small></span>
           <button class="agent-action" type="button" :title="`设置 ${agent.displayName}`" :aria-label="`设置${agent.displayName}`" @click="openAgentSettings(agent)"><AppIcon name="settings" :size="14" /></button>
           <button v-if="agent.status === 'running' || agent.status === 'queued'" class="agent-action" type="button" title="中断" @click="emit('interruptAgent', agent.id)"><AppIcon name="stop" :size="13" /></button>

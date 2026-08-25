@@ -134,10 +134,17 @@ const sidebarItems = computed<SidebarItem[]>(() => {
   }
   return items
 })
-const messages = computed(() => groups.messages.map(message => groupMessageToUi(message, groups.agents)))
+const localAgentIdentities = computed(() => new Map(auth.profiles.map(profile => [profile.name, {
+  name: profile.agentName || profile.displayName || profile.name,
+}])))
+const displayAgents = computed(() => groups.agents.map(agent => {
+  const identity = agent.nodeId === 'local' ? localAgentIdentities.value.get(agent.profile) : undefined
+  return identity ? { ...agent, displayName: identity.name } : agent
+}))
+const messages = computed(() => groups.messages.map(message => groupMessageToUi(message, displayAgents.value)))
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
 const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
-const agents = computed(() => groups.agents.map(agentToUi))
+const agents = computed(() => displayAgents.value.map(agentToUi))
 const agentAvatars = computed(() => Object.fromEntries(auth.profiles.flatMap(profile =>
   profile.agentAvatar ? [[profile.name, profile.agentAvatar] as const] : []
 )))
@@ -148,7 +155,7 @@ function serverAddress(value: string): string {
 const remoteServerAddresses = computed(() => Object.fromEntries(groups.nodes
   .filter(node => node.nodeId && node.serverUrl)
   .map(node => [node.nodeId, serverAddress(node.serverUrl)])))
-const hostAgent = computed(() => groups.hostProtocol ? groups.agents.find(agent => agent.isHost) : undefined)
+const hostAgent = computed(() => groups.hostProtocol ? displayAgents.value.find(agent => agent.isHost) : undefined)
 const connected = computed(() => ['connected', 'ready'].includes(groups.connectionState))
 const synced = computed(() => groups.connectionState === 'ready' && !groups.isLoading)
 const activeInteraction = computed(() => groupInteraction(groups.pendingInteractions[0]))
@@ -174,10 +181,10 @@ const availableProfiles = computed(() => profiles.value.filter(profile => !group
 const uploadsEnabled = computed(() => auth.groupUploadsEnabled)
 const managerBusy = computed(() => groups.isLoading || Object.values(agentUpdateBusy.value).some(Boolean))
 const reference = computed<ComposerReference | null>(() => quoted.value ? { id: quoted.value.id, author: quoted.value.author, content: quoted.value.content } : null)
-const mentionNames = computed(() => ['所有人', ...groups.agents.map(agent => agent.displayName || agent.profile)])
+const mentionNames = computed(() => ['所有人', ...displayAgents.value.map(agent => agent.displayName || agent.profile)])
 const mentionOptions = computed<ComposerOption[]>(() => [
   { id: 'all', label: '所有人', detail: '通知房间内全部 Agent' },
-  ...groups.agents.map(agent => ({
+  ...displayAgents.value.map(agent => ({
     id: agent.id,
     label: agent.displayName || agent.profile,
     detail: groups.hostProtocol && agent.isHost ? `主持人 · ${agent.profile}` : agent.profile,
@@ -206,7 +213,7 @@ const typingAgentIds = computed(() => {
 })
 const typingAgentNames = computed(() => [...new Set(groups.agents
   .filter(agent => typingAgentIds.value.has(agent.id))
-  .map(agent => agent.displayName || agent.profile))])
+  .map(agent => displayAgents.value.find(candidate => candidate.id === agent.id)?.displayName || agent.profile))])
 const typingActivity = computed(() => {
   if (!connected.value) return ''
   const names = typingAgentNames.value
@@ -668,7 +675,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         <template #header-actions>
           <div class="group-header-actions">
             <span v-if="hostAgent" class="group-host-chip" :title="`用户未明确 @ 时由 ${hostAgent.displayName || hostAgent.profile} 负责回应`">主持人 {{ hostAgent.displayName || hostAgent.profile }}</span>
-            <div class="group-avatars" aria-label="群聊成员"><AgentAvatar v-for="agent in agents.slice(0, 4)" :key="agent.id" :name="agent.name" :avatar="agentAvatars[agent.profile || ''] || ''" :size="24" :title="agent.isHost ? `${agent.name} · 主持人` : agent.name" :class="{ host: agent.isHost }" /><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
+            <div class="group-avatars" aria-label="群聊成员"><AgentAvatar v-for="agent in agents.slice(0, 4)" :key="agent.id" :name="agent.name" :avatar="agent.nodeId === 'local' ? agentAvatars[agent.profile || ''] || '' : ''" :size="24" :title="agent.isHost ? `${agent.name} · 主持人` : agent.name" :class="{ host: agent.isHost }" /><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
             <button class="icon-button" type="button" title="管理群聊" aria-label="管理群聊" :disabled="!groups.selectedRoom" @click="openSelectedRoomManager"><AppIcon name="dots" /></button>
           </div>
         </template>
@@ -698,7 +705,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
       <GroupManager
         v-if="room && groups.selectedRoom"
         :room="room"
-        :agents="groups.agents"
+        :agents="displayAgents"
         :host-enabled="groups.hostProtocol"
         :host-flow-enabled="groups.hostFlowProtocol"
         :room-instructions-enabled="groups.roomInstructionsProtocol"
@@ -709,6 +716,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :model-options-error="modelOptionsError"
         :remote-server-addresses="remoteServerAddresses"
         :agent-update-error="agentUpdateError"
+        :agent-avatars="agentAvatars"
         :manager-error="managerError"
         @update-room="updateRoom"
         @add-agent="addAgent"
