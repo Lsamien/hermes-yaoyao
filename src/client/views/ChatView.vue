@@ -22,6 +22,7 @@ import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
 import { chatInteraction, chatMessagesToUi, sessionSidebarItem } from '@/components/workspace/viewModels'
 import { consumeLibraryItemForComposer, loadComposerFile } from '@/components/workspace/pendingComposer'
 import { readAgentShowThinking, writeAgentShowThinking } from '@/utils/sessionPreferences'
+import { estimateConversationTokens } from '@/utils/contextUsage'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { getSession } from '@/api/sessions'
@@ -60,6 +61,12 @@ const sidebarItems = computed(() => sessions.value.map(session => sessionSidebar
   agentNames.value.get(session.profile || auth.activeProfile?.name || ''),
 )))
 const messages = computed(() => chatMessagesToUi(chat.messages, profile => profile ? agentNames.value.get(profile) : undefined))
+const reportedContextTokens = computed(() => chat.contextUsage?.contextTokens
+  || chat.contextUsage?.totalTokens
+  || (activeSession.value?.inputTokens ?? 0) + (activeSession.value?.outputTokens ?? 0))
+const estimatedContextTokens = computed(() => estimateConversationTokens(chat.messages))
+const contextUsed = computed(() => reportedContextTokens.value || estimatedContextTokens.value)
+const contextIsEstimated = computed(() => !reportedContextTokens.value && contextUsed.value > 0)
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
 const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
 const activeSession = computed(() => chat.activeSession)
@@ -432,8 +439,9 @@ watch(() => chat.activeSessionId, async id => {
         :reasoning-effort="reasoningLabel"
         :reasoning-value="chat.reasoningEffort || ''"
         :reasoning-options="reasoningComposerOptions"
-        :context-used="chat.contextUsage?.contextTokens || chat.contextUsage?.totalTokens || 0"
+        :context-used="contextUsed"
         :context-limit="chat.contextUsage?.contextLimit || 262144"
+        :context-estimated="contextIsEstimated"
         :queue-mode="queueMode || chat.isQueued"
         :tool-trace-visible="showThinking"
         :reference="reference"

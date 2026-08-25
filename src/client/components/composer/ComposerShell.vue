@@ -18,6 +18,7 @@ const props = withDefaults(defineProps<{
   reasoningOptions?: ComposerOption[]
   contextUsed?: number
   contextLimit?: number
+  contextEstimated?: boolean
   queueMode?: boolean
   toolTraceVisible?: boolean
   reference?: ComposerReference | null
@@ -40,6 +41,7 @@ const props = withDefaults(defineProps<{
   reasoningOptions: () => [],
   contextUsed: 0,
   contextLimit: 0,
+  contextEstimated: false,
   queueMode: false,
   toolTraceVisible: true,
   reference: null,
@@ -430,8 +432,8 @@ defineExpose({
       <input ref="fileInput" class="composer-file-input" type="file" multiple @change="onFiles" />
       <div class="composer-resize" title="拖动调整高度；双击复位" @pointerdown="startResize" @dblclick="resetHeight" />
 
-      <div v-if="hasContext" class="composer-context" :class="{ warning: contextPercent > 80 }">
-        <span>{{ formatTokens(contextUsed) }} / {{ formatTokens(contextLimit) }} · 剩余 {{ formatTokens(remainingContextTokens) }}</span>
+      <div v-if="hasContext" class="composer-context" :class="{ warning: contextPercent > 80 }" :title="contextEstimated ? 'Hermes 未提供实时上下文用量；此数值按当前会话内容估算。' : undefined">
+        <span>{{ contextEstimated ? '约 ' : '' }}{{ formatTokens(contextUsed) }} / {{ formatTokens(contextLimit) }} · 剩余 {{ formatTokens(remainingContextTokens) }}</span>
         <i><b :style="{ width: `${contextPercent}%` }" /></i>
       </div>
 

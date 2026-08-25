@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage, ChatRouteState, RpcEventFrame } from '@shared/types'
 import { applyChatEvent, mergeChatMessages } from '@/utils/messageReducer'
+import { estimateConversationTokens } from '@/utils/contextUsage'
 
 function message(id: string, content = '相同内容', clientMessageId?: string): ChatMessage {
   return {
@@ -22,6 +23,13 @@ function event(type: string, payload: Record<string, unknown>, sessionId = 'sess
 }
 
 describe('chat message reducer', () => {
+  it('estimates visible conversation tokens when Hermes has no live gauge', () => {
+    expect(estimateConversationTokens([
+      message('one', '你好，Hermes！'),
+      { ...message('two', 'The quick brown fox'), role: 'assistant', reasoning: '检查上下文' },
+    ])).toBeGreaterThan(0)
+  })
+
   it('preserves repeated user text when server identities differ', () => {
     const merged = mergeChatMessages([message('one')], [message('two')])
     expect(merged).toHaveLength(2)
