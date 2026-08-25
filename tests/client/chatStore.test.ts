@@ -91,6 +91,32 @@ describe('chat message reducer', () => {
     expect(current.usage?.totalTokens).toBe(30)
   })
 
+  it('starts a new assistant row after a user prompt when an interrupted row is still marked streaming', () => {
+    const interrupted = {
+      ...message('assistant-old', '上一轮残留'), role: 'assistant' as const, timestamp: 20,
+      stage: 'streaming' as const, isStreaming: true,
+    }
+    const prompt = { ...message('user-new', '再试试'), timestamp: 30, stage: 'accepted' as const }
+    const initial = { ...state(), messages: [interrupted, prompt] }
+
+    let current = applyChatEvent(initial, event('run.started', {}))
+    current = applyChatEvent(current, event('message.delta', { delta: '新一轮回答' }))
+
+    expect(current.messages).toHaveLength(3)
+    expect(current.messages.map(item => item.content)).toEqual(['上一轮残留', '再试试', '新一轮回答'])
+    expect(current.messages[0]).toMatchObject({ id: 'assistant-old', isStreaming: false })
+    expect(current.messages[2]).toMatchObject({ role: 'assistant', isStreaming: true })
+  })
+
+  it('promotes a synthetic streaming row to a server message id without duplicating it', () => {
+    const initial = { ...state(), messages: [{ ...message('user-new', '开始'), timestamp: 30 }] }
+    let current = applyChatEvent(initial, event('run.started', {}))
+    current = applyChatEvent(current, event('message.delta', { message_id: 'assistant-new', delta: '回答' }))
+
+    expect(current.messages).toHaveLength(2)
+    expect(current.messages[1]).toMatchObject({ id: 'assistant-new', content: '回答', isStreaming: true })
+  })
+
   it('treats message.complete status=error as a failed terminal row', () => {
     let current = applyChatEvent(state(), event('message.start', { message_id: 'assistant-1' }))
     current = applyChatEvent(current, event('message.complete', {

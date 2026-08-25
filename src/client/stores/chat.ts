@@ -733,6 +733,9 @@ export const useChatStore = defineStore('chat', () => {
     await socket.request('session.interrupt', { session_id: current.runtimeSessionId! }, 15_000)
     current.isStreaming = false
     current.isQueued = false
+    current.messages = current.messages.map(message => message.role === 'assistant' && message.isStreaming
+      ? { ...message, stage: message.stage === 'streaming' ? 'settled' : message.stage, isStreaming: false }
+      : message)
     clearInflightMarker(current.route.profile, current.route.sessionId)
   }
 

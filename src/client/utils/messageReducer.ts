@@ -75,8 +75,28 @@ function eventMessageId(payload: Record<string, unknown>, fallback: string): str
   return string(payload.message_id ?? payload.messageId ?? payload.id ?? payload.run_id ?? payload.runId, fallback)
 }
 
-function lastStreamingAssistant(messages: ChatMessage[]): ChatMessage | undefined {
-  return [...messages].reverse().find(message => message.role === 'assistant' && message.isStreaming)
+function lastUserMessage(messages: ChatMessage[]): ChatMessage | undefined {
+  return [...messages].reverse().find(message => message.role === 'user')
+}
+
+function lastStreamingAssistant(messages: ChatMessage[], afterLatestUser = false): ChatMessage | undefined {
+  let latestUserIndex = -1
+  if (afterLatestUser) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === 'user') {
+        latestUserIndex = index
+        break
+      }
+    }
+  }
+  return messages.slice(latestUserIndex + 1).reverse()
+    .find(message => message.role === 'assistant' && message.isStreaming)
+}
+
+function settleSupersededStreams(messages: ChatMessage[], current?: ChatMessage): ChatMessage[] {
+  return messages.map(message => message.role === 'assistant' && message.isStreaming && message !== current
+    ? { ...message, stage: message.stage === 'streaming' ? 'settled' : message.stage, isStreaming: false }
+    : message)
 }
 
 function toolFromEvent(payload: Record<string, unknown>, status: ToolCall['status']): ToolCall {
@@ -111,8 +131,13 @@ function updateStreamingMessage(
   payload: Record<string, unknown>,
   mode: 'start' | 'delta' | 'reasoning' | 'complete' | 'failed',
 ): ChatMessage[] {
-  const current = lastStreamingAssistant(state.messages)
-  const fallbackId = current?.id ?? `stream:${state.route.profile}:${state.route.sessionId}`
+  // A start event belongs to the turn after the latest user row. An interrupted
+  // turn may never receive a terminal event, so reusing any older streaming row
+  // would make the new answer render above the new prompt.
+  const current = lastStreamingAssistant(state.messages, mode === 'start')
+  const latestUser = lastUserMessage(state.messages)
+  const fallbackId = current?.id
+    ?? `stream:${state.route.profile}:${state.route.sessionId}:${latestUser?.id ?? 'orphan'}`
   const id = eventMessageId(payload, fallbackId)
   const existing = state.messages.find(message => message.id === id) ?? current
   const delta = string(payload.delta ?? payload.text_delta ?? payload.content_delta)
@@ -124,6 +149,10 @@ function updateStreamingMessage(
   if (mode === 'reasoning') reasoning = `${reasoning ?? ''}${delta || full}`
   const message: ChatMessage = {
     id,
+    // Keep a stable local identity while Hermes promotes a synthetic stream ID
+    // to its authoritative message/run ID on a later event.
+    clientMessageId: existing?.clientMessageId
+      ?? (existing?.id.startsWith('stream:') ? existing.id : id.startsWith('stream:') ? id : undefined),
     serverMessageId: id.startsWith('stream:') ? undefined : id,
     sessionId: state.route.sessionId,
     profile: state.route.profile,
@@ -137,7 +166,8 @@ function updateStreamingMessage(
     toolCalls: existing?.toolCalls,
     raw: payload as JsonValue,
   }
-  return mergeChatMessages(state.messages, [message])
+  const messages = mode === 'start' ? settleSupersededStreams(state.messages, current) : state.messages
+  return mergeChatMessages(messages, [message])
 }
 
 export function applyChatEvent(state: ChatRouteState, event: RpcEventFrame['params']): ChatRouteState {
