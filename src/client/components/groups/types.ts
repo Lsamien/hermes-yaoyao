@@ -16,6 +16,7 @@ export type GroupProfileOption = {
   displayName: string
   nodeId: string
   nodeLabel: string
+  avatar?: string
 }
 
 export type UiRoom = {

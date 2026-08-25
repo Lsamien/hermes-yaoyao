@@ -19,6 +19,6 @@ const hasAvatar = computed(() => /^data:image\/(png|jpeg|webp);base64,/i.test(pr
 </template>
 
 <style scoped>
-.agent-avatar { display: grid; flex: 0 0 auto; place-items: center; overflow: hidden; border-radius: 50%; background: var(--accent); color: var(--text-on-solid); font-size: calc(v-bind(size) * .36); font-weight: 700; line-height: 1; }
+.agent-avatar { display: grid; flex: 0 0 auto; place-items: center; overflow: hidden; border-radius: 50%; background: transparent; color: var(--text-secondary); font-size: calc(v-bind(size) * .36); font-weight: 700; line-height: 1; }
 .agent-avatar img { width: 100%; height: 100%; object-fit: cover; }
 </style>
