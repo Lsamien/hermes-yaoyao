@@ -44,6 +44,28 @@ describe('group host controls', () => {
     wrapper.unmount()
   })
 
+  it('adds an Agent from a paired node to an existing group', async () => {
+    const local = agent('agent-local', 'default', '本机 Agent', true, true)
+    const remote = {
+      id: '11111111-1111-4111-8111-111111111111|reviewer',
+      profile: 'reviewer',
+      displayName: '远端评审',
+      nodeId: '11111111-1111-4111-8111-111111111111',
+      nodeLabel: '工作室 Mac',
+    }
+    const wrapper = mount(GroupManager, {
+      props: {
+        room: { id: 'room-1', name: '群聊', memberIds: [local.id], replyRounds: 3 },
+        agents: [local],
+        availableProfiles: [remote],
+      },
+    })
+
+    await wrapper.get<HTMLSelectElement>('select[aria-label="选择要添加的 Agent"]').setValue(remote.id)
+    expect(wrapper.emitted('addAgent')?.at(-1)).toEqual([remote.id])
+    wrapper.unmount()
+  })
+
   it('keeps one independent host selection when creating a v5 room', async () => {
     const wrapper = mount(CreateGroupDialog, {
       attachTo: document.body,

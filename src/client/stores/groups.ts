@@ -139,6 +139,14 @@ export const useGroupsStore = defineStore('groups', () => {
     pinnedTopics.value = (await getPinnedGroupTopics()).items
   }
 
+  async function refreshNodes(): Promise<void> {
+    if (!capabilities.value?.features?.includes('nodeRegistry')) {
+      nodes.value = []
+      return
+    }
+    nodes.value = await getGroupNodes()
+  }
+
   async function connectEvents(anchor: GroupCapabilities, expectedGeneration: number): Promise<void> {
     await socket.connect({
       epoch: anchor.journalEpoch,
@@ -749,7 +757,7 @@ export const useGroupsStore = defineStore('groups', () => {
     availability, capabilities, topicProtocol, hostProtocol, hostFlowProtocol, roomInstructionsProtocol, activityProtocol, rooms, selectedRoomId, selectedRoom, topics, topicsForRoom, loadRoomTopics, selectedTopicId, selectedTopic,
     messages, agents, pendingInteractions,
     connectionState, isLoading, isSending, error, hasMoreBefore,
-    pinnedTopics, nodes, start, stop, refresh, selectRoom, selectTopic, startNewTopic, createRoom, updateRoom, archiveRoom, restoreRoom, archiveTopic, restoreTopic, setTopicPinned, renameTopic, loadPinnedTopics, archivedRooms, archivedTopics, addAgent, updateAgent,
+    pinnedTopics, nodes, start, stop, refresh, refreshNodes, selectRoom, selectTopic, startNewTopic, createRoom, updateRoom, archiveRoom, restoreRoom, archiveTopic, restoreTopic, setTopicPinned, renameTopic, loadPinnedTopics, archivedRooms, archivedTopics, addAgent, updateAgent,
     removeAgent, sendMessage, loadOlder, interruptAgent, approveInteraction, clarifyInteraction,
   }
 })

@@ -284,6 +284,20 @@ async function openRoomManager(id: string) {
   if (topicFromSidebarItemId(id)) return
   await selectRoom(id)
   managerOpen.value = true
+  try { await groups.refreshNodes() }
+  catch { /* Keep the current node list when refreshing is unavailable. */ }
+}
+
+async function openSelectedRoomManager() {
+  managerOpen.value = true
+  try { await groups.refreshNodes() }
+  catch { /* Keep the current node list when refreshing is unavailable. */ }
+}
+
+async function openCreateGroup() {
+  try { await groups.refreshNodes() }
+  catch { /* A node refresh must not prevent creating a local-only group. */ }
+  createOpen.value = true
 }
 
 function openRoomActions(roomId: string, event: MouseEvent) {
@@ -587,7 +601,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 <template>
   <WorkspaceView sidebar-title="群聊" :sidebar-context-title="topicListRoom?.name" :sidebar-subtitle="sidebarSubtitle" :inspector-open="managerOpen && !!room" inspector-close-label="关闭群聊管理" @close-inspector="managerOpen = false">
     <template #sidebar-action>
-      <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" title="新建群聊" aria-label="新建群聊" @click="createOpen = true">
+      <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" title="新建群聊" aria-label="新建群聊" @click="openCreateGroup">
         <YaoYaoSidebarIcon name="add" />
         <span>新建群聊</span>
       </button>
@@ -649,7 +663,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
           <div class="group-header-actions">
             <span v-if="hostAgent" class="group-host-chip" :title="`用户未明确 @ 时由 ${hostAgent.displayName || hostAgent.profile} 负责回应`">主持人 {{ hostAgent.displayName || hostAgent.profile }}</span>
             <div class="group-avatars" aria-label="群聊成员"><span v-for="agent in agents.slice(0, 4)" :key="agent.id" :title="agent.isHost ? `${agent.name} · 主持人` : agent.name" :class="{ host: agent.isHost }">{{ agent.name.slice(0, 1).toUpperCase() }}</span><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
-            <button class="icon-button" type="button" title="管理群聊" aria-label="管理群聊" :disabled="!groups.selectedRoom" @click="managerOpen = true"><AppIcon name="dots" /></button>
+            <button class="icon-button" type="button" title="管理群聊" aria-label="管理群聊" :disabled="!groups.selectedRoom" @click="openSelectedRoomManager"><AppIcon name="dots" /></button>
           </div>
         </template>
       </MessageTimeline>
