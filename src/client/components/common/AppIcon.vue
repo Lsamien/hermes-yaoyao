@@ -1,6 +1,7 @@
 <script setup lang="ts">
 type IconName =
   | 'chat'
+  | 'bots'
   | 'groups'
   | 'files'
   | 'artifacts'
@@ -65,6 +66,10 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 18 })
     <template v-if="name === 'chat'">
       <path d="M8 18h-3a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-5l-6 4z" />
       <path d="M8 9h8M8 13h5" />
+    </template>
+    <template v-else-if="name === 'bots'">
+      <rect x="4" y="7" width="16" height="12" rx="3" />
+      <path d="M12 3v4M9 12h.01M15 12h.01M9 16h6" />
     </template>
     <template v-else-if="name === 'groups'">
       <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />

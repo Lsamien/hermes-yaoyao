@@ -8,12 +8,14 @@ import {
   PeopleOutline,
   SearchOutline,
 } from '@vicons/ionicons5'
+import { Robot } from '@vicons/tabler'
 
-type SidebarIconName = 'add' | 'chat' | 'folder' | 'people' | 'search'
+type SidebarIconName = 'add' | 'bots' | 'chat' | 'folder' | 'people' | 'search'
 
 const props = withDefaults(defineProps<{ name: SidebarIconName; size?: number }>(), { size: 20 })
 const component = computed(() => ({
   add: AddOutline,
+  bots: Robot,
   chat: ChatbubbleOutline,
   folder: FolderOutline,
   people: PeopleOutline,
