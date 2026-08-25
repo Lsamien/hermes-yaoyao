@@ -92,8 +92,16 @@ export const useAuthStore = defineStore('auth', () => {
     activeProfileName.value = name
   }
 
+  async function refreshProfiles(): Promise<void> {
+    const nextProfiles = await authApi.fetchProfiles()
+    profiles.value = nextProfiles
+    if (!nextProfiles.some(profile => profile.name === activeProfileName.value)) {
+      activeProfileName.value = nextProfiles.find(profile => profile.isDefault)?.name ?? nextProfiles[0]?.name ?? ''
+    }
+  }
+
   return {
     status, user, profiles, activeProfileName, activeProfile, csrfToken, error, authRequired, insecureLan, groupUploadsEnabled,
-    isAuthenticated, bootstrap, login, logout, selectProfile, expire,
+    isAuthenticated, bootstrap, login, logout, selectProfile, refreshProfiles, expire,
   }
 })

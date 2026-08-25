@@ -81,6 +81,7 @@ export function normalizeProfile(value: unknown): Profile {
       ? undefined
       : bool(pick(source, 'gateway_running', 'gatewayRunning')),
     avatar: string(source.avatar) || undefined,
+    agentAvatar: string(pick(source, 'agentAvatar', 'agent_avatar')) || undefined,
   }
 }
 

@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import WorkspaceShell from '@/components/app/WorkspaceShell.vue'
+import AgentIdentityDialog from '@/components/app/AgentIdentityDialog.vue'
+import { updateProfileIdentity } from '@/api/profiles'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 
@@ -17,20 +19,38 @@ const auth = useAuthStore()
 const theme = useThemeStore()
 
 const userName = computed(() => auth.user?.displayName || auth.user?.username || '')
-const profileName = computed(() => auth.activeProfileName)
-const profileNames = computed(() => auth.profiles.map(profile => profile.agentName || profile.displayName || profile.name))
-const profileNameMap = computed(() => new Map(auth.profiles.map(profile => [profile.agentName || profile.displayName || profile.name, profile.name])))
+const identityOpen = ref(false)
+const identityBusy = ref(false)
+const identityError = ref('')
 
 async function logout() { await auth.logout() }
-function selectProfile(label: string) { auth.selectProfile(profileNameMap.value.get(label) || label) }
+function selectProfile(name: string) { auth.selectProfile(name) }
+async function saveIdentity(input: { title: string; avatarDataURL: string | null }) {
+  const profile = auth.activeProfile
+  if (!profile) return
+  identityBusy.value = true
+  identityError.value = ''
+  try {
+    await updateProfileIdentity(profile, input)
+    await auth.refreshProfiles()
+    identityOpen.value = false
+  } catch (cause) {
+    identityError.value = cause instanceof Error ? cause.message : '保存 Agent 身份失败'
+  } finally {
+    identityBusy.value = false
+  }
+}
+function refreshOnFocus() { void auth.refreshProfiles().catch(() => undefined) }
+onMounted(() => window.addEventListener('focus', refreshOnFocus))
+onBeforeUnmount(() => window.removeEventListener('focus', refreshOnFocus))
 </script>
 
 <template>
   <WorkspaceShell
     :user-name="userName"
     :pairing-user-name="auth.user?.username || ''"
-    :profile-name="auth.activeProfile?.agentName || auth.activeProfile?.displayName || profileName"
-    :profiles="profileNames"
+    :active-profile="auth.activeProfile"
+    :profiles="auth.profiles"
     :theme="theme.resolvedTheme"
     :insecure-transport="auth.insecureLan"
     :sidebar-title="sidebarTitle"
@@ -41,6 +61,7 @@ function selectProfile(label: string) { auth.selectProfile(profileNameMap.value.
     @logout="logout"
     @toggle-theme="theme.toggle"
     @select-profile="selectProfile"
+    @edit-profile="identityOpen = true"
     @close-inspector="emit('closeInspector')"
   >
     <template #sidebar-action><slot name="sidebar-action" /></template>
@@ -50,4 +71,5 @@ function selectProfile(label: string) { auth.selectProfile(profileNameMap.value.
     <template #default><slot /></template>
     <template #inspector><slot name="inspector" /></template>
   </WorkspaceShell>
+  <AgentIdentityDialog :open="identityOpen" :profile="auth.activeProfile" :busy="identityBusy" :error="identityError" @close="identityOpen = false" @save="saveIdentity" />
 </template>

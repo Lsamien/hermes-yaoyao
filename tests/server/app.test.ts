@@ -79,7 +79,7 @@ function fakeGateway(records: RecordedRequest[]): typeof fetch {
       case '/api/profiles':
         return jsonResponse({ profiles: [{ name: 'default', is_default: true }] })
       case '/api/plugins/yaoyao/profiles':
-        return jsonResponse({ profiles: [{ name: 'default', botName: '竹儿', agentName: '旧插件名称', isDefault: true }] })
+        return jsonResponse({ profiles: [{ name: 'default', botName: '竹儿', avatar: 'data:image/png;base64,AA==', agentName: '旧插件名称', isDefault: true }] })
       case '/api/auth/providers':
         return jsonResponse({ providers: [{ name: 'basic', supports_password: true }] })
       case '/auth/password-login':
@@ -180,7 +180,7 @@ describe('8800 BFF', () => {
       authRequired: true,
       authenticated: true,
       user: { user_id: 'user-1' },
-      profiles: [{ name: 'default', agentName: '竹儿' }],
+      profiles: [{ name: 'default', agentName: '竹儿', agentAvatar: 'data:image/png;base64,AA==' }],
       groupUploadsEnabled: true,
     })
     expect(response.body.csrfToken).toEqual(expect.any(String))
@@ -204,7 +204,7 @@ describe('8800 BFF', () => {
       '/api/profiles', '/api/plugins/yaoyao/profiles',
     ])
     expect(response.body.profiles).toEqual([
-      { name: 'default', is_default: true, agentName: '竹儿' },
+      { name: 'default', is_default: true, agentName: '竹儿', agentAvatar: 'data:image/png;base64,AA==' },
     ])
     expect(JSON.stringify(response.body)).not.toContain('旧插件名称')
   })

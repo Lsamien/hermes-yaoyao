@@ -28,6 +28,7 @@ export interface Profile {
   provider?: string
   gatewayRunning?: boolean
   avatar?: string
+  agentAvatar?: string
 }
 
 export interface ModelOption {

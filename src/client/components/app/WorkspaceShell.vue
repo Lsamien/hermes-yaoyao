@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import type { Profile } from '@shared/types'
+import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import AppIcon from '@/components/common/AppIcon.vue'
 import BrandMark from '@/components/common/BrandMark.vue'
 import NodePairingDialog from '@/components/app/NodePairingDialog.vue'
@@ -20,8 +22,8 @@ const SIDEBAR_SEARCH_CLOSE_EVENT = 'hermes-yaoyao:sidebar-search-close'
 const props = withDefaults(defineProps<{
   userName?: string
   pairingUserName?: string
-  profileName?: string
-  profiles?: string[]
+  activeProfile?: Profile
+  profiles?: Profile[]
   theme?: 'light' | 'dark'
   insecureTransport?: boolean
   sidebarTitle?: string
@@ -32,7 +34,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   userName: '',
   pairingUserName: '',
-  profileName: '',
+  activeProfile: undefined,
   profiles: () => [],
   theme: 'light',
   insecureTransport: false,
@@ -47,6 +49,7 @@ const emit = defineEmits<{
   logout: []
   toggleTheme: []
   selectProfile: [profile: string]
+  editProfile: []
   closeInspector: []
 }>()
 
@@ -59,6 +62,10 @@ const sidebarSearchOpen = ref(false)
 const nodePairingOpen = ref(false)
 const desktopSidebarContext = ref<HTMLElement | null>(null)
 const mobileSidebarContext = ref<HTMLElement | null>(null)
+
+function profileTitle(profile?: Profile): string {
+  return profile?.agentName || profile?.displayName || profile?.name || '未选择 Agent'
+}
 
 const navItems: NavItem[] = [
   { key: 'chat', label: '对话', path: '/chat', icon: 'chat' },
@@ -251,11 +258,11 @@ onBeforeUnmount(() => {
 
       <div class="sidebar-footer">
         <div class="sidebar-account-switcher">
-          <button class="sidebar-account-switcher__main" type="button" :title="`切换 Agent：${profileName || profiles[0] || '未选择'}`" @click="profileMenuOpen = !profileMenuOpen">
-            <span class="sidebar-account__avatar">{{ (userName || '夭').slice(0, 1).toUpperCase() }}</span>
+          <button class="sidebar-account-switcher__main" type="button" :title="`切换 Agent：${profileTitle(activeProfile)}`" @click="profileMenuOpen = !profileMenuOpen">
+            <AgentAvatar :name="profileTitle(activeProfile)" :avatar="activeProfile?.agentAvatar || ''" :size="30" />
             <span class="account-copy">
-              <strong>{{ userName || 'Hermes 用户' }}</strong>
-              <span>{{ profileName || profiles[0] || '未选择 Agent' }}</span>
+              <strong>{{ profileTitle(activeProfile) }}</strong>
+              <span>{{ activeProfile?.name || userName || '未选择 Agent' }}</span>
             </span>
             <AppIcon class="sidebar-account-switcher__chevron" name="chevron-down" :size="14" />
           </button>
@@ -269,15 +276,16 @@ onBeforeUnmount(() => {
             <div v-if="profileMenuOpen" class="profile-menu">
               <button
                 v-for="profile in profiles"
-                :key="profile"
+                :key="profile.name"
                 type="button"
-                :class="{ active: profile === profileName }"
-                @click="emit('selectProfile', profile); profileMenuOpen = false"
+                :class="{ active: profile.name === activeProfile?.name }"
+                @click="emit('selectProfile', profile.name); profileMenuOpen = false"
               >
-                <span>{{ profile.slice(0, 1).toUpperCase() }}</span>
-                <strong>{{ profile }}</strong>
-                <AppIcon v-if="profile === profileName" name="check" :size="15" />
+                <AgentAvatar :name="profileTitle(profile)" :avatar="profile.agentAvatar || ''" :size="24" />
+                <strong>{{ profileTitle(profile) }}</strong>
+                <AppIcon v-if="profile.name === activeProfile?.name" name="check" :size="15" />
               </button>
+              <button class="profile-menu__edit" type="button" :disabled="!activeProfile" @click="profileMenuOpen = false; emit('editProfile')"><AppIcon name="settings" :size="15" /><strong>编辑当前 Agent</strong></button>
               <button class="profile-menu__logout" type="button" @click="profileMenuOpen = false; emit('logout')">
                 <AppIcon name="logout" :size="15" /><strong>退出登录</strong>
               </button>
@@ -360,11 +368,11 @@ onBeforeUnmount(() => {
 
       <div class="sidebar-footer mobile-drawer__footer">
         <div class="sidebar-account-switcher">
-          <button class="sidebar-account-switcher__main" type="button" :title="`切换 Agent：${profileName || profiles[0] || '未选择'}`" @click="profileMenuOpen = !profileMenuOpen">
-            <span class="sidebar-account__avatar">{{ (userName || '夭').slice(0, 1).toUpperCase() }}</span>
+          <button class="sidebar-account-switcher__main" type="button" :title="`切换 Agent：${profileTitle(activeProfile)}`" @click="profileMenuOpen = !profileMenuOpen">
+            <AgentAvatar :name="profileTitle(activeProfile)" :avatar="activeProfile?.agentAvatar || ''" :size="30" />
             <span class="account-copy">
-              <strong>{{ userName || 'Hermes 用户' }}</strong>
-              <span>{{ profileName || profiles[0] || '未选择 Agent' }}</span>
+              <strong>{{ profileTitle(activeProfile) }}</strong>
+              <span>{{ activeProfile?.name || userName || '未选择 Agent' }}</span>
             </span>
             <AppIcon class="sidebar-account-switcher__chevron" name="chevron-down" :size="14" />
           </button>
@@ -378,15 +386,16 @@ onBeforeUnmount(() => {
             <div v-if="profileMenuOpen" class="profile-menu">
               <button
                 v-for="profile in profiles"
-                :key="profile"
+                :key="profile.name"
                 type="button"
-                :class="{ active: profile === profileName }"
-                @click="emit('selectProfile', profile); profileMenuOpen = false"
+                :class="{ active: profile.name === activeProfile?.name }"
+                @click="emit('selectProfile', profile.name); profileMenuOpen = false"
               >
-                <span>{{ profile.slice(0, 1).toUpperCase() }}</span>
-                <strong>{{ profile }}</strong>
-                <AppIcon v-if="profile === profileName" name="check" :size="15" />
+                <AgentAvatar :name="profileTitle(profile)" :avatar="profile.agentAvatar || ''" :size="24" />
+                <strong>{{ profileTitle(profile) }}</strong>
+                <AppIcon v-if="profile.name === activeProfile?.name" name="check" :size="15" />
               </button>
+              <button class="profile-menu__edit" type="button" :disabled="!activeProfile" @click="profileMenuOpen = false; emit('editProfile')"><AppIcon name="settings" :size="15" /><strong>编辑当前 Agent</strong></button>
               <button class="profile-menu__logout" type="button" @click="profileMenuOpen = false; emit('logout')">
                 <AppIcon name="logout" :size="15" /><strong>退出登录</strong>
               </button>
@@ -560,8 +569,9 @@ onBeforeUnmount(() => {
 .profile-menu { position: absolute; right: 0; bottom: calc(100% + 6px); left: 0; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); box-shadow: var(--shadow-float); }
 .profile-menu button { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 9px; padding: 5px 8px; border: 0; border-radius: 8px; background: transparent; cursor: pointer; text-align: left; }
 .profile-menu button:hover, .profile-menu button.active { background: var(--surface-hover); }
-.profile-menu button > span { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 8px; background: var(--surface-soft); color: var(--text-secondary); font-size: 10px; }
+.profile-menu button > span:not(.agent-avatar) { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 8px; background: var(--surface-soft); color: var(--text-secondary); font-size: 10px; }
 .profile-menu button strong { flex: 1; overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
+.profile-menu__edit { margin-top: 4px; border-top: 1px solid var(--line) !important; color: var(--text-secondary); }
 .profile-menu__logout { margin-top: 4px; border-top: 1px solid var(--line) !important; color: var(--danger); }
 .account-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 .account-copy strong, .account-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
