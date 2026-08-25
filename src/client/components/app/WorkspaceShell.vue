@@ -225,7 +225,8 @@ onBeforeUnmount(() => {
           :title="item.label"
           @click="navigate(item.path)"
         >
-          <YaoYaoSidebarIcon :name="navIcon(item.key)" />
+          <AppIcon v-if="item.key === 'groups'" name="groups" :size="18" />
+          <YaoYaoSidebarIcon v-else :name="navIcon(item.key)" />
           <span>{{ item.label }}</span>
         </button>
       </nav>
