@@ -349,6 +349,18 @@ describe('WebSocket relay', () => {
     })
 
     socket.send(JSON.stringify({
+      id: 'model-with-scoped-provider',
+      method: 'config.set',
+      params: { session_id: 'stored-session', key: 'model', value: 'omni --provider Custom:Tingly --session' },
+    }))
+    await wsMessage(socket)
+    expect(received[3]).toEqual({
+      id: 'model-with-scoped-provider',
+      method: 'config.set',
+      params: { session_id: 'stored-session', key: 'model', value: 'omni --provider Custom:Tingly --session' },
+    })
+
+    socket.send(JSON.stringify({
       id: 'forbidden',
       method: 'config.set',
       params: { session_id: 'stored-session', key: 'yolo', value: 'true' },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { modelForSession, modelSelectionFromSessionInfo } from '@/utils/sessionModel'
+import { modelForChoiceId, modelForSession, modelSelectionFromSessionInfo } from '@/utils/sessionModel'
 import { normalizeSession } from '@/utils/normalize'
 
 const models = [
@@ -31,5 +31,10 @@ describe('session model selection', () => {
       id: 'session-1', model: 'omni',
       model_config: JSON.stringify({ model: 'omni', provider: 'custom:tingly' }),
     })).toMatchObject({ model: 'omni', provider: 'custom:tingly' })
+  })
+
+  it('finds a chosen model when its provider contains a colon', () => {
+    const tinglyModel = { id: 'omni', name: 'Omni', provider: 'Custom:Tingly' }
+    expect(modelForChoiceId([tinglyModel], 'Custom:Tingly:omni')).toEqual(tinglyModel)
   })
 })

@@ -84,7 +84,7 @@ function normalizedConfigParams(params: Record<string, unknown>): Record<string,
   const key = safeString(params.key, 'config key', true)
   if (key === 'model') {
     const value = typeof params.value === 'string' ? params.value.trim() : ''
-    if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,511} --provider [A-Za-z0-9][A-Za-z0-9._-]{0,127}( --session)?$/.test(value)) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,511} --provider [A-Za-z0-9][A-Za-z0-9._:-]{0,127}( --session)?$/.test(value)) {
       throw new HttpError(400, 'Model selection is invalid')
     }
     return {

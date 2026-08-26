@@ -6,6 +6,19 @@ export interface SessionModelSelection {
   provider?: string
 }
 
+/**
+ * The model chooser uses this exact value for its option IDs. Providers may
+ * themselves contain colons, so callers must compare the whole value instead
+ * of splitting it back into provider and model parts.
+ */
+export function modelChoiceId(option: Pick<ModelOption, 'id' | 'provider'>): string {
+  return `${option.provider}:${option.id}`
+}
+
+export function modelForChoiceId(options: ModelOption[], choiceId: string): ModelOption | undefined {
+  return options.find(option => modelChoiceId(option) === choiceId)
+}
+
 export function modelForSession(options: ModelOption[], model?: string, provider?: string): ModelOption | undefined {
   const id = model?.trim()
   if (!id) return undefined

@@ -22,6 +22,7 @@ import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
 import { chatInteraction, chatMessagesToUi, sessionSidebarItem } from '@/components/workspace/viewModels'
 import { consumeLibraryItemForComposer, loadComposerFile } from '@/components/workspace/pendingComposer'
 import { readAgentShowThinking, writeAgentShowThinking } from '@/utils/sessionPreferences'
+import { modelChoiceId, modelForChoiceId } from '@/utils/sessionModel'
 import { estimateConversationTokens } from '@/utils/contextUsage'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
@@ -83,7 +84,7 @@ const forkSourceTitle = computed(() => {
   if (!parentId) return ''
   return chat.sessions.find(session => session.id === parentId && session.profile === activeSession.value?.profile)?.title || parentId
 })
-const selectedModelId = computed(() => chat.selectedModel ? `${chat.selectedModel.provider}:${chat.selectedModel.id}` : '')
+const selectedModelId = computed(() => chat.selectedModel ? modelChoiceId(chat.selectedModel) : '')
 const reasoningOptions: ChoiceOption[] = [
   { id: '', label: '默认', description: '使用模型或 Profile 的默认强度' },
   { id: 'none', label: '关闭', description: '不使用额外推理' },
@@ -208,8 +209,7 @@ async function selectModel(id: string) {
     modelDialog.value = false
     return
   }
-  const [provider, ...rest] = id.split(':')
-  const model = chat.models.find(item => item.provider === provider && item.id === rest.join(':'))
+  const model = modelForChoiceId(chat.models, id)
   if (!model || modelSwitching.value) return
   modelSwitching.value = true
   try {
