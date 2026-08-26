@@ -143,6 +143,7 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === '/api/session-unread') return json(response, 200, { items: { 'session-demo': 0 } })
   if (url.pathname === '/api/plugins/yaoyao/v1/capabilities') return json(response, 200, { protocolVersion: 8, journalEpoch: epoch, latestCursor: groupCursor, limits: { maxAgentsPerRoom: 8, maxMessageBytes: 65536, maxMessagePageSize: 100, defaultMaxReplyRounds: 3, unlimitedReplyRoundsValue: -1, maxAgentDisplayNameLength: 100 }, eventTypes: ['message.upsert', 'topic.updated', 'room.activity', 'run.updated', 'agent.status', 'agent.updated'] })
+  if (url.pathname === '/api/plugins/yaoyao/v1/topics/pinned') return json(response, 200, { items: groupTopics.filter(topic => topic.pinned), nextCursor: null })
   if (url.pathname === '/api/plugins/yaoyao/v1/rooms') return json(response, 200, { items: [room], nextCursor: null })
   if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}`) return json(response, 200, { ...room, agents: groupAgents, runs: [], pendingInteractions: [], latestCursor: groupCursor })
   const agentPatchMatch = new RegExp(`^/api/plugins/yaoyao/v1/rooms/${roomId}/agents/([^/]+)$`).exec(url.pathname)

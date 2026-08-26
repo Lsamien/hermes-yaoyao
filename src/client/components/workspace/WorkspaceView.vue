@@ -10,9 +10,10 @@ withDefaults(defineProps<{
   sidebarTitle: string
   sidebarSubtitle?: string
   sidebarContextTitle?: string
+  sidebarFocusMode?: boolean
   inspectorOpen?: boolean
   inspectorCloseLabel?: string
-}>(), { sidebarSubtitle: '', sidebarContextTitle: '', inspectorOpen: false, inspectorCloseLabel: '关闭预览' })
+}>(), { sidebarSubtitle: '', sidebarContextTitle: '', sidebarFocusMode: false, inspectorOpen: false, inspectorCloseLabel: '关闭预览' })
 
 const emit = defineEmits<{ closeInspector: [] }>()
 const auth = useAuthStore()
@@ -67,6 +68,7 @@ onBeforeUnmount(() => window.removeEventListener('focus', refreshOnWindowFocus))
     :sidebar-title="sidebarTitle"
     :sidebar-subtitle="sidebarSubtitle"
     :sidebar-context-title="sidebarContextTitle"
+    :sidebar-focus-mode="sidebarFocusMode"
     :inspector-open="inspectorOpen"
     :inspector-close-label="inspectorCloseLabel"
     @logout="logout"

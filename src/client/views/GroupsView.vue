@@ -84,8 +84,7 @@ const sidebarItems = computed<SidebarItem[]>(() => {
   if (!room) return activeRooms.value.map(item => ({ ...roomSidebarItem(item), section: undefined }))
   const items: SidebarItem[] = [{
     id: GROUP_LIST_BACK_ID,
-    title: '返回群聊记录',
-    section: room.name,
+    title: '返回房间列表',
     icon: 'chevron-left',
     showMore: false,
   }, {
@@ -612,7 +611,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 </script>
 
 <template>
-  <WorkspaceView sidebar-title="群聊" :sidebar-context-title="topicListRoom?.name" :sidebar-subtitle="sidebarSubtitle" :inspector-open="managerOpen && !!room" inspector-close-label="关闭群聊管理" @close-inspector="managerOpen = false">
+  <WorkspaceView sidebar-title="群聊" :sidebar-context-title="topicListRoom?.name" :sidebar-subtitle="sidebarSubtitle" :sidebar-focus-mode="!!topicListRoom" :inspector-open="managerOpen && !!room" inspector-close-label="关闭群聊管理" @close-inspector="managerOpen = false">
     <template #sidebar-action>
       <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" title="新建群聊" aria-label="新建群聊" @click="openCreateGroup">
         <YaoYaoSidebarIcon name="add" />
@@ -635,6 +634,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
     </template>
     <template #sidebar>
       <ResourceSidebar
+        :class="{ 'group-topic-focus-sidebar': !!topicListRoom }"
         :items="sidebarItems"
         :active-id="groups.selectedRoomId"
         :loading="groups.isLoading"
@@ -786,6 +786,11 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 .pinned-topic-list__heading { display: flex; min-height: 35px; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 11px 5px; }
 .pinned-topic-list__heading strong { font-size: 12px; font-weight: 680; }.pinned-topic-list__heading span { overflow: hidden; color: var(--text-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .pinned-topic-list__item { display: flex; width: 100%; min-height: 32px; align-items: center; gap: 7px; padding: 1px 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }.pinned-topic-list__item:hover, .pinned-topic-list__item.active { background: var(--surface-hover); }.pinned-topic-list__item :deep(.app-icon) { flex: 0 0 auto; color: var(--text-muted); }.pinned-topic-list__item > span { min-width: 0; overflow: hidden; font-size: 10.5px; font-weight: 450; text-overflow: ellipsis; white-space: nowrap; }.pinned-topic-list__item small { margin-left: auto; overflow: hidden; color: var(--text-muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
+.group-topic-focus-sidebar :deep(.sidebar-list) { padding: 0 0 14px; }
+.group-topic-focus-sidebar :deep(.sidebar-section-label) { margin-inline: 10px; }
+.group-topic-focus-sidebar :deep(.sidebar-item:not([data-sidebar-id="group-list"])) { width: calc(100% - 20px); margin-inline: 10px; }
+.group-topic-focus-sidebar :deep([data-sidebar-id="group-list"]) { position: sticky; z-index: 3; top: 0; min-height: 58px; padding-inline: 17px; border-bottom: 1px solid var(--line); border-radius: 0; background: var(--surface); }
+.group-topic-focus-sidebar :deep([data-sidebar-id="group-list"]:hover), .group-topic-focus-sidebar :deep([data-sidebar-id="group-list"]:focus-visible) { background: var(--surface-hover); }
 .archived-overlay-backdrop { position: fixed; z-index: 220; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(0,0,0,.36); }.archived-overlay { width: min(460px, 100%); max-height: min(620px, calc(100vh - 40px)); overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); box-shadow: 0 24px 70px rgba(0,0,0,.28); }.archived-overlay header { display: flex; align-items: center; justify-content: space-between; padding: 18px 18px 14px; border-bottom: 1px solid var(--line); }.archived-overlay header small { display: block; color: var(--text-secondary); font-size: 10px; }.archived-overlay header strong { font-size: 15px; }.archived-overlay header button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); cursor: pointer; }.archived-section { display: grid; gap: 8px; padding: 16px 18px; }.archived-section + .archived-section { border-top: 1px solid var(--line); }.archived-section h3 { margin: 0; font-size: 12px; }.archived-section p { margin: 0; color: var(--text-secondary); font-size: 12px; }.archived-section article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; }.archived-section article span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.archived-section article button { border: 0; border-radius: 7px; background: var(--surface-hover); color: var(--text-primary); cursor: pointer; padding: 5px 9px; }
 .group-header-actions { display: flex; align-items: center; gap: 8px; }.group-host-chip { max-width: 150px; overflow: hidden; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line)); border-radius: 999px; background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); font-size: 9px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.group-avatars { display: flex; align-items: center; }.group-avatars span, .group-avatars em { display: grid; width: 24px; height: 24px; margin-left: -5px; place-items: center; border: 2px solid var(--canvas); border-radius: 8px; font-size: 8px; font-style: normal; font-weight: 650; }.group-avatars span { background: transparent; color: var(--text-secondary); }.group-avatars span:first-child { margin-left: 0; }.group-avatars em { background: var(--surface-hover); color: var(--text-secondary); }
 .group-error { display: flex; width: min(760px, calc(100% - 32px)); margin: 0 auto 4px; align-items: center; gap: 6px; color: var(--danger); font-size: 9px; }
