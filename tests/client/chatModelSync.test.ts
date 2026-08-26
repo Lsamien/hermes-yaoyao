@@ -134,4 +134,22 @@ describe('chat model realtime synchronization', () => {
     })
     expect(chat.selectedModel).toEqual(newModel)
   })
+
+  it('does not resume an old session merely to show its context usage', async () => {
+    const chat = useChatStore()
+    chat.sessions = [{
+      id: 'session-1', profile: 'alpha', source: 'web', title: '旧会话',
+      messageCount: 1, toolCallCount: 0, startedAt: 1, updatedAt: 1,
+    }]
+    chat.routes[routeKey('alpha', 'session-1')] = {
+      route: { profile: 'alpha', sessionId: 'session-1' }, messages: [], historySynced: true,
+      hasMoreBefore: false, loadedMessageCount: 0, messageTotal: 0,
+      isLoadingHistory: false, isStreaming: false, isQueued: false, generation: 1,
+    }
+
+    await chat.selectSession('session-1', 'alpha')
+    await Promise.resolve()
+
+    expect(realtime.request).not.toHaveBeenCalled()
+  })
 })

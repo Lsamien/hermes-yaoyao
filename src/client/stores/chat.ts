@@ -935,8 +935,11 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function refreshContextUsage(initialState = activeRouteState.value): Promise<void> {
-    if (!initialState || initialState.route.sessionId.startsWith('draft-')) return
-    const current = await ensureRuntime(initialState)
+    // Opening history is read-only. Resuming an old session merely to fetch
+    // usage updates Hermes' last_active timestamp and incorrectly moves it
+    // into today's sidebar group.
+    if (!initialState || initialState.route.sessionId.startsWith('draft-') || !initialState.runtimeSessionId) return
+    const current = initialState
     const usage = resultRecord(await socket.request('session.usage', { session_id: current.runtimeSessionId! }))
     current.usage = {
       inputTokens: number(usage.input_tokens ?? usage.input) || undefined,
