@@ -137,7 +137,7 @@ function isImage(type: string) { return type.startsWith('image/') }
 
 function addFiles(files: File[]) {
   if (!props.attachmentsEnabled) {
-    showError('当前上游不支持群聊附件')
+    showError('当前上游不支持团队附件')
     return
   }
   const available = MAX_FILES - attachments.value.length

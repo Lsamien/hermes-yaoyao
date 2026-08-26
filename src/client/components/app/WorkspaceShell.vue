@@ -29,6 +29,7 @@ const props = withDefaults(defineProps<{
   sidebarTitle?: string
   sidebarSubtitle?: string
   sidebarContextTitle?: string
+  sidebarFocusMode?: boolean
   inspectorOpen?: boolean
   inspectorCloseLabel?: string
 }>(), {
@@ -41,6 +42,7 @@ const props = withDefaults(defineProps<{
   sidebarTitle: '',
   sidebarSubtitle: '',
   sidebarContextTitle: '',
+  sidebarFocusMode: false,
   inspectorOpen: false,
   inspectorCloseLabel: '关闭预览',
 })
@@ -69,7 +71,7 @@ function profileTitle(profile?: Profile): string {
 
 const navItems: NavItem[] = [
   { key: 'chat', label: '对话', path: '/chat', icon: 'chat' },
-  { key: 'groups', label: '群聊', path: '/groups', icon: 'groups' },
+  { key: 'groups', label: '团队', path: '/groups', icon: 'groups' },
   { key: 'files', label: '文件库', path: '/files', icon: 'files' },
 ]
 
@@ -85,7 +87,7 @@ const activeNav = computed(() => {
 
 const contextHeading = computed(() => ({
   chat: '历史记录',
-  groups: '群聊记录',
+  groups: '团队列表',
   files: '历史记录',
 })[activeNav.value.key])
 
@@ -167,7 +169,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="workspace-shell" :class="{ 'workspace-shell--collapsed': sidebarCollapsed }">
+  <div class="workspace-shell" :class="{ 'workspace-shell--collapsed': sidebarCollapsed, 'workspace-shell--sidebar-focused': sidebarFocusMode }">
     <header class="mobile-header">
       <button class="icon-button" type="button" aria-label="打开导航" @click="mobileDrawerOpen = true">
         <AppIcon name="menu" :size="20" />
@@ -299,7 +301,7 @@ onBeforeUnmount(() => {
     </Transition>
     <aside
       class="mobile-drawer"
-      :class="{ 'mobile-drawer--open': mobileDrawerOpen }"
+      :class="{ 'mobile-drawer--open': mobileDrawerOpen, 'mobile-drawer--focused': sidebarFocusMode }"
       aria-label="移动导航"
       :aria-hidden="!mobileDrawerOpen"
       :inert="!mobileDrawerOpen"
@@ -559,6 +561,14 @@ onBeforeUnmount(() => {
 .sidebar-context__body :deep(.library-sidebar) { padding-top: 1px; }
 .sidebar-context__body :deep(.library-sidebar section) { margin-top: 2px; }
 
+.workspace-shell--sidebar-focused .desktop-sidebar .sidebar-search-trigger,
+.workspace-shell--sidebar-focused .desktop-sidebar > .sidebar-primary-action,
+.workspace-shell--sidebar-focused .desktop-sidebar .sidebar-feature-nav,
+.workspace-shell--sidebar-focused .desktop-sidebar .sidebar-footer { display: none; }
+.workspace-shell--sidebar-focused { grid-template-columns: 264px minmax(0, 1fr) auto; }
+.workspace-shell--sidebar-focused .desktop-sidebar .sidebar-context,
+.workspace-shell--sidebar-focused .desktop-sidebar--collapsed .sidebar-context { display: flex; flex: 1; }
+
 .sidebar-footer { flex: 0 0 auto; padding: 7px 10px 10px; background: var(--surface); }
 .sidebar-account-switcher { position: relative; z-index: 30; display: flex; min-height: 46px; align-items: center; gap: 6px; padding: 4px 7px; border-top: 1px solid var(--line); }
 .sidebar-account-switcher__main { display: flex; min-width: 0; min-height: 38px; flex: 1; align-items: center; gap: 9px; padding: 4px 1px; border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }
@@ -617,6 +627,12 @@ onBeforeUnmount(() => {
   .mobile-drawer--open { transform: translateX(0); }
   .mobile-drawer__header { display: flex; min-height: 49px; align-items: center; justify-content: space-between; padding: 0 14px 5px 12px; }
   .mobile-drawer__context { margin-top: 2px; }
+  .mobile-drawer--focused { padding-block: max(9px, env(safe-area-inset-top)) max(9px, env(safe-area-inset-bottom)); }
+  .mobile-drawer--focused > .sidebar-search-trigger,
+  .mobile-drawer--focused > .sidebar-primary-action,
+  .mobile-drawer--focused > .sidebar-feature-nav,
+  .mobile-drawer--focused > .sidebar-footer { display: none; }
+  .mobile-drawer--focused .mobile-drawer__context { margin-top: 0; flex: 1; }
   .mobile-drawer__context .sidebar-context__body :deep(.resource-sidebar) { min-height: 0; flex: 1; }
   .mobile-drawer__footer { padding-inline: 10px; }
   .workspace-inspector { position: fixed; z-index: 45; inset: 52px 0 0 auto; width: min(440px, 100vw); min-width: 0; box-shadow: var(--shadow-float); }

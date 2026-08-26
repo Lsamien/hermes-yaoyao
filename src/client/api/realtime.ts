@@ -237,7 +237,7 @@ export class GroupEventSocket {
       socket.addEventListener('error', () => {
         if (!settled) {
           settled = true
-          reject(new ApiError('群聊事件连接失败', 0, 'GROUP_WEBSOCKET_ERROR'))
+          reject(new ApiError('团队事件连接失败', 0, 'GROUP_WEBSOCKET_ERROR'))
         }
       })
       socket.addEventListener('close', event => {

@@ -3,7 +3,7 @@
   "version": "0.1.1",
   "private": true,
   "license": "BSL-1.1",
-  "description": "夭夭 Web：直连 Hermes 9119 的聊天、群聊、文件库与产物工作台",
+  "description": "夭夭 Web：直连 Hermes 9119 的聊天、团队、文件库与产物工作台",
   "type": "module",
   "engines": {
     "node": ">=24.0.0"

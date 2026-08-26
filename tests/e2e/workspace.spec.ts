@@ -46,16 +46,16 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   await expect(page.getByRole('option').first()).toContainText('夭夭 Web 验收会话')
   await expect(page.getByRole('option').first()).toContainText('夭夭')
   await expect(page.locator('.desktop-sidebar').getByText('已置顶 1', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '群聊' }).click()
+  await page.getByRole('button', { name: '团队' }).click()
   await expect(page.getByRole('heading', { name: '设计验收' })).toBeVisible()
   await expect(page.getByRole('button', { name: '对话', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '群聊', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '团队', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '文件库', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '产物', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '新建群聊' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '新建群聊' })).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-  await expect(page.getByRole('button', { name: '新建群聊' })).toHaveCSS('font-weight', '580')
-  await expect(page.getByRole('button', { name: '管理群聊' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '新建团队' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '新建团队' })).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(page.getByRole('button', { name: '新建团队' })).toHaveCSS('font-weight', '580')
+  await expect(page.getByRole('button', { name: '管理团队' })).toBeVisible()
   await expect(page.getByRole('button', { name: '发送消息' })).toBeVisible()
 
   await page.goto('/files')
@@ -105,13 +105,13 @@ test('uses the active session or group title in the browser title', async ({ pag
 })
 
 test('uses a floating search dialog for group rooms', async ({ page }) => {
-  await page.getByRole('button', { name: '群聊' }).click()
+  await page.getByRole('button', { name: '团队' }).click()
   await expect(page.getByRole('heading', { name: '设计验收' })).toBeVisible()
 
   await page.locator('.desktop-sidebar').getByRole('button', { name: '搜索', exact: true }).click()
-  const searchDialog = page.getByRole('dialog', { name: '搜索群聊' })
+  const searchDialog = page.getByRole('dialog', { name: '搜索团队' })
   await expect(searchDialog).toBeVisible()
-  await searchDialog.getByPlaceholder('搜索群聊').fill('设计')
+  await searchDialog.getByPlaceholder('搜索团队').fill('设计')
   const roomResult = searchDialog.getByRole('option', { name: /设计与工程协作/ })
   await expect(roomResult).toBeVisible()
   await roomResult.click()
@@ -119,17 +119,17 @@ test('uses a floating search dialog for group rooms', async ({ page }) => {
 })
 
 test('selects one protocol v5 host independently from no-mention replies', async ({ page }) => {
-  await page.getByRole('button', { name: '群聊' }).click()
+  await page.getByRole('button', { name: '团队' }).click()
   await expect(page.locator('.group-host-chip')).toHaveText('主持人 夭夭')
 
-  await page.getByRole('button', { name: '新建群聊' }).click()
-  const createDialog = page.getByRole('dialog', { name: '新建群聊' })
+  await page.getByRole('button', { name: '新建团队' }).click()
+  const createDialog = page.getByRole('dialog', { name: '新建团队' })
   await createDialog.getByRole('button', { name: /yaoer/ }).click()
   await createDialog.getByLabel('主持人').selectOption('yaoer')
   await expect(createDialog.getByLabel('所有成员无需 @ 也回复')).toBeChecked()
   await createDialog.getByRole('button', { name: '关闭' }).click()
 
-  await page.getByRole('button', { name: '管理群聊' }).click()
+  await page.getByRole('button', { name: '管理团队' }).click()
   const manager = page.locator('.group-manager')
   await expect(manager.getByLabel('主持人')).toHaveValue('33333333-3333-4333-8333-333333333333')
   const promoteRequest = page.waitForRequest(request => request.method() === 'PATCH' && request.url().endsWith('/agents/34343434-3434-4434-8434-343434343434'))
@@ -145,11 +145,11 @@ test('selects one protocol v5 host independently from no-mention replies', async
 })
 
 test('edits every protocol v5 Agent setting with one inspector close control', async ({ page }) => {
-  await page.getByRole('button', { name: '群聊' }).click()
+  await page.getByRole('button', { name: '团队' }).click()
   await expect(page.getByRole('heading', { name: '设计验收' })).toBeVisible()
-  await page.getByRole('button', { name: '管理群聊' }).click()
+  await page.getByRole('button', { name: '管理团队' }).click()
 
-  await expect(page.getByRole('button', { name: '关闭群聊管理' })).toHaveCount(1)
+  await expect(page.getByRole('button', { name: '关闭团队管理' })).toHaveCount(1)
   await expect(page.getByRole('button', { name: '关闭预览' })).toHaveCount(0)
   await expect(page.getByLabel('最多回复轮数')).toHaveValue('-1')
   await page.getByRole('button', { name: '设置夭夭' }).click()
@@ -193,9 +193,9 @@ test('edits every protocol v5 Agent setting with one inspector close control', a
 })
 
 test('pins the named Agent typing status above the group composer', async ({ page }) => {
-  await page.getByRole('button', { name: '群聊' }).click()
+  await page.getByRole('button', { name: '团队' }).click()
   const composer = page.locator('.composer-area')
-  await page.getByRole('textbox', { name: '发消息给群聊，输入 @ 提及 Agent' }).fill('@夭夭 检查输入状态')
+  await page.getByRole('textbox', { name: '发消息给团队，输入 @ 提及 Agent' }).fill('@夭夭 检查输入状态')
   await page.getByRole('button', { name: '发送消息' }).click()
 
   const typing = composer.getByRole('status', { name: 'Agent 输入状态' })
@@ -210,7 +210,7 @@ test('pins the named Agent typing status above the group composer', async ({ pag
 })
 
 test('reconnects the group event stream after an unexpected close', async ({ page }) => {
-  await page.getByRole('button', { name: '群聊' }).click()
+  await page.getByRole('button', { name: '团队' }).click()
   await expect(page.getByText('已同步', { exact: true })).toBeVisible()
   const before = await (await page.request.get('http://127.0.0.1:19119/__test/group-connections')).json() as { count: number }
   await page.request.post('http://127.0.0.1:19119/__test/groups/disconnect')
@@ -223,8 +223,8 @@ test('reconnects the group event stream after an unexpected close', async ({ pag
 
 test('recovers the group page after its initial upstream connection fails', async ({ page }) => {
   await page.request.post('http://127.0.0.1:19119/__test/groups/availability', { data: { available: false } })
-  await page.getByRole('button', { name: '群聊' }).click()
-  await expect(page.getByRole('heading', { name: '群聊服务暂不可用' })).toBeVisible()
+  await page.getByRole('button', { name: '团队' }).click()
+  await expect(page.getByRole('heading', { name: '团队服务暂不可用' })).toBeVisible()
   await page.request.post('http://127.0.0.1:19119/__test/groups/availability', { data: { available: true } })
   await expect(page.getByRole('heading', { name: '设计验收' })).toBeVisible({ timeout: 5_000 })
 })
@@ -531,7 +531,7 @@ test('renders historical assistant MEDIA as Markdown in chat and group chat', as
   await expect(reopenedMediaDialog).toBeHidden()
   await expect(page.locator('.composer-attachments img[alt="AppIcon-1024.png"]')).toBeVisible()
 
-  await page.getByRole('button', { name: '群聊' }).click()
+  await page.getByRole('button', { name: '团队' }).click()
   await expect(page.locator('.markdown img[alt="AppIcon-1024.png"]')).toBeVisible()
 })
 
@@ -540,11 +540,22 @@ test('selects existing group topics and creates a new protocol v4 topic on first
   const existingTopicId = '88888888-8888-4888-8888-888888888888'
   const existingTopicSidebarId = `topic:${roomId}:${existingTopicId}`
 
-  await page.getByRole('button', { name: '群聊' }).click()
+  await page.getByRole('button', { name: '团队' }).click()
   const sidebar = page.locator('.desktop-sidebar')
   const roomItem = sidebar.locator(`[data-sidebar-id="${roomId}"]`)
   const existingTopic = sidebar.locator(`[data-sidebar-id="${existingTopicSidebarId}"]`)
   await roomItem.click()
+  const backToRooms = sidebar.locator('[data-sidebar-id="group-list"]')
+  await expect(backToRooms).toContainText('返回团队列表')
+  await expect(sidebar.getByRole('button', { name: '返回对话' })).toBeVisible()
+  await expect(sidebar.getByRole('button', { name: '折叠侧边栏' })).toBeVisible()
+  await expect(sidebar.getByText('设计与工程协作', { exact: true })).toBeVisible()
+  await expect(sidebar.getByText('2 个 Agent', { exact: true })).toBeVisible()
+  await expect(sidebar.getByRole('button', { name: '搜索', exact: true })).toBeHidden()
+  await expect(sidebar.getByRole('button', { name: '新建团队' })).toBeHidden()
+  await expect(sidebar.getByRole('button', { name: '已归档' })).toBeHidden()
+  await expect(sidebar.getByRole('button', { name: '对话', exact: true })).toBeHidden()
+  await expect(sidebar.locator('.sidebar-footer')).toBeHidden()
   await expect(existingTopic).toContainText('发布检查')
   await expect(existingTopic).toHaveClass(/sidebar-item--topic/)
 
@@ -567,9 +578,11 @@ test('selects existing group topics and creates a new protocol v4 topic on first
   await expect(timeline.getByText('请核对发布话题的独立历史。', { exact: true })).toBeVisible()
   await expect(timeline.getByText('大家好，检查一下群聊输入框。', { exact: true })).toHaveCount(0)
 
-  await sidebar.locator(`[data-sidebar-id="group-list"]`).click()
+  await backToRooms.click()
+  await expect(sidebar.getByRole('button', { name: '搜索', exact: true })).toBeVisible()
+  await expect(sidebar.getByRole('button', { name: '新建团队' })).toBeVisible()
   await roomItem.click({ button: 'right' })
-  const roomActions = page.getByRole('menu', { name: '群聊房间操作' })
+  const roomActions = page.getByRole('menu', { name: '团队操作' })
   await roomActions.getByRole('menuitem', { name: '新建话题' }).click()
   const draftTopic = sidebar.locator('.sidebar-item--topic').filter({ hasText: '新话题' })
   await expect(draftTopic).toBeVisible()
@@ -584,7 +597,7 @@ test('selects existing group topics and creates a new protocol v4 topic on first
     const url = new URL(request.url())
     return request.method() === 'POST' && url.pathname === `/api/app/groups/rooms/${roomId}/messages`
   })
-  await page.getByRole('textbox', { name: '发消息给群聊，输入 @ 提及 Agent' }).fill(content)
+  await page.getByRole('textbox', { name: '发消息给团队，输入 @ 提及 Agent' }).fill(content)
   await page.getByRole('button', { name: '发送消息' }).click()
   const sendRequest = await sendRequestPromise
   const sentPayload = sendRequest.postDataJSON() as { topicId: string; content: string; clientMessageId: string }
