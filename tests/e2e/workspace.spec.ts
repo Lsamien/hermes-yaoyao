@@ -642,6 +642,7 @@ test('folds tool result rows into their expandable tool call', async ({ page }) 
   await expect(trace).not.toHaveAttribute('open', '')
   await expect(trace.locator('summary')).toContainText('思考与工具')
   await expect(trace.locator('summary')).toContainText('2 段思考 · 2 个工具')
+  await expect(trace.locator('summary > :last-child')).toHaveClass(/turn-trace__caret/)
   await trace.locator('summary').click()
   await expect(trace.locator('.turn-trace__reasoning')).toHaveCount(2)
   await expect(trace.locator('.tool-trace')).toHaveCount(2)
@@ -659,6 +660,18 @@ test('folds tool result rows into their expandable tool call', async ({ page }) 
   })
   expect(layout.maxHeight).toBeLessThanOrEqual(420)
   expect(new Set(layout.leftOffsets).size).toBe(1)
+  const toolAlignment = await trace.locator('.tool-trace').first().evaluate(element => {
+    const tool = element as HTMLElement
+    const button = tool.querySelector<HTMLElement>(':scope > button')
+    const detail = tool.querySelector<HTMLElement>('.tool-trace__details > section')
+    return {
+      toolLeft: tool.getBoundingClientRect().left,
+      buttonLeft: button?.getBoundingClientRect().left,
+      detailLeft: detail?.getBoundingClientRect().left,
+    }
+  })
+  expect(toolAlignment.buttonLeft).toBeCloseTo(toolAlignment.toolLeft, 0)
+  expect(toolAlignment.detailLeft).toBeCloseTo(toolAlignment.toolLeft, 0)
   await expect(page.locator('[data-message-id="message-tool-call"]')).toHaveCount(0)
   await expect(page.locator('.message--tool')).toHaveCount(0)
 })
