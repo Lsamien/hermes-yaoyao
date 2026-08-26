@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
+import { createId } from '@/utils/id'
 import type { ComposerAttachment, ComposerOption, ComposerReference, ComposerSubmit } from './types'
 
 const props = withDefaults(defineProps<{
@@ -149,7 +150,7 @@ function addFiles(files: File[]) {
       continue
     }
     accepted.push({
-      id: `${file.name}:${file.size}:${file.lastModified}:${crypto.randomUUID()}`,
+      id: `${file.name}:${file.size}:${file.lastModified}:${createId('attachment')}`,
       file,
       name: file.name,
       size: file.size,

@@ -41,4 +41,24 @@ describe('composer availability', () => {
     expect(activity.element.nextElementSibling).toBe(shell.element)
     expect(activity.get('[role="status"]').text()).toBe('夭夭正在输入…')
   })
+
+  it('adds attachments when randomUUID is unavailable in an HTTP browser', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis.crypto, 'randomUUID')
+    Object.defineProperty(globalThis.crypto, 'randomUUID', { configurable: true, value: undefined })
+    try {
+      const wrapper = mount(ComposerShell)
+      const input = wrapper.get<HTMLInputElement>('.composer-file-input')
+      const file = new File(['兼容内容'], '兼容.txt', { type: 'text/plain', lastModified: 123 })
+      Object.defineProperty(input.element, 'files', { configurable: true, value: [file] })
+
+      await input.trigger('change')
+
+      expect(wrapper.get('.composer-attachment strong').text()).toBe('兼容.txt')
+      expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+      wrapper.unmount()
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis.crypto, 'randomUUID', descriptor)
+      else Reflect.deleteProperty(globalThis.crypto, 'randomUUID')
+    }
+  })
 })
