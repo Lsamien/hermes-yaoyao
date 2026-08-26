@@ -62,7 +62,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     >
       <div class="image-preview-actions">
         <a :href="previewMedia.url" download :aria-label="`下载 ${previewMedia.name}`" :title="`下载 ${previewMedia.name}`"><DownloadOutline aria-hidden="true" /></a>
-        <button type="button" :disabled="canAdd === false" :aria-label="addLabel || '添加到聊天'" :title="canAdd === false ? '当前群聊不支持添加附件' : addLabel || '添加到聊天'" @click.stop="emit('add', previewMedia)"><AddOutline aria-hidden="true" /></button>
+        <button type="button" :disabled="canAdd === false" :aria-label="addLabel || '添加到聊天'" :title="canAdd === false ? '当前团队不支持添加附件' : addLabel || '添加到聊天'" @click.stop="emit('add', previewMedia)"><AddOutline aria-hidden="true" /></button>
         <button type="button" :aria-label="closeLabel || '关闭预览'" :title="closeLabel || '关闭预览'" @click="close"><CloseOutline aria-hidden="true" /></button>
       </div>
       <button v-if="canPrevious" class="image-preview-nav image-preview-nav--previous" type="button" :aria-label="previousLabel || '上一张媒体'" @click.stop="move(-1)"><ChevronBackOutline aria-hidden="true" /></button>

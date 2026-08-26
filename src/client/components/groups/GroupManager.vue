@@ -147,7 +147,7 @@ function canRemoveAgent(agent: GroupAgent): boolean {
 function isRemoteAgent(agent: GroupAgent): boolean { return agent.nodeId !== 'local' }
 
 function removeAgentTitle(agent: GroupAgent): string {
-  return canRemoveAgent(agent) ? '移除' : agent.isHost ? '需要另一位已启用成员才能移除主持人' : '房间必须保留至少一位成员'
+  return canRemoveAgent(agent) ? '移除' : agent.isHost ? '需要另一位已启用成员才能移除主持人' : '团队必须保留至少一位成员'
 }
 
 function openAgentSettings(agent: GroupAgent) {
@@ -218,13 +218,13 @@ function statusLabel(status: GroupAgent['status']): string {
 <template>
   <div class="group-manager">
     <header>
-      <span><small>群聊管理</small><strong>{{ room.name }}</strong></span>
+      <span><small>团队管理</small><strong>{{ room.name }}</strong></span>
     </header>
 
     <section>
-      <h3>房间</h3>
+      <h3>团队设置</h3>
       <label><span>名称</span><input v-model="form.name" maxlength="80" @change="saveRoom" /></label>
-      <label v-if="roomInstructionsEnabled"><span>说明<small>所有 Agent 都会在回复前查阅，可填写协作规则和形式准则。</small></span><textarea v-model="form.instructions" maxlength="4000" rows="5" aria-label="房间说明" placeholder="例如：先核对事实；结论使用中文；发布前等待确认。" @change="saveRoom" /></label>
+      <label v-if="roomInstructionsEnabled"><span>说明<small>所有 Agent 都会在回复前查阅，可填写协作规则和形式准则。</small></span><textarea v-model="form.instructions" maxlength="4000" rows="5" aria-label="团队说明" placeholder="例如：先核对事实；结论使用中文；发布前等待确认。" @change="saveRoom" /></label>
       <label class="rounds"><span>最多回复轮数<small>-1 表示无限</small></span><input v-model.number="form.replyRounds" type="number" min="-1" max="100" aria-label="最多回复轮数" @change="saveRoom" /></label>
       <label v-if="hostFlowEnabled" class="flow-mode">
         <span>协作模式<small>主持人可按依赖逐步调度，也可一次 @ 多人并列执行。</small></span>
@@ -263,7 +263,7 @@ function statusLabel(status: GroupAgent['status']): string {
     </section>
 
     <section class="danger-zone">
-      <div><strong>归档群聊</strong><p>归档后不再出现在活跃列表，历史消息仍会保留。</p></div>
+      <div><strong>归档团队</strong><p>归档后不再出现在活跃列表，历史消息仍会保留。</p></div>
       <button class="quiet-button" type="button" :disabled="busy" @click="emit('archiveRoom')"><AppIcon name="archive" :size="14" />归档</button>
     </section>
   </div>

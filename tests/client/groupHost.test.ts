@@ -208,7 +208,7 @@ describe('group host controls', () => {
         roomInstructionsEnabled: true,
       },
     })
-    const instructions = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="房间说明"]')
+    const instructions = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="团队说明"]')
     await instructions.setValue('新规则\n输出中文')
     await instructions.trigger('change')
     expect(wrapper.emitted('updateRoom')?.at(-1)?.[0]).toMatchObject({

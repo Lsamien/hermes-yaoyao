@@ -61,7 +61,7 @@ const pinnedTopics = computed(() => groups.pinnedTopics.filter(topic => !topic.a
 const topicListRoom = computed(() => topicListRoomId.value ? activeRooms.value.find(room => room.id === topicListRoomId.value) : undefined)
 const sidebarSubtitle = computed(() => topicListRoom.value
   ? `${topicListRoom.value.agentCount} 个 Agent`
-  : groups.availability === 'available' ? `${activeRooms.value.length} 个活跃房间` : `9119 群聊 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}`)
+  : groups.availability === 'available' ? `${activeRooms.value.length} 个活跃团队` : `9119 团队 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}`)
 const GROUP_LIST_BACK_ID = 'group-list'
 const NEW_TOPIC_ID = 'new-topic'
 function topicSidebarItemId(roomId: string, topicId: string): string { return `topic:${roomId}:${topicId}` }
@@ -84,7 +84,7 @@ const sidebarItems = computed<SidebarItem[]>(() => {
   if (!room) return activeRooms.value.map(item => ({ ...roomSidebarItem(item), section: undefined }))
   const items: SidebarItem[] = [{
     id: GROUP_LIST_BACK_ID,
-    title: '返回房间列表',
+    title: '返回团队列表',
     icon: 'chevron-left',
     showMore: false,
   }, {
@@ -183,7 +183,7 @@ const managerBusy = computed(() => groups.isLoading || Object.values(agentUpdate
 const reference = computed<ComposerReference | null>(() => quoted.value ? { id: quoted.value.id, author: quoted.value.author, content: quoted.value.content } : null)
 const mentionNames = computed(() => ['所有人', ...displayAgents.value.map(agent => agent.displayName || agent.profile)])
 const mentionOptions = computed<ComposerOption[]>(() => [
-  { id: 'all', label: '所有人', detail: '通知房间内全部 Agent' },
+  { id: 'all', label: '所有人', detail: '通知团队内全部 Agent' },
   ...displayAgents.value.map(agent => ({
     id: agent.id,
     label: agent.displayName || agent.profile,
@@ -192,7 +192,7 @@ const mentionOptions = computed<ComposerOption[]>(() => [
   })),
 ])
 const roomSubtitle = computed(() => {
-  if (!groups.selectedRoom) return '选择或新建一个群聊'
+  if (!groups.selectedRoom) return '选择或新建一个团队'
   const host = hostAgent.value ? `主持人 ${hostAgent.value.displayName || hostAgent.value.profile} · ` : ''
   const mode = groups.selectedRoom.orchestrationMode === 'host' ? '主持流程 · ' : ''
   return `${groups.selectedRoom.name} · ${mode}${host}${groups.agents.length} 个 Agent · 最多 ${groups.selectedRoom.maxReplyRounds} 轮回复`
@@ -611,11 +611,11 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 </script>
 
 <template>
-  <WorkspaceView sidebar-title="群聊" :sidebar-context-title="topicListRoom?.name" :sidebar-subtitle="sidebarSubtitle" :sidebar-focus-mode="!!topicListRoom" :inspector-open="managerOpen && !!room" inspector-close-label="关闭群聊管理" @close-inspector="managerOpen = false">
+  <WorkspaceView sidebar-title="团队" :sidebar-context-title="topicListRoom?.name" :sidebar-subtitle="sidebarSubtitle" :sidebar-focus-mode="!!topicListRoom" :inspector-open="managerOpen && !!room" inspector-close-label="关闭团队管理" @close-inspector="managerOpen = false">
     <template #sidebar-action>
-      <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" title="新建群聊" aria-label="新建群聊" @click="openCreateGroup">
+      <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" title="新建团队" aria-label="新建团队" @click="openCreateGroup">
         <YaoYaoSidebarIcon name="add" />
-        <span>新建群聊</span>
+        <span>新建团队</span>
       </button>
       <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" @click="openArchivedOverlay">
         <AppIcon name="archive" :size="15" />
@@ -639,9 +639,9 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :active-id="groups.selectedRoomId"
         :loading="groups.isLoading"
         external-search
-        search-placeholder="搜索群聊"
-        empty-title="还没有群聊"
-        empty-description="新建群聊，邀请 1–8 个 Agent 一起协作。"
+        search-placeholder="搜索团队"
+        empty-title="还没有团队"
+        empty-description="新建团队，邀请 1–8 个 Agent 一起协作。"
         @select="selectSidebarItem"
         @more="openRoomManager"
         @context-menu="openRoomActions"
@@ -649,12 +649,12 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
     </template>
 
     <div v-if="groups.availability === 'unsupported' || groups.availability === 'unavailable'" class="groups-unavailable">
-      <EmptyState icon="alert" :title="groups.availability === 'unsupported' ? '群聊协议版本不兼容' : '群聊服务暂不可用'" :description="groups.error || `请确认 9119 已安装 YaoYao 群聊 protocol ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL} 插件。`" action-label="重新检查" @action="groups.refresh" />
+      <EmptyState icon="alert" :title="groups.availability === 'unsupported' ? '团队协议版本不兼容' : '团队服务暂不可用'" :description="groups.error || `请确认 9119 已安装 YaoYao 团队协议 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL} 插件。`" action-label="重新检查" @action="groups.refresh" />
     </div>
     <div v-else class="groups-workspace">
       <MessageTimeline
         :messages="messages"
-        :title="groups.topicProtocol ? (groups.selectedTopic?.title || '新话题') : (groups.selectedRoom?.name || '群聊')"
+        :title="groups.topicProtocol ? (groups.selectedTopic?.title || '新话题') : (groups.selectedRoom?.name || '团队')"
         :subtitle="roomSubtitle"
         :loading="groups.isLoading"
         :has-older="groups.hasMoreBefore"
@@ -676,8 +676,8 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         <template #header-actions>
           <div class="group-header-actions">
             <span v-if="hostAgent" class="group-host-chip" :title="`用户未明确 @ 时由 ${hostAgent.displayName || hostAgent.profile} 负责回应`">主持人 {{ hostAgent.displayName || hostAgent.profile }}</span>
-            <div class="group-avatars" aria-label="群聊成员"><AgentAvatar v-for="agent in agents.slice(0, 4)" :key="agent.id" :name="agent.name" :avatar="agent.nodeId === 'local' ? agentAvatars[agent.profile || ''] || '' : ''" :size="24" :title="agent.isHost ? `${agent.name} · 主持人` : agent.name" /><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
-            <button class="icon-button" type="button" title="管理群聊" aria-label="管理群聊" :disabled="!groups.selectedRoom" @click="openSelectedRoomManager"><AppIcon name="dots" /></button>
+            <div class="group-avatars" aria-label="团队成员"><AgentAvatar v-for="agent in agents.slice(0, 4)" :key="agent.id" :name="agent.name" :avatar="agent.nodeId === 'local' ? agentAvatars[agent.profile || ''] || '' : ''" :size="24" :title="agent.isHost ? `${agent.name} · 主持人` : agent.name" /><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
+            <button class="icon-button" type="button" title="管理团队" aria-label="管理团队" :disabled="!groups.selectedRoom" @click="openSelectedRoomManager"><AppIcon name="dots" /></button>
           </div>
         </template>
       </MessageTimeline>
@@ -694,7 +694,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :reference="reference"
         :mention-options="mentionOptions"
         :attachments-enabled="uploadsEnabled"
-        placeholder="发消息给群聊，输入 @ 提及 Agent"
+        placeholder="发消息给团队，输入 @ 提及 Agent"
         @send="send"
         @stop="stopActiveTopic"
         @tool-trace-toggle="toggleShowThinking"
@@ -731,14 +731,14 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
     </template>
   </WorkspaceView>
 
-  <FloatingResourceSearch section="groups" label="搜索群聊" :items="roomSidebarItems" @select="selectRoom" />
+  <FloatingResourceSearch section="groups" label="搜索团队" :items="roomSidebarItems" @select="selectRoom" />
   <CreateGroupDialog :open="createOpen" :profiles="profiles" :host-enabled="groups.hostProtocol" :host-flow-enabled="groups.hostFlowProtocol" :room-instructions-enabled="groups.roomInstructionsProtocol" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
   <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="addPreviewToComposer" @source="preview = null" />
   <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" :can-add="uploadsEnabled" @add="addMediaToComposer" />
 
   <Teleport to="body">
     <Transition name="group-menu">
-      <section v-if="roomActionMenu" class="group-room-actions" :style="roomActionMenuStyle" role="menu" aria-label="群聊房间操作" @contextmenu.prevent>
+      <section v-if="roomActionMenu" class="group-room-actions" :style="roomActionMenuStyle" role="menu" aria-label="团队操作" @contextmenu.prevent>
         <template v-if="roomActionMenu.topicId">
           <template v-if="topicActionRenaming">
             <label class="group-topic-rename">话题名称<input v-model="topicActionRenameValue" maxlength="120" autofocus @keydown.enter="renameTopicFromAction" /></label>
@@ -752,7 +752,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         </template>
         <template v-else>
           <button class="group-action-row" role="menuitem" type="button" @click="startTopicFromRoomAction"><AppIcon name="plus" :size="14" />新建话题</button>
-          <button class="group-action-row danger" role="menuitem" type="button" @click="archiveRoomFromAction"><AppIcon name="archive" :size="14" />归档群聊</button>
+          <button class="group-action-row danger" role="menuitem" type="button" @click="archiveRoomFromAction"><AppIcon name="archive" :size="14" />归档团队</button>
         </template>
       </section>
     </Transition>
@@ -761,10 +761,10 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
   <Teleport to="body">
     <Transition name="group-menu">
       <div v-if="archivedOverlayOpen" class="archived-overlay-backdrop" role="presentation" @click.self="archivedOverlayOpen = false">
-        <section class="archived-overlay" role="dialog" aria-modal="true" aria-label="已归档群聊和话题">
-          <header><div><small>群聊归档</small><strong>已归档内容</strong></div><button type="button" aria-label="关闭" @click="archivedOverlayOpen = false"><AppIcon name="close" :size="16" /></button></header>
-          <section class="archived-section"><h3>群聊</h3><p v-if="!archivedRoomList.length">没有已归档群聊</p><article v-for="archived in archivedRoomList" :key="archived.id"><span>{{ archived.name }}</span><button type="button" @click="restoreArchivedRoom(archived.id)">恢复</button></article></section>
-          <section class="archived-section"><h3>当前群聊的话题</h3><p v-if="!groups.selectedRoom">请先打开一个群聊查看其已归档话题</p><p v-else-if="!archivedTopicList.length">没有已归档话题</p><article v-for="topic in archivedTopicList" :key="topic.id"><span>{{ topic.title }}</span><button type="button" @click="restoreArchivedTopic(topic.id)">恢复</button></article></section>
+        <section class="archived-overlay" role="dialog" aria-modal="true" aria-label="已归档团队和话题">
+          <header><div><small>团队归档</small><strong>已归档内容</strong></div><button type="button" aria-label="关闭" @click="archivedOverlayOpen = false"><AppIcon name="close" :size="16" /></button></header>
+          <section class="archived-section"><h3>团队</h3><p v-if="!archivedRoomList.length">没有已归档团队</p><article v-for="archived in archivedRoomList" :key="archived.id"><span>{{ archived.name }}</span><button type="button" @click="restoreArchivedRoom(archived.id)">恢复</button></article></section>
+          <section class="archived-section"><h3>当前团队的话题</h3><p v-if="!groups.selectedRoom">请先打开一个团队查看其已归档话题</p><p v-else-if="!archivedTopicList.length">没有已归档话题</p><article v-for="topic in archivedTopicList" :key="topic.id"><span>{{ topic.title }}</span><button type="button" @click="restoreArchivedTopic(topic.id)">恢复</button></article></section>
         </section>
       </div>
     </Transition>

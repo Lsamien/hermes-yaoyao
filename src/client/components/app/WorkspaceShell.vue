@@ -71,7 +71,7 @@ function profileTitle(profile?: Profile): string {
 
 const navItems: NavItem[] = [
   { key: 'chat', label: '对话', path: '/chat', icon: 'chat' },
-  { key: 'groups', label: '群聊', path: '/groups', icon: 'groups' },
+  { key: 'groups', label: '团队', path: '/groups', icon: 'groups' },
   { key: 'files', label: '文件库', path: '/files', icon: 'files' },
 ]
 
@@ -87,7 +87,7 @@ const activeNav = computed(() => {
 
 const contextHeading = computed(() => ({
   chat: '历史记录',
-  groups: '群聊记录',
+  groups: '团队列表',
   files: '历史记录',
 })[activeNav.value.key])
 

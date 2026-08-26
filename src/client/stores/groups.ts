@@ -29,7 +29,7 @@ function initialProtocol(): GroupProtocolState {
   return { epoch: '', cursor: 0, rooms: [], roomDetails: {}, messagesByRoom: {}, topicsByRoom: {}, messagesByTopic: {} }
 }
 
-function errorMessage(cause: unknown): string { return cause instanceof Error ? cause.message : '群聊请求失败' }
+function errorMessage(cause: unknown): string { return cause instanceof Error ? cause.message : '团队请求失败' }
 
 function topicTitle(content: string): string {
   return content.split(/\s+/).filter(Boolean).join(' ').slice(0, 100) || '新话题'
@@ -89,7 +89,7 @@ export const useGroupsStore = defineStore('groups', () => {
     let cursor: string | undefined
     do {
       const key = cursor ?? '<first-page>'
-      if (seen.has(key)) throw new Error('群聊房间分页返回了重复游标')
+      if (seen.has(key)) throw new Error('团队列表分页返回了重复游标')
       seen.add(key)
       const page = await getGroupRooms(cursor, 50)
       loaded.push(...page.items)
@@ -104,7 +104,7 @@ export const useGroupsStore = defineStore('groups', () => {
     let cursor: string | undefined
     do {
       const key = cursor ?? '<first-page>'
-      if (seen.has(key)) throw new Error('群聊话题分页返回了重复游标')
+      if (seen.has(key)) throw new Error('团队话题分页返回了重复游标')
       seen.add(key)
       const page = await getGroupTopics(roomId, cursor, 50, archived)
       loaded.push(...page.items)
@@ -170,7 +170,7 @@ export const useGroupsStore = defineStore('groups', () => {
       },
       onReset(reason) {
         if (expectedGeneration !== generation) return
-        error.value = `群聊事件需要重新同步：${reason}`
+        error.value = `团队事件需要重新同步：${reason}`
         void rebuildSnapshot()
       },
     })
@@ -220,7 +220,7 @@ export const useGroupsStore = defineStore('groups', () => {
         const anchor = await getGroupCapabilities()
         if (!isSupportedGroupProtocolVersion(anchor.protocolVersion)) {
           availability.value = 'unsupported'
-          throw new Error(`群聊协议版本不兼容：支持 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}，服务器返回 v${anchor.protocolVersion || 'unknown'}`)
+          throw new Error(`团队协议版本不兼容：支持 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}，服务器返回 v${anchor.protocolVersion || 'unknown'}`)
         }
         const loadedRooms = await loadRooms()
         nodes.value = anchor.features?.includes('nodeRegistry')
@@ -609,7 +609,7 @@ export const useGroupsStore = defineStore('groups', () => {
     let uploadIds: string[] = []
     let optimisticText = text
     if (files.length) {
-      if (!auth.groupUploadsEnabled) throw new Error('当前上游不支持群聊附件')
+      if (!auth.groupUploadsEnabled) throw new Error('当前上游不支持团队附件')
       const uploaded = await uploadGroupFiles(roomId, files)
       uploadIds = uploaded.map(file => file.id)
       optimisticText = [text, ...uploaded.map(file => `📎 ${file.name}`)].filter(Boolean).join('\n\n')
@@ -695,7 +695,7 @@ export const useGroupsStore = defineStore('groups', () => {
       const failed = {
         ...optimistic,
         status: explicitRejection ? 'failed' as const : 'unknown' as const,
-        error: explicitRejection ? errorMessage(cause) : '送达状态未知；刷新房间后再决定是否重试',
+        error: explicitRejection ? errorMessage(cause) : '送达状态未知；刷新团队后再决定是否重试',
         updatedAt: Date.now() / 1000,
       }
       protocol.value = topicId ? {

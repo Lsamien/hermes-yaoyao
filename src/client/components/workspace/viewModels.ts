@@ -186,7 +186,7 @@ export function chatInteraction(approval?: ApprovalRequest, clarification?: Clar
 export function roomSidebarItem(room: GroupRoomSummary): SidebarItem {
   return {
     id: room.id,
-    title: room.name || '未命名群聊',
+    title: room.name || '未命名团队',
     subtitle: room.lastMessage?.content || `${room.agentCount} 个 Agent`,
     meta: formatRelative(room.updatedAt),
     section: historySection(room.updatedAt),

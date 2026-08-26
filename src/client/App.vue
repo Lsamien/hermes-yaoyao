@@ -16,7 +16,7 @@ const route = useRoute()
 
 const pageTitle = computed(() => {
   const name = route.path.startsWith('/groups')
-    ? groups.selectedRoom?.name || '群聊'
+    ? groups.selectedRoom?.name || '团队'
     : route.path.startsWith('/files')
       ? '文件库'
       : chat.activeSession?.title || '对话'

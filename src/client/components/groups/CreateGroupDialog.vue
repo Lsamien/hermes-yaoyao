@@ -71,8 +71,8 @@ function create() {
     <Transition name="dialog-fade">
       <div v-if="open" class="dialog-layer" role="presentation" @mousedown.self="emit('close')">
         <section class="create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-group-title">
-          <header><div><small>9119 群聊</small><h2 id="create-group-title">新建群聊</h2></div><button class="icon-button" type="button" aria-label="关闭" @click="emit('close')"><AppIcon name="close" /></button></header>
-          <label class="field"><span>群聊名称</span><input v-model="name" maxlength="80" autofocus placeholder="例如：产品评审" /></label>
+          <header><div><small>9119 团队</small><h2 id="create-group-title">新建团队</h2></div><button class="icon-button" type="button" aria-label="关闭" @click="emit('close')"><AppIcon name="close" /></button></header>
+          <label class="field"><span>团队名称</span><input v-model="name" maxlength="80" autofocus placeholder="例如：产品评审" /></label>
           <label v-if="roomInstructionsEnabled" class="field room-instructions"><span>说明 <small>供所有 Agent 查阅的规则和形式准则</small></span><textarea v-model="instructions" maxlength="4000" rows="4" placeholder="例如：先确认事实；结论使用中文；涉及发布必须等待确认。" /></label>
           <div class="agent-picker">
             <div class="agent-picker__heading"><span>选择 Agent</span><small>{{ selected.length }}/8</small></div>
@@ -98,7 +98,7 @@ function create() {
             <label><input v-model="autoReply" type="checkbox" :aria-label="hostEnabled ? '所有成员无需 @ 也回复' : '启用自动回复'" />{{ hostEnabled ? (orchestrationMode === 'host' ? '自由讨论时无需 @ 也回复' : '所有成员无需 @ 也回复') : '启用自动回复' }}</label>
             <label>最多轮数 <input v-model.number="replyRounds" type="number" min="1" max="12" /></label>
           </div>
-          <footer><button class="quiet-button" type="button" @click="emit('close')">取消</button><button class="solid-button" type="button" :disabled="!valid || busy" @click="create">{{ busy ? '创建中…' : '创建群聊' }}</button></footer>
+          <footer><button class="quiet-button" type="button" @click="emit('close')">取消</button><button class="solid-button" type="button" :disabled="!valid || busy" @click="create">{{ busy ? '创建中…' : '创建团队' }}</button></footer>
         </section>
       </div>
     </Transition>

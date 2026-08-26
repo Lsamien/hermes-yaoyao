@@ -138,7 +138,7 @@ onBeforeUnmount(stopPolling)
             <button class="icon-button" type="button" aria-label="关闭手机与节点" @click="emit('close')"><AppIcon name="close" /></button>
           </header>
 
-          <p class="pairing-intro">扫描一次即可在 iOS 中使用这台 Hermes 的 Bots、聊天历史和原生群聊 Agent。</p>
+          <p class="pairing-intro">扫描一次即可在 iOS 中使用这台 Hermes 的 Bots、聊天历史和团队 Agent。</p>
           <p v-if="insecureTransport" class="pairing-warning"><AppIcon name="alert" :size="15" />当前是局域网 HTTP，二维码免密配对仅适用于可信网络。正式使用请配置 HTTPS/WSS 或 Tailscale。</p>
           <p v-if="error" class="pairing-error">{{ error }}</p>
 
@@ -163,7 +163,7 @@ onBeforeUnmount(stopPolling)
             <div class="device-heading"><strong>已授权设备</strong><small v-if="nodeID">节点 {{ nodeID.slice(0, 8) }}</small></div>
             <p v-if="!busy && !devices.length" class="device-empty">还没有已授权设备。</p>
             <div v-for="device in devices" :key="device.id" class="device-row">
-              <span><b>{{ device.name }}</b><small>{{ device.scopes.includes('history.read') ? 'Bots、历史与群聊' : '受限访问' }}</small></span>
+              <span><b>{{ device.name }}</b><small>{{ device.scopes.includes('history.read') ? 'Bots、历史与团队' : '受限访问' }}</small></span>
               <button type="button" :disabled="busy" @click="revoke(device)">撤销</button>
             </div>
           </section>
