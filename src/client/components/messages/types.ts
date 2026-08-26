@@ -33,7 +33,7 @@ export type UiMessage = {
   attachments?: UiMessageAttachment[]
   tools?: UiToolCall[]
   profile?: string
-  timelineKind?: 'delegation-complete' | 'system'
+  timelineKind?: 'delegation-complete' | 'background-process' | 'system'
   timelineMetadata?: Record<string, unknown>
   metadata?: string
 }

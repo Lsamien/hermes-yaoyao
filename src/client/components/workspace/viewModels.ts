@@ -84,14 +84,28 @@ function timelineMetadata(value: unknown): Record<string, unknown> | undefined {
 }
 
 const CONTEXT_COMPACTION_PREFIX = '[context compaction'
+const BACKGROUND_PROCESS_NOTICE = /^\[IMPORTANT:\s*Background process\s+(\S+)\s+exited\s+\(exit code\s+(-?\d+)(?:,\s*([^)]+))?\)\.?\]?(?:\r?\n|$)/i
 
 function isContextCompactionMessage(message: ChatMessage): boolean {
   return message.content.trim().toLocaleLowerCase().startsWith(CONTEXT_COMPACTION_PREFIX)
     || message.displayKind?.toLocaleLowerCase().includes('compaction') === true
 }
 
+function backgroundProcessMetadata(content: string): Record<string, unknown> | undefined {
+  const match = content.trim().match(BACKGROUND_PROCESS_NOTICE)
+  if (!match) return undefined
+  return {
+    process_id: match[1],
+    exit_code: Number(match[2]),
+    ...(match[3]?.trim() ? { signal: match[3].trim() } : {}),
+  }
+}
+
 function isSystemTimelineMessage(message: ChatMessage): boolean {
-  return Boolean(message.displayKind) || /^\[system:/i.test(message.content.trim()) || isContextCompactionMessage(message)
+  return Boolean(message.displayKind)
+    || /^\[system:/i.test(message.content.trim())
+    || isContextCompactionMessage(message)
+    || Boolean(backgroundProcessMetadata(message.content))
 }
 
 export function chatMessageToUi(message: ChatMessage, agentNameFor?: (profile?: string) => string | undefined): UiMessage {
@@ -148,10 +162,16 @@ export function chatMessagesToUi(messages: ChatMessage[], agentNameFor?: (profil
     if (message.role === 'system' && !isSystemTimelineMessage(message)) continue
     const ui = chatMessageToUi(message, agentNameFor)
     if (isSystemTimelineMessage(message)) {
+      const backgroundProcess = backgroundProcessMetadata(message.content)
       ui.role = 'system'
-      ui.timelineKind = message.displayKind === 'async_delegation_complete' ? 'delegation-complete' : 'system'
+      ui.timelineKind = message.displayKind === 'async_delegation_complete'
+        ? 'delegation-complete'
+        : backgroundProcess
+          ? 'background-process'
+          : 'system'
       ui.timelineMetadata = {
         ...(timelineMetadata(message.displayMetadata) ?? {}),
+        ...(backgroundProcess ?? {}),
         eventKind: isContextCompactionMessage(message) ? 'compaction' : message.displayKind,
       }
     }

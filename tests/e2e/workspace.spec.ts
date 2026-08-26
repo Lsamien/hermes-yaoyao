@@ -684,6 +684,19 @@ test('renders subtask completion as a collapsed timeline event', async ({ page }
   await expect(delegation).not.toHaveAttribute('open', '')
 })
 
+test('renders background process exits as collapsed system events', async ({ page }) => {
+  await page.goto('/chat/session-demo')
+  const event = page.locator('[data-message-id="message-background-process"] .background-process-event')
+  const detail = event.locator('.markdown')
+  await expect(event).toContainText('后台子任务已终止 · SIGTERM')
+  await expect(event).not.toHaveAttribute('open', '')
+  await expect(detail).toBeHidden()
+  await event.locator('summary').click()
+  await expect(detail).toBeVisible()
+  await expect(detail).toContainText('Command: ./run_mac.sh')
+  await expect(page.locator('[data-message-id="message-background-process"]')).toHaveClass(/message--system/)
+})
+
 test('renders context compaction as a collapsed timeline event', async ({ page }) => {
   await page.goto('/chat/session-demo')
   const compaction = page.locator('[data-message-id="message-compaction"] .compaction-event')

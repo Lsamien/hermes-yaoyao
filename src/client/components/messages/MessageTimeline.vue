@@ -97,6 +97,14 @@ function systemSummary(content: string): string {
   return '系统信息'
 }
 
+function backgroundProcessSummary(metadata?: Record<string, unknown>): string {
+  const exitCode = Number(metadata?.exit_code)
+  const signal = typeof metadata?.signal === 'string' ? metadata.signal : ''
+  if (exitCode === 0) return '后台子任务已完成'
+  if (signal) return `后台子任务已终止 · ${signal}`
+  return Number.isFinite(exitCode) ? `后台子任务失败 · 退出码 ${exitCode}` : '后台子任务已结束'
+}
+
 function isCompactionEvent(message: UiMessage): boolean {
   return message.timelineMetadata?.eventKind === 'compaction'
     || message.content.trim().toLocaleLowerCase().startsWith('[context compaction')
@@ -266,6 +274,12 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
             <template v-if="message.timelineKind === 'delegation-complete'">
               <details class="delegation-event">
                 <summary><AppIcon name="groups" :size="14" /><span><strong>子任务已完成</strong><small>{{ delegationSummary(message.timelineMetadata) }}</small></span></summary>
+                <MarkdownContent v-if="message.content" :content="message.content" />
+              </details>
+            </template>
+            <template v-else-if="message.timelineKind === 'background-process'">
+              <details class="system-event background-process-event">
+                <summary><AppIcon name="tools" :size="13" /><span>{{ backgroundProcessSummary(message.timelineMetadata) }}</span></summary>
                 <MarkdownContent v-if="message.content" :content="message.content" />
               </details>
             </template>

@@ -41,6 +41,19 @@ describe('ordinary chat tool timeline', () => {
     })
   })
 
+  it('classifies background process exits as collapsed system timeline events', () => {
+    const notice = normalizeChatMessage({
+      id: 'background-process', role: 'user',
+      content: '[IMPORTANT: Background process proc_6be40e6c3864 exited (exit code 143, SIGTERM).\nCommand: ./run_mac.sh\nOutput:\nmodel loaded',
+      timestamp: 1,
+    }, 'session-1', 'default')
+    const [timeline] = chatMessagesToUi([notice])
+    expect(timeline).toMatchObject({
+      id: 'background-process', role: 'system', timelineKind: 'background-process',
+      timelineMetadata: { process_id: 'proc_6be40e6c3864', exit_code: 143, signal: 'SIGTERM' },
+    })
+  })
+
   it('classifies a persisted context compaction envelope as a system timeline event', () => {
     const compacted = normalizeChatMessage({
       id: 'compacted', role: 'user', content: '[CONTEXT COMPACTION — REFERENCE ONLY]\n\n## Historical Task Snapshot', timestamp: 1,

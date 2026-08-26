@@ -67,6 +67,7 @@ const messages = [
   { id: 'message-local-link', role: 'assistant', content: '[方案草稿.md](/Users/samien/Agents/方案草稿.md)', timestamp: now() - 145 },
   { id: 'message-compaction', role: 'user', content: '[CONTEXT COMPACTION — REFERENCE ONLY]\n\n## Historical Task Snapshot\n\n- 已完成普通聊天验收\n- 保留当前会话上下文', timestamp: now() - 143 },
   { id: 'message-delegation', role: 'user', content: '[ASYNC DELEGATION BATCH COMPLETE]\n后台子任务已经完成。', display_kind: 'async_delegation_complete', display_metadata: { task_count: 2, completed_count: 2, failed_count: 0, duration_seconds: 71 }, timestamp: now() - 140 },
+  { id: 'message-background-process', role: 'user', content: '[IMPORTANT: Background process proc_6be40e6c3864 exited (exit code 143, SIGTERM).\nCommand: ./run_mac.sh\nOutput:\nmodel loaded', timestamp: now() - 135 },
   { id: 'message-system', role: 'user', content: '[System: The active model for this chat has changed to gpt-5.6-terra via provider openai.]', timestamp: now() - 130 },
 ]
 const groupAgent = { id: agentId, roomId, profile: 'yaoyao', displayName: '夭夭', description: '主 Agent', enabled: true, replyWithoutMention: true, isHost: true, model: 'gpt-5.6', provider: 'openai', reasoningEffort: 'high', fastMode: true, status: 'idle', createdAt: now() - 2000, updatedAt: now() }
