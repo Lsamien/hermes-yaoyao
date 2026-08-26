@@ -18,9 +18,9 @@ watch(() => props.expanded, value => { if (value) open.value = true })
 <template>
   <div class="tool-trace" :class="`tool-trace--${tool.status}`">
     <button type="button" @click="open = !open">
-      <span class="tool-trace__caret" :class="{ open }">›</span>
       <strong>{{ tool.name }}</strong>
       <small v-if="tool.status === 'error'">{{ statusLabel }}</small>
+      <span class="tool-trace__caret" :class="{ open }">›</span>
     </button>
     <div v-if="open && (inputDetail || outputDetail)" class="tool-trace__details">
       <section v-if="inputDetail"><small>输入</small><pre>{{ inputDetail }}</pre></section>
