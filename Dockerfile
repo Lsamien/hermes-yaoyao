@@ -32,6 +32,10 @@ COPY --chown=node:node package.json package-lock.json ./
 COPY --chown=node:node --from=builder /app/node_modules ./node_modules
 COPY --chown=node:node --from=builder /app/dist ./dist
 COPY --chown=node:node --from=builder /app/dist-server ./dist-server
+# Keep the Dashboard plugin in the offline image as an installation payload.
+# Hermes itself owns plugin discovery, configuration, and restart, so this is
+# deliberately not copied into the Web container's runtime data directory.
+COPY --chown=node:node hermes-plugins/yaoyao/dashboard /opt/hermes-yaoyao-plugin/dashboard
 
 USER node
 

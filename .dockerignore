@@ -18,6 +18,12 @@ docker.env
 *.key
 
 .hermes-yaoyao
-hermes-plugins
+# The runtime only needs the published Dashboard plugin as an offline install
+# payload. Keep all other plugin sources out of the image context.
+hermes-plugins/*
+!hermes-plugins/yaoyao
+hermes-plugins/yaoyao/*
+!hermes-plugins/yaoyao/dashboard
+!hermes-plugins/yaoyao/dashboard/**
 docs
 tests

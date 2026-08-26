@@ -147,7 +147,7 @@ node bin/hermes-yaoyao.mjs service uninstall
 
 ## Docker 部署（仅夭夭 Web 8800）
 
-Docker 镜像只包含本项目的夭夭 Web，不包含、安装或监督 Hermes Dashboard。`9119` 必须已经由项目外部的 Hermes 实例提供；Compose 会强制关闭 `HERMES_YAOYAO_SUPERVISE_DASHBOARD`，因此启动、停止或重建容器都不会操作 9119。
+Docker 镜像运行时只启动本项目的夭夭 Web，不安装或监督 Hermes Dashboard。`9119` 必须已经由项目外部的 Hermes 实例提供；Compose 会强制关闭 `HERMES_YAOYAO_SUPERVISE_DASHBOARD`，因此启动、停止或重建 Web 容器都不会操作 9119。为支持离线部署，镜像额外携带插件安装材料，位于 `/opt/hermes-yaoyao-plugin/dashboard`；它不会自行写入另一个 Hermes 容器。
 
 复制 Docker 环境示例并启动：
 
@@ -191,6 +191,38 @@ docker compose --env-file docker.env up -d --build
 ```
 
 只有显式执行 `docker compose down --volumes` 才会删除夭夭 Web 的命名卷。Dashboard 插件仍需按前文或 [Agent 安装手册](docs/agent-install.md) 独立安装到外部 Hermes 数据目录。
+
+### Docker Hermes 容器的插件安装
+
+`Plugin 'yaoyao' is not installed or bundled.` 表示报错的 **Hermes 容器** 的持久化目录中没有插件；重启或重建夭夭 Web 容器不会修复它。先确认 Hermes 容器把数据目录持久化到 `/root/.hermes`（或该镜像实际使用的 Hermes 数据目录）。没有持久化挂载时，`docker cp` 的内容会在 Hermes 重建后丢失。
+
+离线镜像已加载后，用它携带的插件材料复制到 Hermes 容器。将下面的 `hermes` 替换为实际 Hermes 容器名，并按实际数据目录替换 `/root/.hermes`：
+
+```bash
+WEB_IMAGE=hermes-yaoyao:local
+HERMES_CONTAINER=hermes
+HERMES_HOME=/root/.hermes
+SOURCE_CONTAINER=$(docker create "$WEB_IMAGE")
+
+docker exec "$HERMES_CONTAINER" mkdir -p "$HERMES_HOME/plugins/yaoyao/dashboard"
+docker cp "$SOURCE_CONTAINER":/opt/hermes-yaoyao-plugin/dashboard/. \
+  "$HERMES_CONTAINER":"$HERMES_HOME/plugins/yaoyao/dashboard/"
+docker rm "$SOURCE_CONTAINER"
+```
+
+随后保留现有启用列表并加入 `yaoyao`，再重启 **Hermes 容器** 使其重新发现插件。若当前没有其他用户插件，命令为：
+
+```bash
+docker exec "$HERMES_CONTAINER" hermes config set plugins.enabled '["yaoyao"]'
+docker restart "$HERMES_CONTAINER"
+```
+
+若 `hermes config get plugins.enabled` 已有其他插件名，请把 `yaoyao` 合并进同一个 JSON 列表后再设置，不能用上面的示例覆盖它们。最后从 Hermes 容器或能访问其 `9119` 的位置确认插件清单包含 `"name":"yaoyao"`：
+
+```bash
+docker exec "$HERMES_CONTAINER" hermes config get plugins.enabled
+curl --fail --silent http://127.0.0.1:9119/api/dashboard/plugins
+```
 
 注意：当前安全边界要求群聊上传和宿主机绝对路径媒体只用于回环地址的 Hermes 上游。默认桥接网络中的 `host.docker.internal` 不属于容器回环地址，因此这两类本地文件功能会返回明确的不可用错误；普通聊天、群聊消息、文件库 API 和产物代理不受此限制。不要通过关闭该检查来让不同机器共享本地文件路径。
 
