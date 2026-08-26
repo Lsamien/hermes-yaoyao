@@ -4,6 +4,7 @@ import hljs from 'highlight.js'
 import MarkdownIt from 'markdown-it'
 import { computed, onMounted, onUpdated, ref } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
+import { copyTextToClipboard } from '@/utils/clipboard'
 import { normalizeAssistantMediaMarkdown } from '@/utils/mediaMarkdown'
 import { repairMarkdownForRender } from '@/utils/markdownRepair'
 
@@ -79,7 +80,9 @@ const rendered = computed(() => {
   const html = md.render(markdownSource.value)
   return DOMPurify.sanitize(highlightMentions(html), {
     USE_PROFILES: { html: true },
-    FORBID_TAGS: ['style', 'svg', 'math', 'form', 'input', 'button', 'iframe', 'object', 'embed'],
+    // MarkdownIt generates the inert code-copy button above. User-provided HTML
+    // remains disabled, and DOMPurify still strips event-handler attributes.
+    FORBID_TAGS: ['style', 'svg', 'math', 'form', 'input', 'iframe', 'object', 'embed'],
     FORBID_ATTR: ['style', 'onerror', 'onclick', 'onload'],
     ALLOW_UNKNOWN_PROTOCOLS: false,
     ADD_ATTR: ['target'],
@@ -93,11 +96,17 @@ function decorateCopyButtons() {
     button.dataset.bound = 'true'
     button.addEventListener('click', async () => {
       const code = button.closest('pre')?.querySelector('code')?.textContent ?? ''
-      await navigator.clipboard.writeText(code)
       const key = `${index}:${code.length}`
       copied.value = key
-      button.textContent = '已复制'
-      window.setTimeout(() => { if (copied.value === key) { copied.value = ''; button.textContent = '复制' } }, 1400)
+      const copiedSuccessfully = await copyTextToClipboard(code)
+      button.textContent = copiedSuccessfully ? '已复制' : '复制失败'
+      button.setAttribute('aria-label', copiedSuccessfully ? '代码已复制' : '复制代码失败')
+      window.setTimeout(() => {
+        if (copied.value !== key || !button.isConnected) return
+        copied.value = ''
+        button.textContent = '复制'
+        button.setAttribute('aria-label', '复制代码')
+      }, 1400)
     })
   })
 }
