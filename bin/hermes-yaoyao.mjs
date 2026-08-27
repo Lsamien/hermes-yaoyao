@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { chmod, mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -178,7 +178,16 @@ async function main() {
   process.stdout.write(`夭夭 Web\n\n用法：\n  hermes-yaoyao service install|start|stop|status|uninstall\n  hermes-yaoyao uploads prune --older-than 30 --yes\n`)
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+export function isMainModule(entry = process.argv[1]) {
+  if (!entry) return false
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return resolve(entry) === fileURLToPath(import.meta.url)
+  }
+}
+
+if (isMainModule()) {
   main().catch(error => {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
     process.exitCode = 1
