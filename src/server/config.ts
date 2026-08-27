@@ -19,9 +19,13 @@ export interface ServerConfig {
   production: boolean
   superviseDashboard?: boolean
   yaoyaoPluginSource?: string
+  releaseSource?: string
+  releaseRoot?: string
+  allowRemoteUpdate?: boolean
 }
 
 export const DEFAULT_YAOYAO_PLUGIN_SOURCE = 'https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao'
+export const DEFAULT_YAOYAO_RELEASE_SOURCE = 'https://git.samien.cn/samien/hermes-yaoyao.git'
 
 function flag(value: string | undefined): boolean {
   return value === '1' || value?.toLowerCase() === 'true'
@@ -59,6 +63,22 @@ function parsePluginSource(value: string | undefined): string {
     }
   } else if (!source.startsWith('git@') && !source.startsWith('ssh://')) {
     throw new Error('HERMES_YAOYAO_PLUGIN_SOURCE must be an HTTPS or SSH Git source')
+  }
+  return source
+}
+
+function parseReleaseSource(value: string | undefined): string {
+  const source = value?.trim() || DEFAULT_YAOYAO_RELEASE_SOURCE
+  if (source.length > 2_048 || /[\u0000-\u001f\u007f]/.test(source)) {
+    throw new Error('HERMES_YAOYAO_RELEASE_SOURCE is invalid')
+  }
+  if (source.startsWith('https://')) {
+    const url = new URL(source)
+    if (url.username || url.password || url.search || url.hash) {
+      throw new Error('HERMES_YAOYAO_RELEASE_SOURCE must not contain credentials, query, or fragment')
+    }
+  } else if (!source.startsWith('git@') && !source.startsWith('ssh://')) {
+    throw new Error('HERMES_YAOYAO_RELEASE_SOURCE must be an HTTPS or SSH Git source')
   }
   return source
 }
@@ -119,6 +139,9 @@ export function loadServerConfig(
   const production = env.NODE_ENV === 'production'
   const superviseDashboard = flag(env.HERMES_YAOYAO_SUPERVISE_DASHBOARD)
   const yaoyaoPluginSource = parsePluginSource(env.HERMES_YAOYAO_PLUGIN_SOURCE)
+  const releaseSource = parseReleaseSource(env.HERMES_YAOYAO_RELEASE_SOURCE)
+  const releaseRoot = resolve(env.HERMES_YAOYAO_RELEASE_ROOT?.trim() || `${homedir()}/.local/share/hermes-yaoyao`)
+  const allowRemoteUpdate = flag(env.HERMES_YAOYAO_ALLOW_REMOTE_UPDATE)
   const insecureLan = !tlsCert && !isLoopbackHost(host)
   if (production && insecureLan && !allowInsecureLan) {
     throw new Error(
@@ -148,5 +171,8 @@ export function loadServerConfig(
     production,
     superviseDashboard,
     yaoyaoPluginSource,
+    releaseSource,
+    releaseRoot,
+    allowRemoteUpdate,
   }
 }

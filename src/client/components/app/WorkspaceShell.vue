@@ -6,6 +6,7 @@ import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import AppIcon from '@/components/common/AppIcon.vue'
 import BrandMark from '@/components/common/BrandMark.vue'
 import NodePairingDialog from '@/components/app/NodePairingDialog.vue'
+import SystemUpdateDialog from '@/components/app/SystemUpdateDialog.vue'
 import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 
 type NavItem = {
@@ -62,6 +63,7 @@ const profileMenuOpen = ref(false)
 const sidebarCollapsed = ref(false)
 const sidebarSearchOpen = ref(false)
 const nodePairingOpen = ref(false)
+const systemUpdateOpen = ref(false)
 const desktopSidebarContext = ref<HTMLElement | null>(null)
 const mobileSidebarContext = ref<HTMLElement | null>(null)
 
@@ -287,6 +289,7 @@ onBeforeUnmount(() => {
                 <AppIcon v-if="profile.name === activeProfile?.name" name="check" :size="15" />
               </button>
               <button class="profile-menu__edit" type="button" :disabled="!activeProfile" @click="profileMenuOpen = false; emit('editProfile')"><AppIcon name="settings" :size="15" /><strong>编辑当前 Agent</strong></button>
+              <button class="profile-menu__update" type="button" @click="profileMenuOpen = false; systemUpdateOpen = true"><AppIcon name="download" :size="15" /><strong>系统更新</strong></button>
               <button class="profile-menu__logout" type="button" @click="profileMenuOpen = false; emit('logout')">
                 <AppIcon name="logout" :size="15" /><strong>退出登录</strong>
               </button>
@@ -397,6 +400,7 @@ onBeforeUnmount(() => {
                 <AppIcon v-if="profile.name === activeProfile?.name" name="check" :size="15" />
               </button>
               <button class="profile-menu__edit" type="button" :disabled="!activeProfile" @click="profileMenuOpen = false; emit('editProfile')"><AppIcon name="settings" :size="15" /><strong>编辑当前 Agent</strong></button>
+              <button class="profile-menu__update" type="button" @click="profileMenuOpen = false; systemUpdateOpen = true; mobileDrawerOpen = false"><AppIcon name="download" :size="15" /><strong>系统更新</strong></button>
               <button class="profile-menu__logout" type="button" @click="profileMenuOpen = false; emit('logout')">
                 <AppIcon name="logout" :size="15" /><strong>退出登录</strong>
               </button>
@@ -422,6 +426,7 @@ onBeforeUnmount(() => {
     </Transition>
 
     <NodePairingDialog :open="nodePairingOpen" :insecure-transport="insecureTransport" :user-name="pairingUserName || userName" @close="nodePairingOpen = false" />
+    <SystemUpdateDialog :open="systemUpdateOpen" @close="systemUpdateOpen = false" />
   </div>
 </template>
 
@@ -581,6 +586,7 @@ onBeforeUnmount(() => {
 .profile-menu button > span:not(.agent-avatar) { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 8px; background: var(--surface-soft); color: var(--text-secondary); font-size: 10px; }
 .profile-menu button strong { flex: 1; overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
 .profile-menu__edit { margin-top: 4px; border-top: 1px solid var(--line) !important; color: var(--text-secondary); }
+.profile-menu__update { color: var(--text-secondary); }
 .profile-menu__logout { margin-top: 4px; border-top: 1px solid var(--line) !important; color: var(--danger); }
 .account-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 .account-copy strong, .account-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

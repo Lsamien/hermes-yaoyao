@@ -1,0 +1,94 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import request from 'supertest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { createApplication, type ApplicationRuntime } from '../../src/server/app.js'
+import type { ServerConfig } from '../../src/server/config.js'
+import { SystemUpdateManager } from '../../src/server/updateManager.js'
+
+const runtimes: ApplicationRuntime[] = []
+const roots: string[] = []
+afterEach(() => {
+  for (const runtime of runtimes.splice(0)) runtime.close()
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+function cookieHeader(response: request.Response): string {
+  const values = response.headers['set-cookie'] as unknown as string[]
+  return values.map(value => value.split(';', 1)[0]).join('; ')
+}
+
+function json(value: unknown, init: ResponseInit = {}) {
+  return new Response(JSON.stringify(value), {
+    ...init,
+    headers: { 'content-type': 'application/json', ...init.headers },
+  })
+}
+
+describe('system update routes', () => {
+  it('checks and queues a fixed Web/plugin release through authenticated CSRF routes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'hermes-system-update-routes-'))
+    roots.push(root)
+    const projectRoot = join(root, 'project')
+    mkdirSync(projectRoot)
+    writeFileSync(join(projectRoot, 'release.json'), JSON.stringify({
+      schemaVersion: 1, releaseVersion: '0.2.0', webVersion: '0.2.0', pluginVersion: '1.7.1', gitTag: 'v0.2.0',
+    }))
+    const config: ServerConfig = {
+      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      allowedHosts: new Set(), home: join(root, 'data'), mediaRoot: join(root, 'media'),
+      attachmentsRoot: join(root, 'attachments'), imagesRoot: join(root, 'images'), mediaOwner: 'tester',
+      allowInsecureLan: false, insecureLan: false, production: false,
+      releaseRoot: join(root, 'installed'), releaseSource: 'https://example.test/hermes-yaoyao.git',
+    }
+    const launched: string[] = []
+    const latest = {
+      schemaVersion: 1 as const, releaseVersion: '0.3.0', webVersion: '0.3.0', pluginVersion: '1.8.0', gitTag: 'v0.3.0',
+    }
+    const updates = new SystemUpdateManager(config, {
+      projectRoot,
+      inspectRemote: async () => ({ manifest: latest, commit: 'b'.repeat(40) }),
+      launchUpdater: path => { launched.push(path) },
+      platform: 'darwin',
+    })
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const path = new URL(input instanceof Request ? input.url : String(input)).pathname
+      if (path === '/api/status') return json({ auth_required: true }, { headers: { 'set-cookie': 'hermes_session_at=session; Path=/; HttpOnly' } })
+      if (path === '/api/auth/me') return json({ user_id: 'admin', display_name: '管理员' })
+      if (path === '/api/profiles') return json({ profiles: [{ name: 'default', is_default: true }] })
+      if (path === '/api/plugins/yaoyao/profiles') return json({ profiles: [] })
+      if (path === '/api/dashboard/plugins') return json([{ name: 'yaoyao', version: '1.7.1' }])
+      if (path === '/api/plugins/yaoyao/maintenance/storage') return json({ ready: true })
+      return json({ ok: true })
+    }) as typeof fetch
+    const runtime = createApplication({ config, fetchImpl, updates })
+    runtimes.push(runtime)
+    const bootstrap = await request(runtime.app.callback())
+      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const cookie = cookieHeader(bootstrap)
+    const mutation = (path: string) => request(runtime.app.callback())
+      .post(path)
+      .set('Host', '127.0.0.1:8800')
+      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Cookie', cookie)
+      .set('X-CSRF-Token', bootstrap.body.csrfToken)
+
+    const status = await request(runtime.app.callback())
+      .get('/api/app/system/update/status').set('Host', '127.0.0.1:8800').set('Cookie', cookie).expect(200)
+    expect(status.body).toMatchObject({ installedPluginVersion: '1.7.1', versionsMatch: true, updateAvailable: false })
+
+    const check = await mutation('/api/app/system/update/check').send({}).expect(200)
+    expect(check.body).toMatchObject({ latest, updateAvailable: true })
+
+    const queued = await mutation('/api/app/system/update/apply').send({ targetVersion: '0.3.0' }).expect(202)
+    expect(queued.body).toMatchObject({ operation: 'update', state: 'queued', target: latest })
+    expect(launched).toHaveLength(1)
+
+    const jobResponse = await request(runtime.app.callback())
+      .get(`/api/app/system/update/jobs/${queued.body.id}`)
+      .set('Host', '127.0.0.1:8800').set('Cookie', cookie)
+      .expect(200)
+    expect(jobResponse.body).toMatchObject({ id: queued.body.id, state: 'queued' })
+  })
+})

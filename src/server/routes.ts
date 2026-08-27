@@ -6,7 +6,7 @@ import { basename, resolve, sep } from 'node:path'
 import { lookup as mimeLookup } from 'mime-types'
 import { isSupportedGroupProtocolVersion, SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL } from '../shared/types.js'
 import type { ServerConfig } from './config.js'
-import { DEFAULT_YAOYAO_PLUGIN_SOURCE, isLoopbackUpstream } from './config.js'
+import { DEFAULT_YAOYAO_PLUGIN_SOURCE, isLoopbackHost, isLoopbackUpstream } from './config.js'
 import { HttpError } from './errors.js'
 import { canonicalEpoch, groupCursor, type RealtimeChannel, RealtimeLeaseStore } from './leases.js'
 import {
@@ -26,6 +26,7 @@ import {
   UpstreamClient,
 } from './upstream.js'
 import { receiveGroupUploads, uploadMarkdown, UploadStore } from './uploads.js'
+import { SystemUpdateManager } from './updateManager.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -36,6 +37,7 @@ export interface RouteDependencies {
   leases: RealtimeLeaseStore
   pairings: NodePairingStore
   uploads: UploadStore
+  updates: SystemUpdateManager
   restartDashboard?: () => Promise<void>
 }
 
@@ -167,6 +169,68 @@ function publicStatus(status: JsonObject): JsonObject {
       ? status.gateway_state
       : typeof status.gatewayState === 'string' ? status.gatewayState : undefined,
   }
+}
+
+async function yaoyaoPluginVersion(
+  dependencies: RouteDependencies,
+  jar: CookieJar,
+): Promise<string | undefined> {
+  const response = await dependencies.upstream.request('/api/dashboard/plugins', jar)
+  if (response.status < 200 || response.status >= 300) return undefined
+  const manifests = parseJsonValue(response)
+  if (!Array.isArray(manifests)) return undefined
+  const manifest = manifests.find(entry => (
+    entry && typeof entry === 'object' && !Array.isArray(entry)
+    && (entry as JsonObject).name === 'yaoyao'
+  )) as JsonObject | undefined
+  return typeof manifest?.version === 'string' ? manifest.version : undefined
+}
+
+async function requireYaoyaoStorageReady(
+  dependencies: RouteDependencies,
+  jar: CookieJar,
+  installedVersion?: string,
+): Promise<void> {
+  if (!installedVersion) return
+  const response = await dependencies.upstream.request(
+    '/api/plugins/yaoyao/maintenance/storage',
+    jar,
+  )
+  if (response.status < 200 || response.status >= 300) {
+    throw new HttpError(
+      409,
+      '当前夭夭插件尚未具备安全升级能力，请先按文档完成一次兼容版本安装',
+      'yaoyao_storage_migration_required',
+    )
+  }
+  const storage = parseJson(response)
+  if (storage.ready !== true) {
+    throw new HttpError(
+      409,
+      '检测到旧数据目录冲突，已停止升级以避免覆盖夭夭数据',
+      'yaoyao_storage_conflict',
+    )
+  }
+}
+
+function requireLocalSystemUpdate(ctx: Koa.Context, dependencies: RouteDependencies): void {
+  if (dependencies.config.allowRemoteUpdate) return
+  const address = (ctx.req.socket.remoteAddress ?? '').replace(/^::ffff:/, '')
+  if (!isLoopbackHost(address)) {
+    throw new HttpError(
+      403,
+      '系统升级默认只允许在本机执行',
+      'remote_system_update_disabled',
+    )
+  }
+}
+
+function updateFailure(error: unknown): HttpError {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/最新版本|目标版本|正在执行|可回滚|不支持/.test(message)) {
+    return new HttpError(409, message, 'system_update_conflict')
+  }
+  return new HttpError(502, `无法访问系统发布源：${message}`, 'system_update_source_failed')
 }
 
 async function withJar<T>(ctx: Koa.Context, run: (jar: CookieJar) => Promise<T>): Promise<T> {
@@ -857,6 +921,61 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       }
     })
   })
+  router.get('/api/app/system/update/status', async (ctx) => {
+    await withJar(ctx, async (jar) => {
+      await requireGatewayAuthentication(ctx, dependencies, jar)
+      const installedPluginVersion = await yaoyaoPluginVersion(dependencies, jar)
+      json(ctx, 200, dependencies.updates.status(installedPluginVersion))
+    })
+  })
+  router.post('/api/app/system/update/check', async (ctx) => {
+    await withJar(ctx, async (jar) => {
+      await requireGatewayAuthentication(ctx, dependencies, jar)
+      const installedPluginVersion = await yaoyaoPluginVersion(dependencies, jar)
+      try {
+        json(ctx, 200, await dependencies.updates.check(installedPluginVersion))
+      } catch (error) {
+        throw updateFailure(error)
+      }
+    })
+  })
+  router.post('/api/app/system/update/apply', async (ctx) => {
+    await withJar(ctx, async (jar) => {
+      await requireGatewayAuthentication(ctx, dependencies, jar)
+      requireLocalSystemUpdate(ctx, dependencies)
+      const request = body(ctx)
+      const targetVersion = typeof request.targetVersion === 'string' ? request.targetVersion.trim() : ''
+      if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(targetVersion)) {
+        throw new HttpError(400, 'targetVersion 必须是有效的发布版本', 'invalid_request')
+      }
+      const installedPluginVersion = await yaoyaoPluginVersion(dependencies, jar)
+      await requireYaoyaoStorageReady(dependencies, jar, installedPluginVersion)
+      try {
+        json(ctx, 202, await dependencies.updates.startUpdate(targetVersion, installedPluginVersion))
+      } catch (error) {
+        throw updateFailure(error)
+      }
+    })
+  })
+  router.get('/api/app/system/update/jobs/:jobID', async (ctx) => {
+    await withJar(ctx, async (jar) => {
+      await requireGatewayAuthentication(ctx, dependencies, jar)
+      const job = dependencies.updates.job(ctx.params.jobID)
+      if (!job) throw new HttpError(404, '升级任务不存在', 'system_update_job_not_found')
+      json(ctx, 200, job)
+    })
+  })
+  router.post('/api/app/system/update/rollback', async (ctx) => {
+    await withJar(ctx, async (jar) => {
+      await requireGatewayAuthentication(ctx, dependencies, jar)
+      requireLocalSystemUpdate(ctx, dependencies)
+      try {
+        json(ctx, 202, dependencies.updates.startRollback())
+      } catch (error) {
+        throw updateFailure(error)
+      }
+    })
+  })
   router.post('/api/app/plugins/yaoyao/install', async (ctx) => {
     await withJar(ctx, async (jar) => {
       await requireGatewayAuthentication(ctx, dependencies, jar)
@@ -884,27 +1003,11 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
         && (entry as JsonObject).name === 'yaoyao'
       ))
 
-      if (installed) {
-        const storageResponse = await dependencies.upstream.request(
-          '/api/plugins/yaoyao/maintenance/storage',
-          jar,
-        )
-        if (storageResponse.status < 200 || storageResponse.status >= 300) {
-          throw new HttpError(
-            409,
-            '当前夭夭插件尚未具备安全升级能力，请先按文档完成一次兼容版本安装',
-            'yaoyao_storage_migration_required',
-          )
-        }
-        const storage = parseJson(storageResponse)
-        if (storage.ready !== true) {
-          throw new HttpError(
-            409,
-            '检测到旧数据目录冲突，已停止安装以避免覆盖夭夭数据',
-            'yaoyao_storage_conflict',
-          )
-        }
-      }
+      await requireYaoyaoStorageReady(
+        dependencies,
+        jar,
+        installed ? 'installed' : undefined,
+      )
 
       const force = request.force === true
       if (installed && !force) {

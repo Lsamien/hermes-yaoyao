@@ -9,7 +9,7 @@
 插件安装接口安装。默认源为
 `https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao`。
 
-当前发布版本：**Git `v0.1.1` / 夭夭 Web `0.1.1` / Hermes Dashboard 插件 `1.7.1`**。
+当前发布版本：**Git `v0.2.0` / 夭夭 Web `0.2.0` / Hermes Dashboard 插件 `1.7.1`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
 
 需要由自动化 Agent 部署或升级时，请直接使用 [Agent 安装手册](docs/agent-install.md)。其中包含固定版本校验、备份、同步、单一 Dashboard 重载与验证步骤。
 
@@ -106,6 +106,41 @@ Content-Type: application/json
 本机受管部署会在安装后由 8800 重启 9119；未启用 Dashboard 监督或使用远程
 9119 时，响应中的 `restartRequired` 为 `true`，需要由目标环境的服务管理器
 完成重启。
+
+### Web 与插件配套升级
+
+macOS 受管服务可在左下角 Agent 菜单中打开“系统更新”。它把一个 Git 发布标签
+中的 Web 与 Dashboard 插件视为同一发布单元，版本关系来自 `release.json`。
+
+升级接口固定读取 `HERMES_YAOYAO_RELEASE_SOURCE`，只接受发布源中最新的
+`vX.Y.Z` 标签，并在下载后核对标签解析出的 Git 提交和发布清单。浏览器不能传入
+仓库地址或任意提交。写接口仍受 Hermes 登录、Origin 和 CSRF 保护；默认还要求
+请求来自本机，可通过 `HERMES_YAOYAO_ALLOW_REMOTE_UPDATE=1` 明确允许远程管理。
+
+首次成功升级会把运行文件迁入：
+
+```text
+~/.local/share/hermes-yaoyao/
+├── releases/<版本>-<提交>/
+└── current -> releases/<版本>-<提交>
+```
+
+独立 updater 会先下载、构建和备份插件，再停止 8800 与 9119、原子切换插件和
+`current`、重装 LaunchAgent，最后验证 `/healthz`、`/readyz` 和实际插件版本。
+验证失败会自动恢复上一套 Web 与插件；用户数据始终留在
+`~/.hermes-yaoyao` 和 `~/.hermes/plugin-data/yaoyao`，不进入版本目录。
+
+相关接口：
+
+```text
+GET  /api/app/system/update/status
+POST /api/app/system/update/check
+POST /api/app/system/update/apply
+GET  /api/app/system/update/jobs/:jobID
+POST /api/app/system/update/rollback
+```
+
+容器和非 macOS 环境只显示版本状态，不执行服务内升级；应通过替换镜像更新。
 
 ## 开发
 

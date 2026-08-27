@@ -19,6 +19,7 @@ import {
 } from './security.js'
 import { UpstreamHttpError, UpstreamClient } from './upstream.js'
 import { UploadStore } from './uploads.js'
+import { SystemUpdateManager } from './updateManager.js'
 import { installWebSocketRelay } from './websocket.js'
 
 export interface ApplicationOptions {
@@ -29,6 +30,7 @@ export interface ApplicationOptions {
   pairings?: NodePairingStore
   uploads?: UploadStore
   restartDashboard?: () => Promise<void>
+  updates?: SystemUpdateManager
 }
 
 export interface ApplicationRuntime {
@@ -39,6 +41,7 @@ export interface ApplicationRuntime {
   pairings: NodePairingStore
   upstream: UpstreamClient
   uploads: UploadStore
+  updates: SystemUpdateManager
   close(): void
 }
 
@@ -78,6 +81,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
   const pairings = options.pairings ?? new NodePairingStore(config.home)
   const upstream = new UpstreamClient(config.upstream, options.fetchImpl, Boolean(config.tlsCert))
   const uploads = options.uploads ?? new UploadStore(config.home)
+  const updates = options.updates ?? new SystemUpdateManager(config)
   try {
     uploads.cleanupUncommitted()
   } catch {
@@ -146,6 +150,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     leases,
     pairings,
     uploads,
+    updates,
     restartDashboard: options.restartDashboard,
   })
   app.use(router.routes())
@@ -168,6 +173,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     pairings,
     upstream,
     uploads,
+    updates,
     close: () => uploads.close(),
   }
 }

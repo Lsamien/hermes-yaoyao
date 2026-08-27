@@ -5,6 +5,7 @@ FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+COPY release.json ./
 RUN npm ci
 
 COPY tsconfig.json tsconfig.client.json tsconfig.server.json vite.config.ts ./
@@ -12,6 +13,7 @@ COPY index.html ./
 COPY public ./public
 COPY scripts ./scripts
 COPY src ./src
+COPY hermes-plugins/yaoyao ./hermes-plugins/yaoyao
 
 RUN npm run build \
   && npm prune --omit=dev
@@ -28,7 +30,7 @@ WORKDIR /app
 
 RUN install -d -o node -g node -m 0700 /var/lib/hermes-yaoyao
 
-COPY --chown=node:node package.json package-lock.json ./
+COPY --chown=node:node package.json package-lock.json release.json ./
 COPY --chown=node:node --from=builder /app/node_modules ./node_modules
 COPY --chown=node:node --from=builder /app/dist ./dist
 COPY --chown=node:node --from=builder /app/dist-server ./dist-server

@@ -8,14 +8,15 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const label = 'com.samien.hermes-yaoyao'
-const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const sourceProjectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const serviceRoot = resolve(process.env.HERMES_YAOYAO_SERVICE_ROOT || sourceProjectRoot)
 const uid = process.getuid?.() ?? 501
 const domain = `gui/${uid}`
 const launchAgents = join(homedir(), 'Library', 'LaunchAgents')
 const plistPath = join(launchAgents, `${label}.plist`)
 const dataHome = process.env.HERMES_YAOYAO_HOME || join(homedir(), '.hermes-yaoyao')
 const logDir = join(homedir(), 'Library', 'Logs')
-const serverEntry = join(projectRoot, 'dist-server', 'server', 'index.js')
+const serverEntry = join(serviceRoot, 'dist-server', 'server', 'index.js')
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, { encoding: 'utf8', stdio: options.inherit ? 'inherit' : 'pipe' })
@@ -41,11 +42,17 @@ function environment() {
     'HERMES_YAOYAO_TLS_KEY',
     'HERMES_YAOYAO_ALLOW_INSECURE_LAN',
     'HERMES_YAOYAO_SUPERVISE_DASHBOARD',
+    'HERMES_YAOYAO_RELEASE_SOURCE',
+    'HERMES_YAOYAO_RELEASE_ROOT',
+    'HERMES_YAOYAO_ALLOW_REMOTE_UPDATE',
+    'HERMES_YAOYAO_SERVICE_ROOT',
   ]
   return Object.fromEntries(allowed.flatMap(key => process.env[key] ? [[key, process.env[key]]] : []))
 }
 
-export function launchAgentPlist() {
+export function launchAgentPlist(options = {}) {
+  const plistServiceRoot = resolve(options.serviceRoot || serviceRoot)
+  const plistServerEntry = join(plistServiceRoot, 'dist-server', 'server', 'index.js')
   const node = process.execPath
   const envEntries = {
     PATH: `${dirname(node)}:${join(homedir(), '.local', 'bin')}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
@@ -67,8 +74,8 @@ export function launchAgentPlist() {
   <dict>
     <key>Label</key><string>${label}</string>
     <key>ProgramArguments</key>
-    <array><string>${escapeXml(node)}</string><string>${escapeXml(serverEntry)}</string></array>
-    <key>WorkingDirectory</key><string>${escapeXml(projectRoot)}</string>
+    <array><string>${escapeXml(node)}</string><string>${escapeXml(plistServerEntry)}</string></array>
+    <key>WorkingDirectory</key><string>${escapeXml(plistServiceRoot)}</string>
     <key>EnvironmentVariables</key>
     <dict>
 ${envXml}
