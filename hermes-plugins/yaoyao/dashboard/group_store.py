@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator, Mapping
 
+from .data_paths import ensure_durable_data_root
 from .group_protocol import (
     ALL_MENTION_ALIASES,
     CONTEXT_CHARACTER_BUDGET,
@@ -329,7 +330,7 @@ class GroupStore:
     ) -> "GroupStore":
         hermes_home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
         return cls(
-            hermes_home / "plugins" / "yaoyao" / "data" / "group-chat.db",
+            ensure_durable_data_root(hermes_home).data_root / "group-chat.db",
             agent_name_resolver=agent_name_resolver,
         )
 

@@ -6,6 +6,7 @@ export const DEFAULT_DASHBOARD_USERNAME = 'admin'
 export const DEFAULT_DASHBOARD_PASSWORD = 'admin'
 const DASHBOARD_PORT = 9119
 const SUPERVISION_INTERVAL_MS = 5_000
+const RESTART_READY_TIMEOUT_MS = 15_000
 
 type Run = (args: readonly string[]) => string
 type Launch = (args: readonly string[]) => void
@@ -47,6 +48,10 @@ function portIsListening(host: string, port: number): Promise<boolean> {
   })
 }
 
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
 function passwordHash(password: string): string {
   const salt = randomBytes(16)
   const derived = scryptSync(password, salt, 32, { N: 2 ** 14, r: 8, p: 1, maxmem: 64 * 1024 * 1024 })
@@ -84,6 +89,18 @@ export class DashboardSupervisor {
   stop(): void {
     if (this.timer) clearInterval(this.timer)
     this.timer = undefined
+  }
+
+  async restart(): Promise<void> {
+    while (this.checking) await delay(25)
+    this.run(['dashboard', '--stop'])
+    await this.checkNow()
+    const deadline = Date.now() + RESTART_READY_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      if (await this.probe('127.0.0.1', DASHBOARD_PORT)) return
+      await delay(100)
+    }
+    throw new Error('Hermes Dashboard did not return on 9119 after restart')
   }
 
   async checkNow(): Promise<void> {

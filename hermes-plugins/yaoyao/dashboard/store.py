@@ -6,10 +6,10 @@ storing the same image N times costs one copy on disk.
 
 Profile isolation
 -----------------
-Each profile (agent) gets its OWN data directory resolved from the profile's
-HERMES_HOME: ``<profile_home>/plugins/yaoyao/data/{index.sqlite3, objects/}``.
-The default profile uses ``~/.hermes/plugins/yaoyao/data/`` (back-compat with
-the pre-profile layout). A ``Store`` instance owns one connection per
+Each profile (agent) gets its OWN durable data directory:
+``<profile_home>/plugin-data/yaoyao/{index.sqlite3, objects/}``. Legacy
+``<profile_home>/plugins/yaoyao/data`` trees are moved there once before the
+store opens. A ``Store`` instance owns one connection per
 ``data_root``; the module keeps a small cache keyed by resolved path so
 callers passing the same ``data_root`` share a connection.
 
@@ -33,8 +33,10 @@ from typing import Any, Optional
 
 try:
     from .group_protocol import is_reserved_mention_alias
+    from .data_paths import DURABLE_DATA_SUBPATH, ensure_durable_data_root
 except ImportError:  # Loaded by the Dashboard plugin loader as a top-level module.
     from group_protocol import is_reserved_mention_alias
+    from data_paths import DURABLE_DATA_SUBPATH, ensure_durable_data_root
 
 log = logging.getLogger("yaoyao.store")
 
@@ -42,12 +44,16 @@ log = logging.getLogger("yaoyao.store")
 # Paths
 # ---------------------------------------------------------------------------
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent  # ~/.hermes/plugins/yaoyao
-# Default profile's data dir (back-compat: <plugin>/data). Named profiles use
-# <profile_home>/plugins/yaoyao/data, resolved at call time.
-DEFAULT_DATA_ROOT = PLUGIN_ROOT / "data"
+# An installed plugin root is <profile_home>/plugins/yaoyao. Keeping this
+# derivation local also makes source-tree tests independent of the real home.
+DEFAULT_PROFILE_HOME = Path(
+    os.environ.get("HERMES_HOME") or PLUGIN_ROOT.parent.parent
+).expanduser().resolve()
+DEFAULT_DATA_PATH_STATUS = ensure_durable_data_root(DEFAULT_PROFILE_HOME)
+DEFAULT_DATA_ROOT = DEFAULT_DATA_PATH_STATUS.data_root
 
-# Subpath of a profile home where this plugin's per-profile data lives.
-PLUGIN_DATA_SUBPATH = Path("plugins") / "yaoyao" / "data"
+# Back-compatible public constant used by callers resolving named profiles.
+PLUGIN_DATA_SUBPATH = DURABLE_DATA_SUBPATH
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS objects (
@@ -689,8 +695,9 @@ def get_store(data_root: Optional[Path] = None) -> Store:
 def data_root_for_profile(profile: Optional[str]) -> Path:
     """Resolve the plugin data dir for a profile name.
 
-    ``default`` (or None) -> ``~/.hermes/plugins/yaoyao/data`` (back-compat).
-    Named profile -> ``<profile_home>/plugins/yaoyao/data``.
+    Legacy data is moved to ``<profile_home>/plugin-data/yaoyao`` before the
+    path is returned. A conflicting pair stays on the legacy tree so existing
+    data remains visible and the install coordinator can refuse replacement.
     """
     if not profile or profile == "default":
         return DEFAULT_DATA_ROOT
@@ -712,7 +719,7 @@ def data_root_for_profile(profile: Optional[str]) -> Path:
         except Exception:
             base = Path.home() / ".hermes"
         home = base / "profiles" / profile
-    return home / PLUGIN_DATA_SUBPATH
+    return ensure_durable_data_root(home).data_root
 
 
 # ---------------------------------------------------------------------------

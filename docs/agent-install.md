@@ -123,6 +123,26 @@ test "$(node -e \"console.log(require(process.argv[1]).version)\" "$PLUGIN_DIR/m
 
 不要提交、复制或恢复 `data/`、`__pycache__/`、`.pytest_cache/` 等运行时内容。归档数据库和本机状态不属于插件发布物。
 
+当前兼容版本首次启动时，会把每个 Profile 的旧目录
+`<profile-home>/plugins/yaoyao/data` 原子迁移到
+`<profile-home>/plugin-data/yaoyao`。后者独立于插件安装树，后续通过 Hermes
+插件接口替换 `plugins/yaoyao` 时不会丢失运行数据。若两个目录同时包含数据，
+插件不会自动合并；应人工核对后保留唯一权威目录。
+
+完成这次兼容版本启动后，后续可在已登录的 8800 会话中调用：
+
+```http
+POST /api/app/plugins/yaoyao/install
+Content-Type: application/json
+
+{"force":true}
+```
+
+默认安装源是
+`https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao`，可由服务端
+环境变量 `HERMES_YAOYAO_PLUGIN_SOURCE` 覆盖。接口不接受请求体覆盖仓库地址，
+并会在调用 9119 的通用安装接口前检查持久数据迁移状态。
+
 ## 3. 由 8800 服务担任唯一 Dashboard 监督者
 
 插件文件只有在 Dashboard 重载后才会生效。安装本项目的受管服务后，8800 服务是 Dashboard 的唯一持续监督者；不要保留其他 Dashboard LaunchAgent 或手动常驻进程。

@@ -6,7 +6,7 @@ import { basename, resolve, sep } from 'node:path'
 import { lookup as mimeLookup } from 'mime-types'
 import { isSupportedGroupProtocolVersion, SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL } from '../shared/types.js'
 import type { ServerConfig } from './config.js'
-import { isLoopbackUpstream } from './config.js'
+import { DEFAULT_YAOYAO_PLUGIN_SOURCE, isLoopbackUpstream } from './config.js'
 import { HttpError } from './errors.js'
 import { canonicalEpoch, groupCursor, type RealtimeChannel, RealtimeLeaseStore } from './leases.js'
 import {
@@ -36,6 +36,7 @@ export interface RouteDependencies {
   leases: RealtimeLeaseStore
   pairings: NodePairingStore
   uploads: UploadStore
+  restartDashboard?: () => Promise<void>
 }
 
 function body(ctx: Koa.Context): JsonObject {
@@ -73,6 +74,14 @@ function parseJson(response: UpstreamResponse): JsonObject {
     const value = JSON.parse(response.body.toString('utf8')) as unknown
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('not an object')
     return value as JsonObject
+  } catch {
+    throw new HttpError(502, 'Hermes returned invalid JSON', 'invalid_upstream_json')
+  }
+}
+
+function parseJsonValue(response: UpstreamResponse): unknown {
+  try {
+    return JSON.parse(response.body.toString('utf8')) as unknown
   } catch {
     throw new HttpError(502, 'Hermes returned invalid JSON', 'invalid_upstream_json')
   }
@@ -846,6 +855,94 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       } else {
         json(ctx, 200, { ok: true, csrfToken: nextCsrf })
       }
+    })
+  })
+  router.post('/api/app/plugins/yaoyao/install', async (ctx) => {
+    await withJar(ctx, async (jar) => {
+      await requireGatewayAuthentication(ctx, dependencies, jar)
+      const pluginSource = dependencies.config.yaoyaoPluginSource
+        ?? DEFAULT_YAOYAO_PLUGIN_SOURCE
+      const request = body(ctx)
+      if (request.force !== undefined && typeof request.force !== 'boolean') {
+        throw new HttpError(400, 'force must be a boolean', 'invalid_request')
+      }
+
+      const manifestsResponse = await dependencies.upstream.request(
+        '/api/dashboard/plugins',
+        jar,
+      )
+      if (manifestsResponse.status < 200 || manifestsResponse.status >= 300) {
+        sendUpstreamResponse(ctx, manifestsResponse, jar)
+        return
+      }
+      const manifests = parseJsonValue(manifestsResponse)
+      if (!Array.isArray(manifests)) {
+        throw new HttpError(502, 'Hermes returned an invalid plugin list', 'invalid_upstream_json')
+      }
+      const installed = manifests.some((entry) => (
+        entry && typeof entry === 'object' && !Array.isArray(entry)
+        && (entry as JsonObject).name === 'yaoyao'
+      ))
+
+      if (installed) {
+        const storageResponse = await dependencies.upstream.request(
+          '/api/plugins/yaoyao/maintenance/storage',
+          jar,
+        )
+        if (storageResponse.status < 200 || storageResponse.status >= 300) {
+          throw new HttpError(
+            409,
+            '当前夭夭插件尚未具备安全升级能力，请先按文档完成一次兼容版本安装',
+            'yaoyao_storage_migration_required',
+          )
+        }
+        const storage = parseJson(storageResponse)
+        if (storage.ready !== true) {
+          throw new HttpError(
+            409,
+            '检测到旧数据目录冲突，已停止安装以避免覆盖夭夭数据',
+            'yaoyao_storage_conflict',
+          )
+        }
+      }
+
+      const force = request.force === true
+      if (installed && !force) {
+        throw new HttpError(
+          409,
+          '夭夭已经安装；升级时必须明确传入 force=true',
+          'yaoyao_force_required',
+        )
+      }
+      const installResponse = await dependencies.upstream.request(
+        '/api/dashboard/agent-plugins/install',
+        jar,
+        {
+          method: 'POST',
+          body: {
+            identifier: pluginSource,
+            force,
+            enable: true,
+          },
+          clientAddress: ctx.req.socket.remoteAddress,
+        },
+      )
+      if (installResponse.status < 200 || installResponse.status >= 300) {
+        sendUpstreamResponse(ctx, installResponse, jar)
+        return
+      }
+      const installedResult = parseJson(installResponse)
+      let restarted = false
+      if (dependencies.restartDashboard) {
+        await dependencies.restartDashboard()
+        restarted = true
+      }
+      json(ctx, 200, {
+        ...installedResult,
+        source: pluginSource,
+        restarted,
+        restartRequired: !restarted,
+      })
     })
   })
   router.post('/api/app/realtime-leases', async (ctx) => {

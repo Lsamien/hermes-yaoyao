@@ -28,6 +28,7 @@ export interface ApplicationOptions {
   leases?: RealtimeLeaseStore
   pairings?: NodePairingStore
   uploads?: UploadStore
+  restartDashboard?: () => Promise<void>
 }
 
 export interface ApplicationRuntime {
@@ -138,7 +139,15 @@ export function createApplication(options: ApplicationOptions = {}): Application
     },
   }))
 
-  const router = createApiRouter({ config, csrf, upstream, leases, pairings, uploads })
+  const router = createApiRouter({
+    config,
+    csrf,
+    upstream,
+    leases,
+    pairings,
+    uploads,
+    restartDashboard: options.restartDashboard,
+  })
   app.use(router.routes())
   app.use(router.allowedMethods({ throw: false }))
   app.use(async (ctx, next) => {

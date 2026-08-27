@@ -10,7 +10,7 @@ Profile isolation
 -----------------
 Each profile (agent) - ``default``, ``yaoyao``, ``yaoer``, ``gril``,
 ``succubus`` ... - has its OWN ``state.db`` and its OWN plugin data dir
-(``<profile_home>/plugins/yaoyao/data``). The poller keeps one watcher state
+(``<profile_home>/plugin-data/yaoyao``). The poller keeps one watcher state
 per profile: a separate RO connection to that profile's state.db, its own
 mtime watermark, and its own waterline. Files are ingested into that
 profile's store with ``owner_profile=<profile name>``.

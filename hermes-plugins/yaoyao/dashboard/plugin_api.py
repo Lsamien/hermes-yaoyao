@@ -42,6 +42,7 @@ if _THIS_DIR not in sys.path:
 import store  # noqa: E402
 import poller  # noqa: E402
 import voice_store  # noqa: E402
+import data_paths  # noqa: E402
 
 
 def _profile_home(profile: Optional[str]) -> Path:
@@ -166,6 +167,46 @@ try:
     poller.start()
 except Exception:
     log.exception("yaoyao: poller failed to start (routes still serve existing data)")
+
+
+@router.get("/maintenance/storage")
+def maintenance_storage():
+    """Report whether every profile's runtime data is safe across updates."""
+
+    profiles: list[dict[str, object]] = []
+    ready = True
+    try:
+        discovered = poller._discover_profiles()
+    except Exception as error:
+        log.warning("yaoyao: unable to discover profile storage: %s", error)
+        discovered = [("default", _profile_home("default"))]
+    seen: set[str] = set()
+    for profile, home in discovered:
+        name = str(profile or "default")
+        if name in seen:
+            continue
+        seen.add(name)
+        try:
+            status = data_paths.ensure_durable_data_root(Path(home))
+            entry = {
+                "profile": name,
+                "ready": status.ready,
+                "migrated": status.migrated,
+                "legacyPresent": status.legacy_present,
+                "conflict": status.conflict,
+            }
+        except OSError as error:
+            log.warning("yaoyao: storage migration failed for %s: %s", name, error)
+            entry = {
+                "profile": name,
+                "ready": False,
+                "migrated": False,
+                "legacyPresent": True,
+                "conflict": True,
+            }
+        ready = ready and bool(entry["ready"])
+        profiles.append(entry)
+    return {"ready": ready, "profiles": profiles}
 
 
 # ---------------------------------------------------------------------------

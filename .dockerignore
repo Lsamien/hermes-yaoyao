@@ -23,6 +23,7 @@ docker.env
 hermes-plugins/*
 !hermes-plugins/yaoyao
 hermes-plugins/yaoyao/*
+!hermes-plugins/yaoyao/plugin.yaml
 !hermes-plugins/yaoyao/dashboard
 !hermes-plugins/yaoyao/dashboard/**
 docs

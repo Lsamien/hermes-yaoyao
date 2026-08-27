@@ -7,9 +7,10 @@ Mirrors yaoyao-webui's tts-settings-store.ts and stt-settings-store.ts:
 - baseUrl presets (recently used base URLs per provider).
 - Secrets are masked as "[stored]" in public responses.
 
-Storage: a single JSON file at data/voice_providers.json (not SQLite - the data
-is small and write frequency is low). The structure matches yaoyao-webui's
-DB rows so the data is interchangeable.
+Storage: a single JSON file at
+``<profile_home>/plugin-data/yaoyao/voice_providers.json`` (not SQLite - the
+data is small and write frequency is low). The structure matches
+yaoyao-webui's DB rows so the data is interchangeable.
 """
 
 from __future__ import annotations

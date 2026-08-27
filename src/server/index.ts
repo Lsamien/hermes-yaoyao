@@ -3,14 +3,20 @@ import { resolve } from 'node:path'
 import send from 'koa-send'
 import serve from 'koa-static'
 import { createApplication, createNodeServer } from './app.js'
-import { isLoopbackHost } from './config.js'
+import { isLoopbackHost, loadServerConfig } from './config.js'
 import { DashboardSupervisor } from './dashboardSupervisor.js'
 
-const runtime = createApplication()
-const nodeRuntime = createNodeServer(runtime)
-const dashboardSupervisor = runtime.config.superviseDashboard
-  ? new DashboardSupervisor({ allowLan: !isLoopbackHost(runtime.config.host) })
+const config = loadServerConfig()
+const dashboardSupervisor = config.superviseDashboard
+  ? new DashboardSupervisor({ allowLan: !isLoopbackHost(config.host) })
   : undefined
+const runtime = createApplication({
+  config,
+  ...(dashboardSupervisor
+    ? { restartDashboard: () => dashboardSupervisor.restart() }
+    : {}),
+})
+const nodeRuntime = createNodeServer(runtime)
 let closeFrontend = async (): Promise<void> => undefined
 
 if (runtime.config.production) {

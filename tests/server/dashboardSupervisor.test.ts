@@ -28,7 +28,10 @@ function supervisor(overrides: {
       }
       return ''
     },
-    launch(args) { launches.push([...args]) },
+    launch(args) {
+      launches.push([...args])
+      running = true
+    },
     probe: async () => running,
     log: () => undefined,
   })
@@ -67,5 +70,21 @@ describe('DashboardSupervisor', () => {
 
     expect(value.calls).toContainEqual(['dashboard', '--stop'])
     expect(value.launches).toEqual([['dashboard', '--host', '0.0.0.0', '--no-open']])
+  })
+
+  it('explicitly restarts a healthy dashboard and waits for 9119 to return', async () => {
+    const value = supervisor({
+      running: true,
+      values: {
+        'dashboard.basic_auth.username': 'operator',
+        'dashboard.basic_auth.password_hash': 'scrypt$existing',
+        'dashboard.basic_auth.secret': 'configured-secret',
+      },
+    })
+
+    await value.instance.restart()
+
+    expect(value.calls).toContainEqual(['dashboard', '--stop'])
+    expect(value.launches).toEqual([['dashboard', '--host', '127.0.0.1', '--no-open']])
   })
 })

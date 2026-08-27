@@ -5,6 +5,10 @@
 仓库同时归档了夭夭的 Hermes Dashboard 插件，位于
 [`hermes-plugins/yaoyao/dashboard`](hermes-plugins/yaoyao/dashboard)。Web 工作台和该插件是两个独立部署单元：前者运行在 `8800`，后者由已运行的 Hermes Dashboard 在 `9119` 加载。
 
+插件根目录同时提供 Hermes 标准 `plugin.yaml`，可通过 Dashboard 的 Git
+插件安装接口安装。默认源为
+`https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao`。
+
 当前发布版本：**Git `v0.1.1` / 夭夭 Web `0.1.1` / Hermes Dashboard 插件 `1.7.1`**。
 
 需要由自动化 Agent 部署或升级时，请直接使用 [Agent 安装手册](docs/agent-install.md)。其中包含固定版本校验、备份、同步、单一 Dashboard 重载与验证步骤。
@@ -76,6 +80,32 @@ tail -n 100 ~/.hermes/logs/gui.log
 若 Hermes 由 LaunchAgent、服务管理器或其他外部监督器启动，请使用该监督器重启 Dashboard；不要在 `hermes dashboard --stop` 后同时手动执行 `hermes dashboard --no-open`，以免产生重复监听进程。
 
 插件的归档数据与运行状态仍位于 Hermes 数据目录中，不在此仓库的 `hermes-plugins/` 中；升级插件前的备份也不应提交到 Git。
+
+### 通过 8800 安全编排 9119 安装
+
+登录夭夭 Web 后，可以调用受登录、Origin 和 CSRF 保护的接口：
+
+```http
+POST /api/app/plugins/yaoyao/install
+Content-Type: application/json
+
+{"force":false}
+```
+
+全新安装使用 `force:false`；已安装版本升级必须明确使用 `force:true`。8800
+只会把服务端配置的固定 Git 源交给 9119，不接受浏览器传入任意仓库地址。
+可通过 `HERMES_YAOYAO_PLUGIN_SOURCE` 覆盖默认源，且配置中禁止嵌入用户名或
+密码。
+
+插件数据会从旧的 `<profile-home>/plugins/yaoyao/data` 一次性迁移到
+`<profile-home>/plugin-data/yaoyao`。如果旧、新目录同时包含数据，安装接口会
+返回 `409 yaoyao_storage_conflict`，不会覆盖任一目录。旧版插件没有迁移检查
+接口时，也会返回 `409 yaoyao_storage_migration_required`；此时先按上面的
+`dashboard/` 局部同步方式安装一次当前兼容版本并重启，之后才能使用一键升级。
+
+本机受管部署会在安装后由 8800 重启 9119；未启用 Dashboard 监督或使用远程
+9119 时，响应中的 `restartRequired` 为 `true`，需要由目标环境的服务管理器
+完成重启。
 
 ## 开发
 
