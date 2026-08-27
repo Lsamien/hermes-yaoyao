@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { GroupAgent, GroupMessage, GroupRoomSummary } from '@shared/types'
 import CreateGroupDialog from '@/components/groups/CreateGroupDialog.vue'
 import GroupManager from '@/components/groups/GroupManager.vue'
+import { TEAM_PRESETS } from '@/components/groups/teamPresets'
 import { groupMessageToUi, roomSidebarItem } from '@/components/workspace/viewModels'
 
 const profiles = (...names: string[]) => names.map(name => ({
@@ -20,6 +21,68 @@ function agent(id: string, profile: string, displayName: string, isHost: boolean
 }
 
 describe('group host controls', () => {
+  it('provides office and development presets with unique roles within the Agent limit', () => {
+    expect(TEAM_PRESETS.map(preset => preset.name)).toEqual([
+      '信息收集团队', '产品设计团队', '软件开发团队', '文案书写团队',
+      '项目管理团队', '数据分析团队', '会议协作团队', '运维保障团队',
+    ])
+    for (const preset of TEAM_PRESETS) {
+      expect(preset.roles.length).toBeGreaterThanOrEqual(4)
+      expect(preset.roles.length).toBeLessThanOrEqual(8)
+      expect(new Set(preset.roles.map(role => role.name)).size).toBe(preset.roles.length)
+      expect(preset.roles.filter(role => role.host)).toHaveLength(1)
+    }
+  })
+
+  it('maps preset roles onto existing Agents and submits their role descriptions', async () => {
+    const choices = profiles('yaoyao', 'yaoer', 'reviewer', 'writer')
+    const wrapper = mount(CreateGroupDialog, {
+      attachTo: document.body,
+      props: {
+        open: true,
+        profiles: choices,
+        hostEnabled: true,
+        hostFlowEnabled: true,
+        roomInstructionsEnabled: true,
+      },
+      global: { stubs: { teleport: true } },
+    })
+    await wrapper.get('button[aria-label^="信息收集团队"]').trigger('click')
+    expect(wrapper.get<HTMLInputElement>('input[placeholder="例如：产品评审"]').element.value).toBe('信息收集团队')
+    expect(wrapper.findAll('.role-mapping select')).toHaveLength(4)
+    await wrapper.get<HTMLSelectElement>('select[aria-label="信息检索对应的 Agent"]').setValue('local|yaoyao')
+    await wrapper.get<HTMLSelectElement>('select[aria-label="信息检索对应的 Agent"]').setValue('local|reviewer')
+    await wrapper.get('.solid-button').trigger('click')
+
+    const payload = wrapper.emitted('create')?.[0]?.[0] as { members: Array<{ profile: string; displayName: string; description: string }>; hostProfile: string; autoReply: boolean; orchestrationMode: string; instructions: string }
+    expect(payload.members.map(member => [member.profile, member.displayName])).toEqual([
+      ['yaoer', '调研负责人'],
+      ['reviewer', '信息检索'],
+      ['yaoyao', '事实核验'],
+      ['writer', '资料整理'],
+    ])
+    expect(payload.members.every(member => member.description.length > 0)).toBe(true)
+    expect(payload.hostProfile).toBe('local|yaoer')
+    expect(payload.autoReply).toBe(false)
+    expect(payload.orchestrationMode).toBe('host')
+    expect(payload.instructions).toContain('交叉核验')
+    wrapper.unmount()
+  })
+
+  it('disables presets when the current Agent count is insufficient', async () => {
+    const wrapper = mount(CreateGroupDialog, {
+      attachTo: document.body,
+      props: { open: true, profiles: profiles('yaoyao', 'yaoer', 'reviewer', 'writer') },
+      global: { stubs: { teleport: true } },
+    })
+    const softwarePreset = wrapper.get<HTMLButtonElement>('button[aria-label^="软件开发团队"]')
+    expect(softwarePreset.element.disabled).toBe(true)
+    expect(softwarePreset.text()).toContain('还缺 1 人')
+    await softwarePreset.trigger('click')
+    expect(wrapper.find('.role-mapping').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('resolves a local team avatar by display name when an old room stored an internal Profile alias', () => {
     const room = {
       id: 'room-1', name: '头像团队', cwd: '', instructions: '', avatar: '', createdAt: 1, updatedAt: 1,

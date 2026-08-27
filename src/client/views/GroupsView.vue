@@ -390,7 +390,7 @@ async function startTopic(roomId: string) {
   } catch { /* store publishes the error */ }
 }
 
-async function createRoom(payload: { name: string; avatar?: string; members: GroupProfileOption[]; autoReply: boolean; replyRounds: number; instructions?: string; hostProfile?: string; orchestrationMode?: 'free' | 'host' }) {
+async function createRoom(payload: { name: string; avatar?: string; members: Array<GroupProfileOption & { description?: string }>; autoReply: boolean; replyRounds: number; instructions?: string; hostProfile?: string; orchestrationMode?: 'free' | 'host' }) {
   const hostProfile = payload.hostProfile || payload.members[0]?.id
   const detail = await groups.createRoom({
     name: payload.name,
@@ -401,6 +401,7 @@ async function createRoom(payload: { name: string; avatar?: string; members: Gro
       nodeId: member.nodeId,
       nodeLabel: member.nodeLabel,
       displayName: member.displayName,
+      description: member.description,
       replyWithoutMention: payload.autoReply,
       ...(groups.hostProtocol ? { isHost: member.id === hostProfile } : {}),
     })),

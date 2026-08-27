@@ -143,6 +143,9 @@ test('shows the team avatar in the list and automatic avatar controls during cre
 
   await page.getByRole('button', { name: '新建团队' }).click()
   const dialog = page.getByRole('dialog', { name: '新建团队' })
+  await expect(dialog.getByRole('region', { name: '团队预设' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: /信息收集团队/ })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: /信息收集团队/ })).toContainText('还缺 2 人')
   await expect(dialog.getByText('自动组合已选 Agent 的头像')).toBeVisible()
   await expect(dialog.getByRole('button', { name: '上传图片' })).toBeVisible()
   await expect(dialog.getByRole('button', { name: '自动生成' })).toBeVisible()
