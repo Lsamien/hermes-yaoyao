@@ -1938,6 +1938,18 @@ class GroupStore:
              WHERE latest.topic_id = topic.id AND latest.visible = 1
                AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
              ORDER BY latest.seq DESC LIMIT 1), '') AS preview,
+            (SELECT latest.sender_kind FROM group_messages AS latest
+             WHERE latest.topic_id = topic.id AND latest.visible = 1
+               AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
+             ORDER BY latest.seq DESC LIMIT 1) AS last_sender_kind,
+            (SELECT latest.sender_id FROM group_messages AS latest
+             WHERE latest.topic_id = topic.id AND latest.visible = 1
+               AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
+             ORDER BY latest.seq DESC LIMIT 1) AS last_sender_id,
+            (SELECT latest.sender_name FROM group_messages AS latest
+             WHERE latest.topic_id = topic.id AND latest.visible = 1
+               AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
+             ORDER BY latest.seq DESC LIMIT 1) AS last_sender_name,
             (SELECT COUNT(*) FROM group_messages AS unread
              WHERE unread.topic_id = topic.id AND unread.visible = 1
                AND unread.sender_kind = 'agent'
@@ -1993,6 +2005,18 @@ class GroupStore:
              WHERE latest.topic_id = topic.id AND latest.visible = 1
                AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
              ORDER BY latest.seq DESC LIMIT 1), '') AS preview,
+            (SELECT latest.sender_kind FROM group_messages AS latest
+             WHERE latest.topic_id = topic.id AND latest.visible = 1
+               AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
+             ORDER BY latest.seq DESC LIMIT 1) AS last_sender_kind,
+            (SELECT latest.sender_id FROM group_messages AS latest
+             WHERE latest.topic_id = topic.id AND latest.visible = 1
+               AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
+             ORDER BY latest.seq DESC LIMIT 1) AS last_sender_id,
+            (SELECT latest.sender_name FROM group_messages AS latest
+             WHERE latest.topic_id = topic.id AND latest.visible = 1
+               AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
+             ORDER BY latest.seq DESC LIMIT 1) AS last_sender_name,
             (SELECT COUNT(*) FROM group_messages AS unread
              WHERE unread.topic_id = topic.id AND unread.visible = 1
                AND unread.sender_kind = 'agent'
@@ -6104,6 +6128,18 @@ class GroupStore:
              WHERE latest.topic_id = topic.id AND latest.visible = 1
                AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
              ORDER BY latest.seq DESC LIMIT 1), '') AS preview,
+            (SELECT latest.sender_kind FROM group_messages AS latest
+             WHERE latest.topic_id = topic.id AND latest.visible = 1
+               AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
+             ORDER BY latest.seq DESC LIMIT 1) AS last_sender_kind,
+            (SELECT latest.sender_id FROM group_messages AS latest
+             WHERE latest.topic_id = topic.id AND latest.visible = 1
+               AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
+             ORDER BY latest.seq DESC LIMIT 1) AS last_sender_id,
+            (SELECT latest.sender_name FROM group_messages AS latest
+             WHERE latest.topic_id = topic.id AND latest.visible = 1
+               AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
+             ORDER BY latest.seq DESC LIMIT 1) AS last_sender_name,
             (SELECT COUNT(*) FROM group_messages AS unread
              WHERE unread.topic_id = topic.id AND unread.visible = 1
                AND unread.sender_kind = 'agent'
@@ -7058,6 +7094,9 @@ class GroupStore:
             "roomId": row["room_id"],
             "title": row["title"],
             "preview": preview[:_TOPIC_PREVIEW_LENGTH],
+            "lastSenderKind": row["last_sender_kind"],
+            "lastSenderId": row["last_sender_id"],
+            "lastSenderName": row["last_sender_name"],
             "messageCount": int(row["message_count"]),
             "unreadCount": int(row["unread_count"]),
             "latestMessageSeq": int(row["latest_message_seq"]),

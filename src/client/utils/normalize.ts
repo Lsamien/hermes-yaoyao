@@ -425,9 +425,15 @@ export function normalizeGroupRun(value: unknown): GroupRun {
 
 export function normalizeGroupTopic(value: unknown): GroupTopicSummary {
   const source = record(value)
+  const lastSenderKind = string(pick(source, 'lastSenderKind', 'last_sender_kind'))
   return {
     id: string(source.id), roomId: string(pick(source, 'roomId', 'room_id')),
     title: string(source.title, '新话题'), preview: string(source.preview),
+    lastSenderKind: lastSenderKind === 'human' || lastSenderKind === 'agent'
+      || lastSenderKind === 'system' || lastSenderKind === 'unknown'
+      ? lastSenderKind : undefined,
+    lastSenderId: string(pick(source, 'lastSenderId', 'last_sender_id')) || undefined,
+    lastSenderName: string(pick(source, 'lastSenderName', 'last_sender_name')) || undefined,
     messageCount: number(pick(source, 'messageCount', 'message_count')),
     unreadCount: number(pick(source, 'unreadCount', 'unread_count')),
     latestMessageSeq: number(pick(source, 'latestMessageSeq', 'latest_message_seq')),
