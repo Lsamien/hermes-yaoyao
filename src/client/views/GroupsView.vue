@@ -56,7 +56,16 @@ const archivedRoomList = ref<GroupRoomSummary[]>([])
 const archivedTopicList = ref<GroupTopicSummary[]>([])
 
 const activeRooms = computed(() => groups.rooms.filter(room => !room.archived))
-const roomSidebarItems = computed(() => activeRooms.value.map(roomSidebarItem))
+const roomSidebarItems = computed(() => activeRooms.value.map(room => {
+  const currentMembers = room.id === groups.selectedRoomId && displayAgents.value.length
+    ? displayAgents.value.slice(0, 4).map(agent => ({
+      profile: agent.profile,
+      nodeId: agent.nodeId,
+      displayName: agent.displayName,
+    }))
+    : room.avatarMembers
+  return roomSidebarItem({ ...room, avatarMembers: currentMembers }, agentAvatars.value, agentAvatarsByName.value)
+}))
 const pinnedTopics = computed(() => groups.pinnedTopics.filter(topic => !topic.archived).sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id)))
 const topicListRoom = computed(() => topicListRoomId.value ? activeRooms.value.find(room => room.id === topicListRoomId.value) : undefined)
 const sidebarSubtitle = computed(() => topicListRoom.value
@@ -81,7 +90,7 @@ function topicTimeSection(updatedAt: number): string {
 }
 const sidebarItems = computed<SidebarItem[]>(() => {
   const room = topicListRoom.value
-  if (!room) return activeRooms.value.map(item => ({ ...roomSidebarItem(item), section: undefined }))
+  if (!room) return roomSidebarItems.value.map(item => ({ ...item, section: undefined }))
   const items: SidebarItem[] = [{
     id: GROUP_LIST_BACK_ID,
     title: '返回团队列表',
@@ -146,6 +155,9 @@ const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({
 const agents = computed(() => displayAgents.value.map(agentToUi))
 const agentAvatars = computed(() => Object.fromEntries(auth.profiles.flatMap(profile =>
   profile.agentAvatar ? [[profile.name, profile.agentAvatar] as const] : []
+)))
+const agentAvatarsByName = computed(() => Object.fromEntries(auth.profiles.flatMap(profile =>
+  profile.agentAvatar ? [[profile.agentName || profile.displayName || profile.name, profile.agentAvatar] as const] : []
 )))
 function serverAddress(value: string): string {
   try { return new URL(value).host }
@@ -378,10 +390,11 @@ async function startTopic(roomId: string) {
   } catch { /* store publishes the error */ }
 }
 
-async function createRoom(payload: { name: string; members: GroupProfileOption[]; autoReply: boolean; replyRounds: number; instructions?: string; hostProfile?: string; orchestrationMode?: 'free' | 'host' }) {
+async function createRoom(payload: { name: string; avatar?: string; members: GroupProfileOption[]; autoReply: boolean; replyRounds: number; instructions?: string; hostProfile?: string; orchestrationMode?: 'free' | 'host' }) {
   const hostProfile = payload.hostProfile || payload.members[0]?.id
   const detail = await groups.createRoom({
     name: payload.name,
+    ...(groups.roomAvatarProtocol ? { avatar: payload.avatar ?? '' } : {}),
     ...(groups.roomInstructionsProtocol ? { instructions: payload.instructions ?? '' } : {}),
     agents: payload.members.map(member => ({
       profile: member.profile,
@@ -407,11 +420,12 @@ async function send(payload: ComposerSubmit) {
   } catch { /* store publishes the error */ }
 }
 
-async function updateRoom(patch: { name?: string; instructions?: string; replyRounds?: number; orchestrationMode?: 'free' | 'host' }) {
+async function updateRoom(patch: { name?: string; instructions?: string; avatar?: string; replyRounds?: number; orchestrationMode?: 'free' | 'host' }) {
   if (!groups.selectedRoom) return
   await groups.updateRoom(groups.selectedRoom.id, {
     name: patch.name,
     ...(groups.roomInstructionsProtocol ? { instructions: patch.instructions } : {}),
+    ...(groups.roomAvatarProtocol ? { avatar: patch.avatar } : {}),
     maxReplyRounds: patch.replyRounds,
     ...(groups.hostFlowProtocol ? { orchestrationMode: patch.orchestrationMode } : {}),
   })
@@ -710,6 +724,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         :host-enabled="groups.hostProtocol"
         :host-flow-enabled="groups.hostFlowProtocol"
         :room-instructions-enabled="groups.roomInstructionsProtocol"
+        :avatar-enabled="groups.roomAvatarProtocol"
         :available-profiles="availableProfiles"
         :busy="managerBusy"
         :model-options-by-profile="modelOptionsByProfile"
@@ -732,7 +747,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
   </WorkspaceView>
 
   <FloatingResourceSearch section="groups" label="搜索团队" :items="roomSidebarItems" @select="selectRoom" />
-  <CreateGroupDialog :open="createOpen" :profiles="profiles" :host-enabled="groups.hostProtocol" :host-flow-enabled="groups.hostFlowProtocol" :room-instructions-enabled="groups.roomInstructionsProtocol" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
+  <CreateGroupDialog :open="createOpen" :profiles="profiles" :avatar-enabled="groups.roomAvatarProtocol" :host-enabled="groups.hostProtocol" :host-flow-enabled="groups.hostFlowProtocol" :room-instructions-enabled="groups.roomInstructionsProtocol" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
   <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="addPreviewToComposer" @source="preview = null" />
   <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" :can-add="uploadsEnabled" @add="addMediaToComposer" />
 

@@ -75,6 +75,15 @@ class GroupSettingsContractTests(unittest.TestCase):
             self.assertEqual(agents_by_node["local"]["profile"], "default")
             self.assertEqual(agents_by_node[node_id]["profile"], "default")
             self.assertEqual(agents_by_node[node_id]["nodeLabel"], "MacBook Pro")
+            self.assertEqual(
+                {(item["nodeId"], item["profile"]) for item in room["avatarMembers"]},
+                {("local", "default"), (node_id, "default")},
+            )
+            [summary] = store.list_rooms(limit=50, cursor=None).items
+            self.assertEqual(
+                {(item["nodeId"], item["profile"]) for item in summary["avatarMembers"]},
+                {("local", "default"), (node_id, "default")},
+            )
             with store.connection() as connection:
                 stored = connection.execute(
                     "SELECT profile, execution_profile FROM group_agents "
@@ -391,7 +400,7 @@ class GroupSettingsContractTests(unittest.TestCase):
 
             migrated = GroupStore(path)
             migrated.initialize()
-            self.assertEqual(migrated.schema_version(), 13)
+            self.assertEqual(migrated.schema_version(), 14)
             self.assertEqual(migrated.get_room(room["id"])["instructions"], "")
 
     def test_terminal_session_info_captures_effective_model_for_settlement(self) -> None:
@@ -696,7 +705,7 @@ class GroupSettingsContractTests(unittest.TestCase):
                 )
 
     def test_protocol_v5_advertises_reply_round_contract(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 11)
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 12)
         self.assertEqual(
             PROTOCOL.limits_payload()["defaultMaxReplyRounds"], 3
         )
@@ -728,6 +737,56 @@ class GroupSettingsContractTests(unittest.TestCase):
                         "agents": [{"profile": "planner"}],
                     }
                 )
+
+    def test_room_avatar_persists_and_auto_mode_exposes_members(self) -> None:
+        avatar = "data:image/png;base64,AA=="
+        request = PROTOCOL.CreateRoomRequest.model_validate({
+            "requestId": request_id(),
+            "name": "头像团队",
+            "avatar": avatar,
+            "agents": [
+                {"profile": "planner", "displayName": "策划"},
+                {"profile": "reviewer", "displayName": "评审"},
+            ],
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+            room = store.create_room(
+                group_plugin_api._create_room_command(request)
+            )
+            self.assertEqual(room["avatar"], avatar)
+            self.assertEqual(
+                {item["displayName"] for item in room["avatarMembers"]},
+                {"策划", "评审"},
+            )
+
+            [summary] = store.list_rooms(limit=50, cursor=None).items
+            self.assertEqual(summary["avatar"], avatar)
+            self.assertEqual(
+                {item["profile"] for item in summary["avatarMembers"]},
+                {"planner", "reviewer"},
+            )
+
+            updated = store.update_room(room["id"], {
+                "requestId": request_id(),
+                "avatar": "",
+            })
+            self.assertEqual(updated["avatar"], "")
+            self.assertEqual(len(updated["avatarMembers"]), 2)
+
+        for invalid in (
+            "https://example.com/avatar.png",
+            "data:image/svg+xml;base64,AA==",
+            "data:image/png;base64,***",
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                PROTOCOL.CreateRoomRequest.model_validate({
+                    "requestId": request_id(),
+                    "name": "头像团队",
+                    "avatar": invalid,
+                    "agents": [{"profile": "planner"}],
+                })
 
     def test_reserved_all_aliases_cannot_be_agent_display_names(self) -> None:
         model_payloads = (
@@ -1070,7 +1129,7 @@ class GroupSettingsContractTests(unittest.TestCase):
             self._create_v1_database(path)
             store = GroupStore(path)
             store.initialize()
-            self.assertEqual(store.schema_version(), 13)
+            self.assertEqual(store.schema_version(), 14)
             self.assertEqual(store.journal_epoch(), "11111111-1111-4111-8111-111111111111")
             with store.connection() as connection:
                 room = connection.execute("SELECT * FROM group_rooms").fetchone()

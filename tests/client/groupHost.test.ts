@@ -1,10 +1,10 @@
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { describe, expect, it } from 'vitest'
-import type { GroupAgent, GroupMessage } from '@shared/types'
+import type { GroupAgent, GroupMessage, GroupRoomSummary } from '@shared/types'
 import CreateGroupDialog from '@/components/groups/CreateGroupDialog.vue'
 import GroupManager from '@/components/groups/GroupManager.vue'
-import { groupMessageToUi } from '@/components/workspace/viewModels'
+import { groupMessageToUi, roomSidebarItem } from '@/components/workspace/viewModels'
 
 const profiles = (...names: string[]) => names.map(name => ({
   id: `local|${name}`, profile: name, displayName: name, nodeId: 'local', nodeLabel: '当前 Hermes',
@@ -20,6 +20,22 @@ function agent(id: string, profile: string, displayName: string, isHost: boolean
 }
 
 describe('group host controls', () => {
+  it('resolves a local team avatar by display name when an old room stored an internal Profile alias', () => {
+    const room = {
+      id: 'room-1', name: '头像团队', cwd: '', instructions: '', avatar: '', createdAt: 1, updatedAt: 1,
+      archived: false, agentCount: 2, lastMessage: null, unreadCount: 0, activeRunCount: 0, maxReplyRounds: 3, orchestrationMode: 'free',
+      avatarMembers: [
+        { profile: 'legacy:default', nodeId: 'local', displayName: '丫头' },
+        { profile: 'default', nodeId: 'remote-node', displayName: '远端丫头' },
+      ],
+    } satisfies GroupRoomSummary
+    const item = roomSidebarItem(room, { default: 'data:image/png;base64,LOCAL==' }, { 丫头: 'data:image/png;base64,LOCAL==' })
+    expect(item.avatarMembers).toEqual([
+      { name: '丫头', avatar: 'data:image/png;base64,LOCAL==' },
+      { name: '远端丫头', avatar: undefined },
+    ])
+  })
+
   it('keeps same-name Profiles distinct across paired Hermes nodes', async () => {
     const local = profiles('default')[0]!
     const remote = {
@@ -128,6 +144,29 @@ describe('group host controls', () => {
       name: '顺序协作',
       instructions: '先核对事实，再输出中文结论。',
       orchestrationMode: 'host',
+    })
+    wrapper.unmount()
+  })
+
+  it('shows and submits an automatic team avatar from selected Agents', async () => {
+    const choices = profiles('yaoyao', 'yaoer').map((profile, index) => ({
+      ...profile,
+      ...(index === 0 ? { avatar: 'data:image/png;base64,AA==' } : {}),
+    }))
+    const wrapper = mount(CreateGroupDialog, {
+      attachTo: document.body,
+      props: { open: true, profiles: choices, avatarEnabled: true },
+      global: { stubs: { teleport: true } },
+    })
+    await wrapper.get('input[placeholder="例如：产品评审"]').setValue('头像团队')
+    await wrapper.findAll('.agent-picker > button')[1]!.trigger('click')
+    expect(wrapper.findAll('.avatar-picker .team-avatar__member')).toHaveLength(2)
+    expect(wrapper.get('.avatar-picker').text()).toContain('自动组合已选 Agent 的头像')
+    await wrapper.get('.solid-button').trigger('click')
+    expect(wrapper.emitted('create')?.[0]?.[0]).toMatchObject({
+      name: '头像团队',
+      avatar: '',
+      members: choices,
     })
     wrapper.unmount()
   })

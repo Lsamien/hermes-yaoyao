@@ -242,7 +242,7 @@ export interface GroupLimits {
 }
 
 export const MIN_SUPPORTED_GROUP_PROTOCOL_VERSION = 2
-export const MAX_SUPPORTED_GROUP_PROTOCOL_VERSION = 11
+export const MAX_SUPPORTED_GROUP_PROTOCOL_VERSION = 12
 export const SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL = `v${MIN_SUPPORTED_GROUP_PROTOCOL_VERSION}–v${MAX_SUPPORTED_GROUP_PROTOCOL_VERSION}`
 
 export function isSupportedGroupProtocolVersion(value: number): boolean {
@@ -364,6 +364,8 @@ export interface GroupRoomSummary {
   name: string
   cwd: string
   instructions?: string
+  avatar?: string
+  avatarMembers?: GroupRoomAvatarMember[]
   createdAt: number
   updatedAt: number
   archived: boolean
@@ -373,6 +375,12 @@ export interface GroupRoomSummary {
   activeRunCount?: number
   maxReplyRounds: number
   orchestrationMode?: 'free' | 'host'
+}
+
+export interface GroupRoomAvatarMember {
+  profile: string
+  nodeId: string
+  displayName: string
 }
 
 export interface GroupRoomDetail extends Omit<GroupRoomSummary, 'agentCount' | 'lastMessage' | 'unreadCount'> {

@@ -37,7 +37,7 @@ def new_id() -> str:
 
 class GroupTopicsContractTests(unittest.TestCase):
     def test_protocol_and_router_advertise_topics(self) -> None:
-        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 11)
+        self.assertEqual(PROTOCOL.PROTOCOL_VERSION, 12)
         self.assertIn("topic.updated", PROTOCOL.EVENT_TYPES)
         self.assertIn("room.activity", PROTOCOL.EVENT_TYPES)
         request = PROTOCOL.SendMessageRequest.model_validate({
@@ -268,7 +268,7 @@ class GroupTopicsContractTests(unittest.TestCase):
             migrated = GroupStore(path)
             migrated.initialize()
 
-            self.assertEqual(migrated.schema_version(), 13)
+            self.assertEqual(migrated.schema_version(), 14)
             with migrated.connection() as connection:
                 topic = connection.execute(
                     "SELECT * FROM group_topics WHERE id = ?", (topic_id,)
@@ -1504,7 +1504,7 @@ class GroupTopicsContractTests(unittest.TestCase):
 
             store = GroupStore(path)
             store.initialize()
-            self.assertEqual(store.schema_version(), 13)
+            self.assertEqual(store.schema_version(), 14)
             with store.connection() as migrated:
                 room = migrated.execute("SELECT * FROM group_rooms").fetchone()
                 agent = migrated.execute("SELECT * FROM group_agents").fetchone()
@@ -1534,6 +1534,7 @@ class GroupTopicsContractTests(unittest.TestCase):
                     **expected_room,
                     "orchestration_mode": "free",
                     "instructions": "",
+                    "avatar_data_url": "",
                 }
             )
             self.assertEqual(

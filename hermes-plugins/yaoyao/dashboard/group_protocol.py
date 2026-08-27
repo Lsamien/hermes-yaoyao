@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import re
 import unicodedata
 from pathlib import Path
 from typing import Any, Literal
@@ -18,7 +21,7 @@ from pydantic import (
 )
 
 
-PROTOCOL_VERSION = 11
+PROTOCOL_VERSION = 12
 MAX_AGENTS_PER_ROOM = 8
 MAX_MESSAGE_BYTES = 64 * 1024
 MAX_TOOL_STATE_BYTES = 256 * 1024
@@ -32,6 +35,7 @@ UNLIMITED_REPLY_ROUNDS = -1
 MAX_FINITE_REPLY_ROUNDS = 100
 MAX_AGENT_DISPLAY_NAME_LENGTH = 100
 MAX_ROOM_INSTRUCTIONS_LENGTH = 4_000
+MAX_ROOM_AVATAR_LENGTH = 512 * 1024
 MAX_ROOM_CONCURRENCY = 3
 MAX_PLUGIN_CONCURRENCY = 4
 INITIAL_CONTEXT_MESSAGE_LIMIT = 50
@@ -40,6 +44,10 @@ REASONING_EFFORTS = frozenset({
     "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
 })
 ORCHESTRATION_MODES = frozenset({"free", "host"})
+_ROOM_AVATAR_PATTERN = re.compile(
+    r"^data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$",
+    re.IGNORECASE,
+)
 
 # These literals address the room as a whole and must never become a member
 # display-name or alias target.  Keep the stable wire spelling for existing
@@ -84,9 +92,31 @@ def limits_payload() -> dict[str, int]:
         "unlimitedReplyRoundsValue": UNLIMITED_REPLY_ROUNDS,
         "maxAgentDisplayNameLength": MAX_AGENT_DISPLAY_NAME_LENGTH,
         "maxRoomInstructionsLength": MAX_ROOM_INSTRUCTIONS_LENGTH,
+        "maxRoomAvatarLength": MAX_ROOM_AVATAR_LENGTH,
         "maxRoomConcurrency": MAX_ROOM_CONCURRENCY,
         "maxPluginConcurrency": MAX_PLUGIN_CONCURRENCY,
     }
+
+
+def normalize_room_avatar(value: object) -> str:
+    """Validate a persisted custom avatar; an empty string selects auto mode."""
+    if not isinstance(value, str):
+        raise ValueError("avatar must be a data image URL or an empty string")
+    normalized = value.strip()
+    if not normalized:
+        return ""
+    if len(normalized) > MAX_ROOM_AVATAR_LENGTH:
+        raise ValueError("avatar is too large")
+    match = _ROOM_AVATAR_PATTERN.fullmatch(normalized)
+    if match is None:
+        raise ValueError("avatar must be a PNG, JPEG, or WebP data image URL")
+    try:
+        decoded = base64.b64decode(match.group(2), validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("avatar contains invalid base64 data") from error
+    if not decoded:
+        raise ValueError("avatar image is empty")
+    return normalized
 
 
 class GroupModel(BaseModel):
@@ -150,6 +180,7 @@ class CreateRoomRequest(GroupModel):
     name: str = Field(min_length=1, max_length=100)
     cwd: str = Field(default="", max_length=4096)
     instructions: str = Field(default="", max_length=MAX_ROOM_INSTRUCTIONS_LENGTH)
+    avatar: str = Field(default="", max_length=MAX_ROOM_AVATAR_LENGTH)
     max_reply_rounds: StrictInt = Field(
         default=DEFAULT_MAX_REPLY_ROUNDS, alias="maxReplyRounds"
     )
@@ -168,6 +199,11 @@ class CreateRoomRequest(GroupModel):
     def normalize_instructions(cls, value: str) -> str:
         return normalize_room_instructions(value)
 
+    @field_validator("avatar")
+    @classmethod
+    def normalize_avatar(cls, value: str) -> str:
+        return normalize_room_avatar(value)
+
     @model_validator(mode="after")
     def validate_unique_host(self) -> "CreateRoomRequest":
         if sum(agent.is_host for agent in self.agents) > 1:
@@ -182,13 +218,14 @@ class UpdateRoomRequest(GroupModel):
     instructions: str | None = Field(
         default=None, max_length=MAX_ROOM_INSTRUCTIONS_LENGTH
     )
+    avatar: str | None = Field(default=None, max_length=MAX_ROOM_AVATAR_LENGTH)
     max_reply_rounds: StrictInt | None = Field(default=None, alias="maxReplyRounds")
     orchestration_mode: Literal["free", "host"] | None = Field(
         default=None, alias="orchestrationMode"
     )
 
     @field_validator(
-        "name", "cwd", "instructions", "max_reply_rounds", "orchestration_mode",
+        "name", "cwd", "instructions", "avatar", "max_reply_rounds", "orchestration_mode",
         mode="before"
     )
     @classmethod
@@ -200,11 +237,11 @@ class UpdateRoomRequest(GroupModel):
     @model_validator(mode="after")
     def require_change(self) -> "UpdateRoomRequest":
         if not (
-            {"name", "cwd", "instructions", "max_reply_rounds", "orchestration_mode"}
+            {"name", "cwd", "instructions", "avatar", "max_reply_rounds", "orchestration_mode"}
             & self.model_fields_set
         ):
             raise ValueError(
-                "Room update requires name, cwd, instructions, maxReplyRounds, or orchestrationMode"
+                "Room update requires name, cwd, instructions, avatar, maxReplyRounds, or orchestrationMode"
             )
         return self
 
@@ -212,6 +249,11 @@ class UpdateRoomRequest(GroupModel):
     @classmethod
     def normalize_instructions(cls, value: str | None) -> str | None:
         return None if value is None else normalize_room_instructions(value)
+
+    @field_validator("avatar")
+    @classmethod
+    def normalize_avatar(cls, value: str | None) -> str | None:
+        return None if value is None else normalize_room_avatar(value)
 
     @field_validator("max_reply_rounds")
     @classmethod

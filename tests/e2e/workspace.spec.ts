@@ -118,6 +118,58 @@ test('uses a floating search dialog for group rooms', async ({ page }) => {
   await expect(searchDialog).toBeHidden()
 })
 
+test('shows the team avatar in the list and automatic avatar controls during creation', async ({ page }) => {
+  await page.getByRole('button', { name: '团队' }).click()
+
+  const roomRow = page.locator('[data-sidebar-id="22222222-2222-4222-8222-222222222222"]')
+  const roomAvatar = roomRow.getByRole('img', { name: '设计与工程协作团队头像' })
+  await expect(roomAvatar).toBeVisible()
+  await expect(roomAvatar.locator('.team-avatar__member')).toHaveCount(2)
+  await expect(roomAvatar).toContainText('夭')
+  await expect(roomAvatar).toContainText('瑶')
+  const avatarGeometry = await roomAvatar.evaluate(element => {
+    const outer = element.getBoundingClientRect()
+    return [...element.querySelectorAll<HTMLElement>('.team-avatar__member')].map(member => {
+      const rect = member.getBoundingClientRect()
+      return { width: rect.width, height: rect.height, outerWidth: outer.width, radius: getComputedStyle(member).borderRadius }
+    })
+  })
+  expect(avatarGeometry).toHaveLength(2)
+  for (const member of avatarGeometry) {
+    expect(member.width).toBeLessThan(member.outerWidth * .75)
+    expect(member.height).toBe(member.width)
+    expect(member.radius).toBe('50%')
+  }
+
+  await page.getByRole('button', { name: '新建团队' }).click()
+  const dialog = page.getByRole('dialog', { name: '新建团队' })
+  await expect(dialog.getByText('自动组合已选 Agent 的头像')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '上传图片' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '自动生成' })).toBeVisible()
+  await dialog.locator('input[type="file"]').setInputFiles('public/brand/AppIcon-1024.png')
+  await expect(dialog.getByText('使用上传的图片')).toBeVisible()
+  await expect(dialog.getByRole('img', { name: '团队团队头像' }).locator('img')).toBeVisible()
+})
+
+test('updates an existing team avatar from the Web manager', async ({ page }) => {
+  await page.getByRole('button', { name: '团队' }).click()
+  await page.getByRole('button', { name: '管理团队' }).click()
+
+  const manager = page.locator('.group-manager')
+  const preview = manager.getByRole('img', { name: '设计与工程协作团队头像' })
+  await expect(preview).toHaveCSS('border-radius', '50%')
+  const uploadRequest = page.waitForRequest(request => request.method() === 'PATCH' && request.url().endsWith('/rooms/22222222-2222-4222-8222-222222222222'))
+  await manager.locator('input[type="file"]').setInputFiles('public/brand/AppIcon-1024.png')
+  expect((await uploadRequest).postDataJSON().avatar).toMatch(/^data:image\/png;base64,/)
+  await expect(manager.getByText('使用上传的图片')).toBeVisible()
+  await expect(preview.locator('img')).toBeVisible()
+
+  const automaticRequest = page.waitForRequest(request => request.method() === 'PATCH' && request.url().endsWith('/rooms/22222222-2222-4222-8222-222222222222'))
+  await manager.getByRole('button', { name: '自动生成' }).click()
+  expect((await automaticRequest).postDataJSON()).toMatchObject({ avatar: '' })
+  await expect(manager.getByText('自动组合当前 Agent 头像')).toBeVisible()
+})
+
 test('selects one protocol v5 host independently from no-mention replies', async ({ page }) => {
   await page.getByRole('button', { name: '团队' }).click()
   await expect(page.locator('.group-host-chip')).toHaveText('主持人 夭夭')

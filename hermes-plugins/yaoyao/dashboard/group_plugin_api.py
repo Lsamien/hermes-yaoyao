@@ -1071,6 +1071,8 @@ def _create_room_command(request: CreateRoomRequest) -> dict[str, object]:
         command.pop("orchestrationMode", None)
     if "instructions" not in request.model_fields_set:
         command.pop("instructions", None)
+    if "avatar" not in request.model_fields_set:
+        command.pop("avatar", None)
     agents = command.get("agents")
     if isinstance(agents, list):
         for seed, item in zip(request.agents, agents):
@@ -1135,7 +1137,7 @@ async def capabilities() -> dict[str, object]:
         "limits": limits_payload(),
         "eventTypes": sorted(EVENT_TYPES),
         "features": [
-            "hostFlow", "roomInstructions", "nodeWorker", "nodeRegistry"
+            "hostFlow", "roomInstructions", "roomAvatar", "nodeWorker", "nodeRegistry"
         ],
     }
 

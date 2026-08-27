@@ -24,6 +24,7 @@ export type UiRoom = {
   name: string
   description?: string
   instructions?: string
+  avatar?: string
   archived?: boolean
   memberIds?: string[]
   autoReply?: boolean

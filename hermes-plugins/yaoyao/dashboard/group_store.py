@@ -40,11 +40,12 @@ from .group_protocol import (
     normalize_max_reply_rounds,
     normalize_room_cwd,
     normalize_room_instructions,
+    normalize_room_avatar,
     normalize_room_name,
 )
 
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 _WAL_RETRY_DELAYS = (0.01, 0.02, 0.04, 0.08)
 EVENT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 MIN_RETAINED_EVENTS = 100_000
@@ -116,6 +117,7 @@ _SCHEMA_STATEMENTS = (
         name TEXT NOT NULL,
         cwd TEXT NOT NULL DEFAULT '',
         instructions TEXT NOT NULL DEFAULT '',
+        avatar_data_url TEXT NOT NULL DEFAULT '',
         max_reply_rounds INTEGER NOT NULL DEFAULT 3,
         orchestration_mode TEXT NOT NULL DEFAULT 'free',
         created_at REAL NOT NULL,
@@ -505,6 +507,9 @@ class GroupStore:
             raw_version = "12"
         if raw_version == "12":
             self._migrate_v12_to_v13(connection)
+            raw_version = "13"
+        if raw_version == "13":
+            self._migrate_v13_to_v14(connection)
         self._validated_schema_version(
             self._metadata_value_from_connection(connection, "schema_version")
         )
@@ -1275,10 +1280,25 @@ class GroupStore:
         )
 
     @staticmethod
+    def _migrate_v13_to_v14(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(group_rooms)")
+        }
+        if "avatar_data_url" not in columns:
+            connection.execute(
+                "ALTER TABLE group_rooms ADD COLUMN avatar_data_url "
+                "TEXT NOT NULL DEFAULT ''"
+            )
+        connection.execute(
+            "UPDATE group_meta SET value = '14' WHERE key = 'schema_version'"
+        )
+
+    @staticmethod
     def _validate_v8_columns(connection: sqlite3.Connection) -> None:
         expected_columns = {
             "group_meta": {"key", "value"},
-            "group_rooms": {"id", "name", "cwd", "instructions", "max_reply_rounds", "orchestration_mode", "created_at", "updated_at", "archived"},
+            "group_rooms": {"id", "name", "cwd", "instructions", "avatar_data_url", "max_reply_rounds", "orchestration_mode", "created_at", "updated_at", "archived"},
             "group_topics": {"id", "room_id", "title", "last_read_message_seq", "created_at", "updated_at", "archived", "pinned"},
             "group_agents": {"id", "room_id", "profile", "node_id", "node_label", "execution_profile", "display_name", "display_name_key", "description", "stored_session_id", "last_context_message_seq", "enabled", "reply_without_mention", "is_host", "model_override", "provider_override", "reasoning_effort_override", "fast_mode_override", "session_config_json", "created_at", "updated_at"},
             "group_agent_topic_state": {"agent_id", "topic_id", "last_context_message_seq", "created_at", "updated_at"},
@@ -1292,6 +1312,7 @@ class GroupStore:
             ("group_rooms", "max_reply_rounds"): ("INTEGER", 1, "3"),
             ("group_rooms", "orchestration_mode"): ("TEXT", 1, "'free'"),
             ("group_rooms", "instructions"): ("TEXT", 1, "''"),
+            ("group_rooms", "avatar_data_url"): ("TEXT", 1, "''"),
             ("group_agents", "reply_without_mention"): ("INTEGER", 1, "0"),
             ("group_agents", "is_host"): ("INTEGER", 1, "0"),
             ("group_agents", "node_id"): ("TEXT", 1, "'local'"),
@@ -1749,6 +1770,7 @@ class GroupStore:
                 "name",
                 "cwd",
                 "instructions",
+                "avatar",
                 "maxReplyRounds",
                 "orchestrationMode",
                 "agents",
@@ -1762,6 +1784,7 @@ class GroupStore:
             instructions = normalize_room_instructions(
                 command.get("instructions", "")
             )
+            avatar = normalize_room_avatar(command.get("avatar", ""))
             max_reply_rounds = normalize_max_reply_rounds(
                 command.get("maxReplyRounds", DEFAULT_MAX_REPLY_ROUNDS)
             )
@@ -1773,11 +1796,11 @@ class GroupStore:
             room_id = str(uuid.uuid4())
             connection.execute(
                 """INSERT INTO group_rooms
-                (id, name, cwd, instructions, max_reply_rounds, orchestration_mode,
+                (id, name, cwd, instructions, avatar_data_url, max_reply_rounds, orchestration_mode,
                  created_at, updated_at, archived)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
                 (
-                    room_id, name, cwd, instructions, max_reply_rounds,
+                    room_id, name, cwd, instructions, avatar, max_reply_rounds,
                     orchestration_mode, now, now,
                 ),
             )
@@ -1853,7 +1876,7 @@ class GroupStore:
         ):
             raise ValueError("limit must be an integer from 1 to 100")
         cursor_values = self._decode_cursor(cursor) if cursor is not None else None
-        query = """SELECT id, name, cwd, instructions, max_reply_rounds, orchestration_mode,
+        query = """SELECT id, name, cwd, instructions, avatar_data_url, max_reply_rounds, orchestration_mode,
             created_at, updated_at, archived,
             (SELECT COUNT(*) FROM group_agents WHERE room_id = group_rooms.id) AS agent_count,
             (SELECT COUNT(*) FROM group_topics WHERE room_id = group_rooms.id) AS topic_count
@@ -1868,7 +1891,9 @@ class GroupStore:
             rows = connection.execute(query, params).fetchall()
             items = []
             for row in rows[:limit]:
-                summary = self._room_summary(row)
+                summary = self._room_summary(
+                    row, self._room_avatar_members(connection, str(row["id"]))
+                )
                 activity = self._room_activity_from_connection(
                     connection, str(row["id"])
                 )
@@ -2005,7 +2030,7 @@ class GroupStore:
         command = self._command(
             command,
             {
-                "requestId", "name", "cwd", "instructions",
+                "requestId", "name", "cwd", "instructions", "avatar",
                 "maxReplyRounds", "orchestrationMode",
             },
         )
@@ -2013,13 +2038,13 @@ class GroupStore:
         changes = {
             key
             for key in (
-                "name", "cwd", "instructions", "maxReplyRounds", "orchestrationMode"
+                "name", "cwd", "instructions", "avatar", "maxReplyRounds", "orchestrationMode"
             )
             if key in command
         }
         if not changes:
             raise ValueError(
-                "Room update requires name, cwd, instructions, maxReplyRounds, or orchestrationMode"
+                "Room update requires name, cwd, instructions, avatar, maxReplyRounds, or orchestrationMode"
             )
 
         def action(connection: sqlite3.Connection) -> dict[str, object]:
@@ -2035,6 +2060,9 @@ class GroupStore:
             if "instructions" in changes:
                 assignments.append("instructions = ?")
                 values.append(normalize_room_instructions(command["instructions"]))
+            if "avatar" in changes:
+                assignments.append("avatar_data_url = ?")
+                values.append(normalize_room_avatar(command["avatar"]))
             if "maxReplyRounds" in changes:
                 assignments.append("max_reply_rounds = ?")
                 values.append(normalize_max_reply_rounds(command["maxReplyRounds"]))
@@ -5872,7 +5900,7 @@ class GroupStore:
         created_at: float,
     ) -> None:
         room = connection.execute(
-            """SELECT id, name, cwd, instructions, max_reply_rounds, orchestration_mode,
+            """SELECT id, name, cwd, instructions, avatar_data_url, max_reply_rounds, orchestration_mode,
             created_at, updated_at, archived,
             (SELECT COUNT(*) FROM group_agents WHERE room_id = group_rooms.id)
                 AS agent_count,
@@ -5887,7 +5915,9 @@ class GroupStore:
             connection,
             room_id,
             "room.updated",
-            self._room_summary(room),
+            self._room_summary(
+                room, self._room_avatar_members(connection, room_id)
+            ),
             created_at=created_at,
         )
 
@@ -5905,6 +5935,9 @@ class GroupStore:
         ).fetchall()
         result = self._room_wire(room)
         result["agents"] = [self._agent_wire(agent) for agent in agents]
+        result["avatarMembers"] = [
+            self._avatar_member_wire(agent) for agent in agents[:4]
+        ]
         return result
 
     def prepare_run_session_configuration(
@@ -6905,6 +6938,7 @@ class GroupStore:
             "name": row["name"],
             "cwd": row["cwd"],
             "instructions": row["instructions"],
+            "avatar": row["avatar_data_url"],
             "maxReplyRounds": row["max_reply_rounds"],
             "orchestrationMode": row["orchestration_mode"],
             "createdAt": row["created_at"],
@@ -6913,12 +6947,17 @@ class GroupStore:
         }
 
     @staticmethod
-    def _room_summary(row: sqlite3.Row) -> dict[str, object]:
+    def _room_summary(
+        row: sqlite3.Row,
+        avatar_members: list[dict[str, object]] | None = None,
+    ) -> dict[str, object]:
         return {
             "id": row["id"],
             "name": row["name"],
             "cwd": row["cwd"],
             "instructions": row["instructions"],
+            "avatar": row["avatar_data_url"],
+            "avatarMembers": avatar_members or [],
             "maxReplyRounds": row["max_reply_rounds"],
             "orchestrationMode": row["orchestration_mode"],
             "createdAt": row["created_at"],
@@ -6927,6 +6966,24 @@ class GroupStore:
             "agentCount": row["agent_count"],
             "topicCount": row["topic_count"],
         }
+
+    @staticmethod
+    def _avatar_member_wire(row: sqlite3.Row) -> dict[str, object]:
+        return {
+            "profile": row["execution_profile"] or row["profile"],
+            "nodeId": row["node_id"],
+            "displayName": row["display_name"],
+        }
+
+    def _room_avatar_members(
+        self, connection: sqlite3.Connection, room_id: str
+    ) -> list[dict[str, object]]:
+        rows = connection.execute(
+            """SELECT profile, execution_profile, node_id, display_name FROM group_agents
+            WHERE room_id = ? ORDER BY created_at ASC, id ASC LIMIT 4""",
+            (room_id,),
+        ).fetchall()
+        return [self._avatar_member_wire(row) for row in rows]
 
     @staticmethod
     def _topic_summary(row: sqlite3.Row) -> dict[str, object]:

@@ -82,7 +82,8 @@ const groupTopics = [
   { id: releaseTopicId, roomId, title: '发布检查', preview: releaseTopicMessage.content, messageCount: 1, unreadCount: 0, latestMessageSeq: 3, createdAt: now() - 500, updatedAt: now() - 500 },
 ]
 let nextGroupSeq = 4
-const room = { id: roomId, name: '设计与工程协作', cwd: '/tmp', createdAt: now() - 2000, updatedAt: now(), archived: false, agentCount: groupAgents.length, maxReplyRounds: -1, lastMessage: groupAssistantMessage, unreadCount: 1, activeRunCount: 0 }
+const avatarMembers = groupAgents.map(agent => ({ profile: agent.profile, nodeId: 'local', displayName: agent.displayName }))
+const room = { id: roomId, name: '设计与工程协作', avatar: '', avatarMembers, cwd: '/tmp', createdAt: now() - 2000, updatedAt: now(), archived: false, agentCount: groupAgents.length, maxReplyRounds: -1, lastMessage: groupAssistantMessage, unreadCount: 1, activeRunCount: 0 }
 const rpcRequests = []
 const previewPdf = Buffer.from('JVBERi0xLjQKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFnZXMgMiAwIFI+PgplbmRvYmoKMiAwIG9iago8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PgplbmRvYmoKMyAwIG9iago8PC9UeXBlL1BhZ2UvUGFyZW50IDIgMCBSL01lZGlhQm94WzAgMCAyMDAgMjAwXT4+CmVuZG9iagp4cmVmCjAgNAowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTAgMDAwMDAgbiAKMDAwMDAwMDA1MyAwMDAwMCBuIAowMDAwMDAwMTA1IDAwMDAwIG4gCnRyYWlsZXIKPDwvU2l6ZSA0L1Jvb3QgMSAwIFI+PgpzdGFydHhyZWYKMTY2CiUlRU9G', 'base64')
 
@@ -143,10 +144,19 @@ const server = createServer(async (request, response) => {
     return session ? json(response, 200, session) : json(response, 404, { detail: 'Not found' })
   }
   if (url.pathname === '/api/session-unread') return json(response, 200, { items: { 'session-demo': 0 } })
-  if (url.pathname === '/api/plugins/yaoyao/v1/capabilities') return json(response, 200, { protocolVersion: 8, journalEpoch: epoch, latestCursor: groupCursor, limits: { maxAgentsPerRoom: 8, maxMessageBytes: 65536, maxMessagePageSize: 100, defaultMaxReplyRounds: 3, unlimitedReplyRoundsValue: -1, maxAgentDisplayNameLength: 100 }, eventTypes: ['message.upsert', 'topic.updated', 'room.activity', 'run.updated', 'agent.status', 'agent.updated'] })
+  if (url.pathname === '/api/plugins/yaoyao/v1/capabilities') return json(response, 200, { protocolVersion: 12, journalEpoch: epoch, latestCursor: groupCursor, limits: { maxAgentsPerRoom: 8, maxMessageBytes: 65536, maxMessagePageSize: 100, defaultMaxReplyRounds: 3, unlimitedReplyRoundsValue: -1, maxAgentDisplayNameLength: 100, maxRoomAvatarLength: 524288 }, features: ['roomAvatar'], eventTypes: ['message.upsert', 'topic.updated', 'room.activity', 'run.updated', 'agent.status', 'agent.updated'] })
   if (url.pathname === '/api/plugins/yaoyao/v1/topics/pinned') return json(response, 200, { items: groupTopics.filter(topic => topic.pinned), nextCursor: null })
   if (url.pathname === '/api/plugins/yaoyao/v1/rooms') return json(response, 200, { items: [room], nextCursor: null })
-  if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}`) return json(response, 200, { ...room, agents: groupAgents, runs: [], pendingInteractions: [], latestCursor: groupCursor })
+  if (url.pathname === `/api/plugins/yaoyao/v1/rooms/${roomId}`) {
+    if (request.method === 'PATCH') {
+      const input = await body(request)
+      for (const key of ['name', 'cwd', 'instructions', 'avatar', 'maxReplyRounds', 'orchestrationMode']) {
+        if (Object.prototype.hasOwnProperty.call(input, key)) room[key] = input[key]
+      }
+      room.updatedAt = now()
+    }
+    return json(response, 200, { ...room, agents: groupAgents, runs: [], pendingInteractions: [], latestCursor: groupCursor })
+  }
   const agentPatchMatch = new RegExp(`^/api/plugins/yaoyao/v1/rooms/${roomId}/agents/([^/]+)$`).exec(url.pathname)
   if (agentPatchMatch && request.method === 'PATCH') {
     const target = groupAgents.find(agent => agent.id === decodeURIComponent(agentPatchMatch[1]))

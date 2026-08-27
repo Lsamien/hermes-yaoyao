@@ -110,13 +110,13 @@ export interface AgentSeed {
   fastMode?: boolean | null
 }
 
-export async function createGroupRoom(input: { name: string; cwd?: string; instructions?: string; agents: AgentSeed[]; maxReplyRounds?: number; orchestrationMode?: 'free' | 'host' }): Promise<GroupRoomDetail> {
+export async function createGroupRoom(input: { name: string; cwd?: string; instructions?: string; avatar?: string; agents: AgentSeed[]; maxReplyRounds?: number; orchestrationMode?: 'free' | 'host' }): Promise<GroupRoomDetail> {
   return normalizeGroupRoomDetail(unwrapData(await apiRequest<unknown>(`${BASE}/rooms`, {
     method: 'POST', body: { requestId: requestId(), cwd: '', maxReplyRounds: 3, ...input } as unknown as JsonValue,
   })))
 }
 
-export async function updateGroupRoom(roomId: string, input: { name?: string; cwd?: string; instructions?: string; maxReplyRounds?: number; orchestrationMode?: 'free' | 'host' }): Promise<GroupRoomDetail> {
+export async function updateGroupRoom(roomId: string, input: { name?: string; cwd?: string; instructions?: string; avatar?: string; maxReplyRounds?: number; orchestrationMode?: 'free' | 'host' }): Promise<GroupRoomDetail> {
   return normalizeGroupRoomDetail(unwrapData(await apiRequest<unknown>(`${BASE}/rooms/${encodeURIComponent(roomId)}`, {
     method: 'PATCH', body: { requestId: requestId(), ...input } as JsonValue,
   })))

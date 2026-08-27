@@ -3,6 +3,8 @@ import { computed, reactive, ref, watch } from 'vue'
 import type { GroupAgent, ModelOption } from '@shared/types'
 import AppIcon from '@/components/common/AppIcon.vue'
 import AgentAvatar from '@/components/common/AgentAvatar.vue'
+import TeamAvatar from '@/components/common/TeamAvatar.vue'
+import { processTeamAvatarFile } from '@/utils/teamAvatar'
 import type { UiRoom } from './types'
 import type { GroupProfileOption } from './types'
 
@@ -39,6 +41,7 @@ const props = withDefaults(defineProps<{
   hostEnabled?: boolean
   hostFlowEnabled?: boolean
   roomInstructionsEnabled?: boolean
+  avatarEnabled?: boolean
   availableProfiles?: GroupProfileOption[]
   modelOptionsByProfile?: Record<string, ModelOption[]>
   modelOptionsLoading?: Record<string, boolean>
@@ -48,7 +51,7 @@ const props = withDefaults(defineProps<{
   agentAvatars?: Record<string, string>
   managerError?: string
   busy?: boolean
-}>(), { hostEnabled: false, hostFlowEnabled: false, roomInstructionsEnabled: false, busy: false, agentAvatars: () => ({}) })
+}>(), { hostEnabled: false, hostFlowEnabled: false, roomInstructionsEnabled: false, avatarEnabled: false, busy: false, agentAvatars: () => ({}) })
 
 const emit = defineEmits<{
   updateRoom: [patch: Partial<UiRoom>]
@@ -64,15 +67,22 @@ const emit = defineEmits<{
 const form = reactive({
   name: props.room.name,
   instructions: props.room.instructions ?? '',
+  avatar: props.room.avatar ?? '',
   replyRounds: props.room.replyRounds ?? 3,
   orchestrationMode: props.room.orchestrationMode ?? 'free' as 'free' | 'host',
 })
 const expandedAgentId = ref('')
+const avatarInput = ref<HTMLInputElement>()
+const avatarError = ref('')
 const agentDrafts = reactive<Record<string, AgentDraft>>({})
 const dirtyAgents = reactive(new Set<string>())
 const selectedAgent = computed(() => props.agents.find(agent => agent.id === expandedAgentId.value))
 const hostAgent = computed(() => props.agents.find(agent => agent.isHost))
 const hasActiveAgents = computed(() => props.agents.some(agent => ['queued', 'running', 'awaiting_input'].includes(agent.status)))
+const avatarMembers = computed(() => props.agents.slice(0, 4).map(agent => ({
+  name: agent.displayName || agent.profile,
+  avatar: agent.nodeId === 'local' ? props.agentAvatars[agent.profile] : undefined,
+})))
 
 function modelKey(provider?: string | null, model?: string | null): string {
   return provider && model ? JSON.stringify([provider, model]) : ''
@@ -104,6 +114,7 @@ function draftFrom(agent: GroupAgent): AgentDraft {
 watch(() => props.room, room => {
   form.name = room.name
   form.instructions = room.instructions ?? ''
+  form.avatar = room.avatar ?? ''
   form.replyRounds = room.replyRounds ?? 3
   form.orchestrationMode = room.orchestrationMode ?? 'free'
 }, { deep: true })
@@ -127,9 +138,31 @@ function saveRoom() {
   emit('updateRoom', {
     name: form.name.trim() || props.room.name,
     ...(props.roomInstructionsEnabled ? { instructions: form.instructions.trim() } : {}),
+    ...(props.avatarEnabled ? { avatar: form.avatar } : {}),
     replyRounds: replyRounds === -1 ? -1 : Math.min(100, Math.max(1, replyRounds || 1)),
     ...(props.hostFlowEnabled ? { orchestrationMode: form.orchestrationMode } : {}),
   })
+}
+
+async function chooseAvatar(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    form.avatar = await processTeamAvatarFile(file)
+    avatarError.value = ''
+    saveRoom()
+  } catch (cause) {
+    avatarError.value = cause instanceof Error ? cause.message : '处理头像失败'
+  } finally {
+    input.value = ''
+  }
+}
+
+function useAutomaticAvatar() {
+  form.avatar = ''
+  avatarError.value = ''
+  saveRoom()
 }
 
 function selectHost(event: Event) {
@@ -224,6 +257,19 @@ function statusLabel(status: GroupAgent['status']): string {
     <section>
       <h3>团队设置</h3>
       <label><span>名称</span><input v-model="form.name" maxlength="80" @change="saveRoom" /></label>
+      <div v-if="avatarEnabled" class="team-avatar-setting">
+        <TeamAvatar :name="room.name" :avatar="form.avatar" :members="avatarMembers" :size="52" />
+        <div>
+          <strong>团队头像</strong>
+          <small>{{ form.avatar ? '使用上传的图片' : '自动组合当前 Agent 头像' }}</small>
+          <span>
+            <button class="quiet-button" type="button" :disabled="busy || !form.avatar" @click="useAutomaticAvatar">自动生成</button>
+            <button class="quiet-button" type="button" :disabled="busy" @click="avatarInput?.click()"><AppIcon name="image" :size="14" />上传图片</button>
+          </span>
+        </div>
+        <input ref="avatarInput" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" @change="chooseAvatar" />
+      </div>
+      <p v-if="avatarError" class="avatar-error" role="alert">{{ avatarError }}</p>
       <label v-if="roomInstructionsEnabled"><span>说明<small>所有 Agent 都会在回复前查阅，可填写协作规则和形式准则。</small></span><textarea v-model="form.instructions" maxlength="4000" rows="5" aria-label="团队说明" placeholder="例如：先核对事实；结论使用中文；发布前等待确认。" @change="saveRoom" /></label>
       <label class="rounds"><span>最多回复轮数<small>-1 表示无限</small></span><input v-model.number="form.replyRounds" type="number" min="-1" max="100" aria-label="最多回复轮数" @change="saveRoom" /></label>
       <label v-if="hostFlowEnabled" class="flow-mode">
@@ -332,6 +378,7 @@ section { padding: 17px 0; border-top: 1px solid var(--line); } section:first-of
 h3 { margin: 0 0 13px; color: var(--text-secondary); font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; } h3 em { color: var(--text-muted); font-style: normal; font-weight: 500; }
 label { display: flex; flex-direction: column; gap: 5px; margin: 0 0 11px; color: var(--text-muted); font-size: 10px; }
 input, textarea, select { width: 100%; padding: 8px 9px; border: 1px solid var(--line); border-radius: 9px; outline: 0; resize: vertical; background: var(--surface-soft); color: var(--text-primary); font-size: 11px; } input:focus, textarea:focus, select:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }
+.team-avatar-setting { display: flex; align-items: center; gap: 12px; margin: 0 0 13px; padding: 10px; border-radius: 11px; background: var(--surface-soft); }.team-avatar-setting > div { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }.team-avatar-setting strong { color: var(--text-secondary); font-size: 10px; }.team-avatar-setting small { color: var(--text-muted); font-size: 9px; }.team-avatar-setting span { display: flex; gap: 6px; margin-top: 4px; }.team-avatar-setting .quiet-button { display: inline-flex; min-height: 28px; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--text-secondary); cursor: pointer; font-size: 9px; }.team-avatar-setting .quiet-button:disabled { cursor: not-allowed; opacity: .4; }.avatar-error { margin: -7px 0 11px; color: var(--danger); font-size: 9px; }.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .rounds { flex-direction: row; align-items: center; justify-content: space-between; }.rounds > span { display: flex; flex-direction: column; gap: 2px; }.rounds small { color: var(--text-muted); font-size: 9px; }.rounds input { width: 62px; text-align: center; }
 .flow-mode { display: grid; grid-template-columns: minmax(0, 1fr) 128px; align-items: center; gap: 10px; }.flow-mode > span { display: flex; flex-direction: column; gap: 2px; color: var(--text-secondary); font-weight: 650; }.flow-mode small { color: var(--text-muted); font-size: 9px; font-weight: 400; line-height: 1.4; }.flow-mode select { margin: 0; padding: 7px 8px; background: var(--surface); }
 .host-selector { display: grid; grid-template-columns: minmax(0, 1fr) 128px; align-items: center; gap: 10px; margin-bottom: 10px; padding: 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }.host-selector > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; color: var(--text-secondary); font-weight: 650; }.host-selector small { color: var(--text-muted); font-size: 9px; font-weight: 400; line-height: 1.4; }.host-selector select { padding: 7px 8px; background: var(--surface); }
@@ -339,7 +386,7 @@ input, textarea, select { width: 100%; padding: 8px 9px; border: 1px solid var(-
 .agent-avatar { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: transparent; color: var(--text-secondary); font-size: 10px; font-weight: 700; }.agent-avatar i { position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; border: 2px solid var(--surface-soft); border-radius: 50%; background: var(--text-muted); }.agent-avatar .status-running, .agent-avatar .status-queued { background: var(--warning); }.agent-avatar .status-idle { background: var(--success); }.agent-avatar .status-awaiting_input { background: var(--warning); }
 .agent-copy { display: flex; min-width: 0; flex-direction: column; }.agent-name-line, .settings-agent-name { display: flex; min-width: 0; align-items: center; gap: 5px; }.agent-copy strong, .agent-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.agent-copy strong { min-width: 0; font-size: 11px; }.agent-copy small { margin-top: 2px; color: var(--text-muted); font-size: 9px; }.host-badge { flex: 0 0 auto; padding: 2px 5px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 999px; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--accent); font-size: 8px; font-style: normal; font-weight: 650; line-height: 1.2; }
 .agent-action { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); cursor: pointer; }.agent-action:hover { background: var(--surface-hover); color: var(--text-primary); }.agent-action.danger:hover { color: var(--danger); }.agent-action:disabled { cursor: not-allowed; opacity: .25; }
-.agent-settings-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--text-primary) 24%, transparent); }.agent-settings-dialog { width: min(100%, 520px); max-height: min(720px, calc(100vh - 48px)); overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: 0 24px 72px color-mix(in srgb, var(--text-primary) 24%, transparent); }.agent-settings-dialog header { min-height: 68px; padding: 0 20px; border-bottom: 1px solid var(--line); border-radius: 16px 16px 0 0; }.agent-settings-close { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }.agent-settings-close:hover { background: var(--surface-hover); color: var(--text-primary); }.agent-editor { display: block; min-width: 0; margin: 0; padding: 20px; border: 0; }.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }.editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }.editor-grid > label:nth-child(1), .editor-grid > label:nth-child(2) { grid-column: 1 / -1; }.editor-grid label:last-child { margin-bottom: 7px; }.editor-note { margin: -1px 2px 0; color: var(--text-muted); font-size: 9px; }.editor-note.error { color: var(--danger); }
+.agent-settings-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--text-primary) 24%, transparent); }.agent-settings-dialog { width: min(100%, 520px); max-height: min(720px, calc(100vh - 48px)); overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: 0 24px 72px color-mix(in srgb, var(--text-primary) 24%, transparent); }.agent-settings-dialog header { min-height: 68px; padding: 0 20px; border-bottom: 1px solid var(--line); border-radius: 16px 16px 0 0; }.agent-settings-close { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }.agent-settings-close:hover { background: var(--surface-hover); color: var(--text-primary); }.agent-editor { display: block; min-width: 0; margin: 0; padding: 20px; border: 0; }.editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }.editor-grid > label:nth-child(1), .editor-grid > label:nth-child(2) { grid-column: 1 / -1; }.editor-grid label:last-child { margin-bottom: 7px; }.editor-note { margin: -1px 2px 0; color: var(--text-muted); font-size: 9px; }.editor-note.error { color: var(--danger); }
 .editor-toggles { display: flex; align-items: center; gap: 16px; padding: 3px 0 12px; }.editor-toggles label { display: flex; flex-direction: row; align-items: center; gap: 5px; margin: 0; color: var(--text-secondary); }.editor-toggles input { width: auto; margin: 0; accent-color: var(--accent); }
 .remote-agent-address { margin: 0 0 10px; overflow-wrap: anywhere; color: var(--text-muted); font-size: 9px; line-height: 1.5; }
 .host-explanation { margin: -4px 0 12px; color: var(--text-muted); font-size: 9px; line-height: 1.5; }

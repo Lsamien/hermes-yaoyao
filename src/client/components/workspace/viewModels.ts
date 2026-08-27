@@ -203,7 +203,11 @@ export function chatInteraction(approval?: ApprovalRequest, clarification?: Clar
   return null
 }
 
-export function roomSidebarItem(room: GroupRoomSummary): SidebarItem {
+export function roomSidebarItem(
+  room: GroupRoomSummary,
+  avatars: Record<string, string> = {},
+  avatarsByName: Record<string, string> = {},
+): SidebarItem {
   return {
     id: room.id,
     title: room.name || '未命名团队',
@@ -211,7 +215,11 @@ export function roomSidebarItem(room: GroupRoomSummary): SidebarItem {
     meta: formatRelative(room.updatedAt),
     section: historySection(room.updatedAt),
     unread: room.unreadCount,
-    icon: 'groups',
+    avatar: room.avatar || '',
+    avatarMembers: (room.avatarMembers || []).map(member => ({
+      name: member.displayName || member.profile,
+      avatar: member.nodeId === 'local' ? avatars[member.profile] || avatarsByName[member.displayName] : undefined,
+    })),
   }
 }
 
@@ -282,6 +290,7 @@ export function roomToUi(room: GroupRoomDetail): UiRoom {
     name: room.name,
     archived: room.archived,
     instructions: room.instructions,
+    avatar: room.avatar,
     memberIds: room.agents.map(agent => agent.id),
     replyRounds: room.maxReplyRounds,
     orchestrationMode: room.orchestrationMode,
