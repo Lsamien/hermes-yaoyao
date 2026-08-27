@@ -6,9 +6,9 @@
 
 | 项目 | 版本 | 校验位置 |
 | --- | --- | --- |
-| Git 发布标签 | `v0.2.1` | `release.json` 的 `gitTag` 与 `git describe --tags --exact-match HEAD` |
-| 夭夭 Web | `0.2.1` | `release.json` 与 `package.json` 的 `version` |
-| Hermes Dashboard 插件 | `1.7.1` | `hermes-plugins/yaoyao/dashboard/manifest.json` 的 `version` |
+| Git 发布标签 | `v0.2.5` | `release.json` 的 `gitTag` 与 `git describe --tags --exact-match HEAD` |
+| 夭夭 Web | `0.2.5` | `release.json` 与 `package.json` 的 `version` |
+| Hermes Dashboard 插件 | `1.7.2` | `hermes-plugins/yaoyao/dashboard/manifest.json` 的 `version` |
 
 以下步骤以仓库根目录为工作目录。不要使用浮动分支替代发布标签。
 
@@ -81,13 +81,13 @@ curl --fail --silent --show-error http://127.0.0.1:9119/api/auth/providers
 ## 1. 获取并校验指定发布版本
 
 ```bash
-RELEASE_VERSION=v0.2.1
+RELEASE_VERSION=v0.2.5
 git fetch --tags
 git checkout "$RELEASE_VERSION"
 
 test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_VERSION"
-test "$(node -p \"require('./package.json').version\")" = "0.2.1"
-test "$(node -e \"console.log(require('./hermes-plugins/yaoyao/dashboard/manifest.json').version)\")" = "1.7.1"
+test "$(node -p \"require('./package.json').version\")" = "0.2.5"
+test "$(node -e \"console.log(require('./hermes-plugins/yaoyao/dashboard/manifest.json').version)\")" = "1.7.2"
 npm run release:verify
 ```
 
@@ -117,7 +117,7 @@ test -f "$PLUGIN_DIR/manifest.json"
 test -f "$PLUGIN_DIR/plugin_api.py"
 test -f "$PLUGIN_DIR/group_plugin_api.py"
 test -f "$PLUGIN_DIR/dist/index.js"
-test "$(node -e \"console.log(require(process.argv[1]).version)\" "$PLUGIN_DIR/manifest.json")" = "1.7.1"
+test "$(node -e \"console.log(require(process.argv[1]).version)\" "$PLUGIN_DIR/manifest.json")" = "1.7.2"
 ```
 
 `rsync --delete` 的范围严格限于 `$PLUGIN_DIR`，不会删除其他 Hermes 插件或用户数据。若目标目录已有额外的本机定制文件，应先将其移出目录或改用不带 `--delete` 的同步命令。
@@ -227,7 +227,7 @@ launchctl load -w ~/Library/LaunchAgents/com.samien.hermes-yaoyao.plist
 
 ## 7. 通过受管服务进行配套升级
 
-首次按第 6 步安装 Web `0.2.1` 后，可在左下角 Agent 菜单打开“系统更新”。
+首次按第 6 步安装 Web `0.2.5` 后，可在左下角 Agent 菜单打开“系统更新”。
 检查更新只读取固定的 `HERMES_YAOYAO_RELEASE_SOURCE`，并锁定最新 `vX.Y.Z`
 标签解析到的 Git 提交；执行升级前仍会检查插件持久目录是否安全。
 

@@ -603,7 +603,10 @@ onMounted(async () => {
     const requested = typeof route.params.roomId === 'string' ? route.params.roomId : ''
     const requestedTopic = typeof route.params.topicId === 'string' ? route.params.topicId : undefined
     if (requested) {
-      try { await groups.selectRoom(requested, requestedTopic) }
+      try {
+        await groups.selectRoom(requested, requestedTopic)
+        topicListRoomId.value = requested
+      }
       catch {
         if (groups.selectedRoomId) await router.replace(groupRoute())
         return
@@ -624,8 +627,15 @@ onBeforeUnmount(() => {
 watch(() => [route.params.roomId, route.params.topicId] as const, async ([roomValue, topicValue]) => {
   const roomId = typeof roomValue === 'string' ? roomValue : ''
   const topicId = typeof topicValue === 'string' ? topicValue : undefined
+  if (!roomId) {
+    topicListRoomId.value = null
+    return
+  }
   if (roomId && (roomId !== groups.selectedRoomId || (groups.topicProtocol && topicId && topicId !== groups.selectedTopicId))) {
-    try { await groups.selectRoom(roomId, topicId) }
+    try {
+      await groups.selectRoom(roomId, topicId)
+      topicListRoomId.value = roomId
+    }
     catch { if (groups.selectedRoomId && route.fullPath !== groupRoute()) await router.replace(groupRoute()) }
   }
 })

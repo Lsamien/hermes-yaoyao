@@ -71,7 +71,7 @@ const messages = [
   { id: 'message-system', role: 'user', content: '[System: The active model for this chat has changed to gpt-5.6-terra via provider openai.]', timestamp: now() - 130 },
 ]
 const groupAgent = { id: agentId, roomId, profile: 'yaoyao', displayName: '夭夭', description: '主 Agent', enabled: true, replyWithoutMention: true, isHost: true, model: 'gpt-5.6', provider: 'openai', reasoningEffort: 'high', fastMode: true, status: 'idle', createdAt: now() - 2000, updatedAt: now() }
-const secondGroupAgent = { id: secondAgentId, roomId, profile: 'yaoer', displayName: '瑶儿', description: '评审 Agent', enabled: true, replyWithoutMention: false, isHost: false, model: 'gpt-5.6', provider: 'openai', reasoningEffort: 'medium', fastMode: false, status: 'idle', createdAt: now() - 1900, updatedAt: now() }
+const secondGroupAgent = { id: secondAgentId, roomId, profile: 'yaoer', nodeId: 'remote-node', nodeLabel: '远程节点', displayName: '瑶儿', description: '评审 Agent', enabled: true, replyWithoutMention: false, isHost: false, model: 'gpt-5.6', provider: 'openai', reasoningEffort: 'medium', fastMode: false, status: 'idle', createdAt: now() - 1900, updatedAt: now() }
 const groupAgents = [groupAgent, secondGroupAgent]
 const groupMessage = { seq: 1, id: '44444444-4444-4444-8444-444444444444', roomId, topicId, senderKind: 'human', senderId: 'demo-user', senderName: '验收用户', content: '大家好，检查一下群聊输入框。', status: 'completed', createdAt: now() - 120, updatedAt: now() - 120 }
 const groupAssistantMessage = { seq: 2, id: '55555555-5555-4555-8555-555555555555', roomId, topicId, senderKind: 'agent', senderId: agentId, senderName: '夭夭', content: '历史兼容：MEDIA:/brand/AppIcon-1024.png', status: 'completed', createdAt: now() - 100, updatedAt: now() - 100 }
