@@ -60,14 +60,19 @@ describe('system update routes', () => {
       launchUpdater: path => { launched.push(path) },
       platform: 'darwin',
     })
+    let pluginVersion = '1.7.1'
     const fetchImpl = (async (input: string | URL | Request) => {
       const path = new URL(input instanceof Request ? input.url : String(input)).pathname
       if (path === '/api/status') return json({ auth_required: true }, { headers: { 'set-cookie': 'hermes_session_at=session; Path=/; HttpOnly' } })
       if (path === '/api/auth/me') return json({ user_id: 'admin', display_name: '管理员' })
       if (path === '/api/profiles') return json({ profiles: [{ name: 'default', is_default: true }] })
       if (path === '/api/plugins/yaoyao/profiles') return json({ profiles: [] })
-      if (path === '/api/dashboard/plugins') return json([{ name: 'yaoyao', version: '1.7.1' }])
+      if (path === '/api/dashboard/plugins') return json([{ name: 'yaoyao', version: pluginVersion }])
       if (path === '/api/plugins/yaoyao/maintenance/storage') return json({ ready: true })
+      if (path === '/api/dashboard/agent-plugins/install') {
+        pluginVersion = '1.8.0'
+        return json({ ok: true, plugin_name: 'yaoyao', enabled: true })
+      }
       return json({ ok: true })
     }) as typeof fetch
     const runtime = createApplication({ config, fetchImpl, updates })

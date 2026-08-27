@@ -29,7 +29,6 @@ export interface ApplicationOptions {
   leases?: RealtimeLeaseStore
   pairings?: NodePairingStore
   uploads?: UploadStore
-  restartDashboard?: () => Promise<void>
   updates?: SystemUpdateManager
 }
 
@@ -151,7 +150,6 @@ export function createApplication(options: ApplicationOptions = {}): Application
     pairings,
     uploads,
     updates,
-    restartDashboard: options.restartDashboard,
   })
   app.use(router.routes())
   app.use(router.allowedMethods({ throw: false }))

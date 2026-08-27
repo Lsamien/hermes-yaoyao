@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useGroupsStore } from '@/stores/groups'
 import { useThemeStore } from '@/stores/theme'
+import { reconcileYaoyaoPlugin } from '@/api/systemUpdate'
 
 const auth = useAuthStore()
 const chat = useChatStore()
@@ -32,7 +33,10 @@ watch(() => theme.resolvedTheme, value => {
 watch(pageTitle, value => { document.title = value }, { immediate: true })
 
 watch(() => auth.isAuthenticated, authenticated => {
-  if (authenticated) void chat.connect().catch(() => undefined)
+  if (authenticated) {
+    void reconcileYaoyaoPlugin().catch(() => undefined)
+    void chat.connect().catch(() => undefined)
+  }
 })
 
 onMounted(() => auth.bootstrap())

@@ -1,8 +1,8 @@
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { backupPlugin, currentTarget, enabledPlugins, formatCommandFailure, restorePlugin, switchCurrent, validateManifest } from '../bin/hermes-yaoyao-updater.mjs'
+import { currentTarget, formatCommandFailure, switchCurrent, validateManifest } from '../bin/hermes-yaoyao-updater.mjs'
 
 const roots: string[] = []
 afterEach(() => {
@@ -48,40 +48,4 @@ describe('standalone updater primitives', () => {
     expect(message).not.toContain('\u001B')
   })
 
-  it('requests Hermes plugin configuration as JSON', () => {
-    const calls: Array<{ command: string, args: string[] }> = []
-    const plugins = enabledPlugins((command: string, args: string[]) => {
-      calls.push({ command, args })
-      return '["yaoyao", "other"]\n'
-    })
-
-    expect(plugins).toEqual(['yaoyao', 'other'])
-    expect(calls).toEqual([{
-      command: 'hermes',
-      args: ['config', 'get', '--json', 'plugins.enabled'],
-    }])
-    expect(() => enabledPlugins(() => '- yaoyao\n')).toThrow('未返回有效 JSON')
-  })
-
-  it('backs up and restores plugin code without touching durable plugin data', () => {
-    const root = mkdtempSync(join(tmpdir(), 'hermes-updater-plugin-'))
-    roots.push(root)
-    const hermesHome = join(root, 'hermes')
-    const dataHome = join(root, 'web-data')
-    const dashboard = join(hermesHome, 'plugins', 'yaoyao', 'dashboard')
-    const durable = join(hermesHome, 'plugin-data', 'yaoyao')
-    mkdirSync(dashboard, { recursive: true })
-    mkdirSync(durable, { recursive: true })
-    writeFileSync(join(dashboard, 'manifest.json'), JSON.stringify({ version: '1.7.1' }))
-    writeFileSync(join(dashboard, 'plugin.py'), 'old plugin')
-    writeFileSync(join(hermesHome, 'plugins', 'yaoyao', 'plugin.yaml'), 'version: "1.7.1"\n')
-    writeFileSync(join(durable, 'archive.db'), 'durable data')
-
-    const backup = backupPlugin({ hermesHome, dataHome }, '11111111-1111-4111-8111-111111111111')
-    writeFileSync(join(dashboard, 'plugin.py'), 'new plugin')
-    restorePlugin(backup.pluginRoot, backup.backupRoot, 'restore', true)
-
-    expect(readFileSync(join(dashboard, 'plugin.py'), 'utf8')).toBe('old plugin')
-    expect(readFileSync(join(durable, 'archive.db'), 'utf8')).toBe('durable data')
-  })
 })

@@ -49,8 +49,6 @@ export interface UpdateJob {
 interface UpdatePlan {
   source: string
   releaseRoot: string
-  dataHome: string
-  hermesHome: string
   previousServiceRoot: string
   target?: ReleaseManifest
   targetCommit?: string
@@ -333,8 +331,6 @@ export class SystemUpdateManager {
       plan: {
         source: this.releaseSource,
         releaseRoot: this.releaseRoot,
-        dataHome: this.config.home,
-        hermesHome: resolve(process.env.HERMES_HOME?.trim() || join(homedir(), '.hermes')),
         previousServiceRoot: this.projectRoot,
         target,
         targetCommit,

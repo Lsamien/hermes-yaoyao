@@ -61,7 +61,7 @@ async function poll(next: UpdateJob) {
 
 async function applyUpdate() {
   const target = status.value?.latest
-  if (!target || !window.confirm(`升级到 Web ${target.webVersion} + 插件 ${target.pluginVersion}？运行服务会短暂重启。`)) return
+  if (!target || !window.confirm(`升级 Web 到 ${target.webVersion}？插件 ${target.pluginVersion} 将通过 9119 更新。`)) return
   busy.value = true
   error.value = ''
   try {
@@ -74,7 +74,7 @@ async function applyUpdate() {
 }
 
 async function rollback() {
-  if (!window.confirm('回滚到上一次升级前的 Web 与插件版本？运行服务会短暂重启。')) return
+  if (!window.confirm('回滚到上一次 Web 版本？插件继续由 9119 保持最新版本。')) return
   busy.value = true
   error.value = ''
   try {
@@ -111,7 +111,7 @@ onBeforeUnmount(stopPolling)
             <button class="icon-button" type="button" aria-label="关闭系统更新" :disabled="!!active" @click="emit('close')"><AppIcon name="close" /></button>
           </header>
 
-          <p class="system-update-intro">Web 服务与 Hermes Dashboard 插件按兼容组合一起更新；用户数据保留在独立目录中。</p>
+          <p class="system-update-intro">Web 服务独立升级；Hermes Dashboard 插件由 9119 自动更新到最新兼容版本。</p>
           <p v-if="error" class="system-update-error"><AppIcon name="alert" :size="15" />{{ error }}</p>
 
           <section v-if="status" class="version-grid">
@@ -121,7 +121,7 @@ onBeforeUnmount(stopPolling)
             <article><small>配套插件</small><strong>{{ status.latest?.pluginVersion || status.current.pluginVersion }}</strong></article>
           </section>
 
-          <p v-if="status && !status.versionsMatch" class="version-warning"><AppIcon name="alert" :size="14" />当前插件与 Web 发布清单不匹配，升级时会恢复为配套组合。</p>
+          <p v-if="status && !status.versionsMatch" class="version-warning"><AppIcon name="alert" :size="14" />当前插件版本落后，登录后会自动通过 9119 更新。</p>
           <p v-if="status?.installationMode === 'source'" class="mode-note">首次升级会把运行服务迁移到可回滚的版本目录；Git 工作区不会被覆盖。</p>
           <p v-if="status && !status.supported" class="mode-note">{{ status.unsupportedReason }}</p>
 

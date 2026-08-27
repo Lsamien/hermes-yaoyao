@@ -116,7 +116,7 @@ describe('8800 BFF', () => {
     expect(restarted.csrf.verify(cookies, bootstrap.body.csrfToken)).toBe(true)
   })
 
-  it('installs a fresh Yaoyao plugin through authenticated Hermes and restarts supervised 9119', async () => {
+  it('installs a fresh Yaoyao plugin through authenticated 9119 without restarting it', async () => {
     const records: RecordedRequest[] = []
     const baseGateway = fakeGateway(records)
     const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -135,11 +135,9 @@ describe('8800 BFF', () => {
       }
       return baseGateway(input, init)
     }) as typeof fetch
-    let restarts = 0
     const runtime = createApplication({
       config: makeConfig(),
       fetchImpl,
-      restartDashboard: async () => { restarts += 1 },
     })
     runtimes.push(runtime)
     const bootstrap = await request(runtime.app.callback())
@@ -160,13 +158,63 @@ describe('8800 BFF', () => {
       force: false,
       enable: true,
     })
-    expect(restarts).toBe(1)
     expect(response.body).toMatchObject({
       ok: true,
       plugin_name: 'yaoyao',
-      restarted: true,
+      restarted: false,
       restartRequired: false,
     })
+  })
+
+  it('automatically reconciles an older Yaoyao plugin through 9119', async () => {
+    const records: RecordedRequest[] = []
+    const baseGateway = fakeGateway(records)
+    let pluginVersion = '1.7.1'
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      if (url.pathname === '/api/dashboard/plugins') {
+        return jsonResponse([{ name: 'yaoyao', version: pluginVersion }])
+      }
+      if (url.pathname === '/api/plugins/yaoyao/maintenance/storage') {
+        return jsonResponse({ ready: true })
+      }
+      if (url.pathname === '/api/dashboard/agent-plugins/install') {
+        const rawBody = typeof init?.body === 'string' ? init.body : '{}'
+        records.push({
+          path: url.pathname,
+          method: init?.method ?? 'GET',
+          search: url.searchParams,
+          headers: new Headers(init?.headers),
+          body: JSON.parse(rawBody),
+        })
+        pluginVersion = '1.7.2'
+        return jsonResponse({ ok: true, plugin_name: 'yaoyao', enabled: true })
+      }
+      return baseGateway(input, init)
+    }) as typeof fetch
+    const runtime = createApplication({ config: makeConfig(), fetchImpl })
+    runtimes.push(runtime)
+    const bootstrap = await request(runtime.app.callback())
+      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+
+    const response = await request(runtime.app.callback())
+      .post('/api/app/plugins/yaoyao/reconcile')
+      .set('Host', '127.0.0.1:8800')
+      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Cookie', cookieHeader(bootstrap))
+      .set('X-CSRF-Token', bootstrap.body.csrfToken)
+      .send({})
+      .expect(200)
+
+    expect(response.body).toMatchObject({
+      updated: true,
+      installedPluginVersion: '1.7.2',
+      expectedPluginVersion: '1.7.2',
+      restarted: false,
+      restartRequired: false,
+    })
+    expect(records.find(entry => entry.path === '/api/dashboard/agent-plugins/install')?.body)
+      .toMatchObject({ force: true, enable: true })
   })
 
   it('refuses to replace an existing Yaoyao before durable storage is ready', async () => {

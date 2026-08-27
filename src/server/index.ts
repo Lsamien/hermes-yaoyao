@@ -12,9 +12,6 @@ const dashboardSupervisor = config.superviseDashboard
   : undefined
 const runtime = createApplication({
   config,
-  ...(dashboardSupervisor
-    ? { restartDashboard: () => dashboardSupervisor.restart() }
-    : {}),
 })
 const nodeRuntime = createNodeServer(runtime)
 let closeFrontend = async (): Promise<void> => undefined

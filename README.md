@@ -104,14 +104,14 @@ Content-Type: application/json
 接口时，也会返回 `409 yaoyao_storage_migration_required`；此时先按上面的
 `dashboard/` 局部同步方式安装一次当前兼容版本并重启，之后才能使用一键升级。
 
-本机受管部署会在安装后由 8800 重启 9119；未启用 Dashboard 监督或使用远程
-9119 时，响应中的 `restartRequired` 为 `true`，需要由目标环境的服务管理器
-完成重启。
+安装、覆盖、启用和加载均由 9119 自身处理；8800 不重启 9119，也不读写 Hermes
+插件目录。登录 Web 后还会比较发布清单与 9119 的实际插件版本，落后时自动通过
+同一接口更新。
 
 ### Web 与插件配套升级
 
-macOS 受管服务可在左下角 Agent 菜单中打开“系统更新”。它把一个 Git 发布标签
-中的 Web 与 Dashboard 插件视为同一发布单元，版本关系来自 `release.json`。
+macOS 受管服务可在左下角 Agent 菜单中打开“系统更新”。Git 发布标签负责 Web
+版本，`release.json` 同时声明兼容的插件版本；插件本身始终通过 9119 独立同步。
 
 升级接口固定读取 `HERMES_YAOYAO_RELEASE_SOURCE`，只接受发布源中最新的
 `vX.Y.Z` 标签，并在下载后核对标签解析出的 Git 提交和发布清单。浏览器不能传入
@@ -126,10 +126,11 @@ macOS 受管服务可在左下角 Agent 菜单中打开“系统更新”。它�
 └── current -> releases/<版本>-<提交>
 ```
 
-独立 updater 会先下载、构建和备份插件，再停止 8800 与 9119、原子切换插件和
-`current`、重装 LaunchAgent，最后验证 `/healthz`、`/readyz` 和实际插件版本。
-验证失败会自动恢复上一套 Web 与插件；用户数据始终留在
-`~/.hermes-yaoyao` 和 `~/.hermes/plugin-data/yaoyao`，不进入版本目录。
+插件会先由已登录的 Web 会话通过 9119 更新并核对版本。独立 updater 只下载、
+构建和切换 Web 的 `current`，不会停止 9119、调用 `hermes config` 或读写
+`HERMES_HOME`。Web 验证失败时只回滚 Web；插件继续由 9119 保持最新版本。
+用户数据始终留在 `~/.hermes-yaoyao` 和
+`~/.hermes/plugin-data/yaoyao`，不进入版本目录。
 
 相关接口：
 
@@ -213,7 +214,11 @@ node bin/hermes-yaoyao.mjs service uninstall
 
 ## Docker 部署（仅夭夭 Web 8800）
 
-Docker 镜像运行时只启动本项目的夭夭 Web，不安装或监督 Hermes Dashboard。`9119` 必须已经由项目外部的 Hermes 实例提供；Compose 会强制关闭 `HERMES_YAOYAO_SUPERVISE_DASHBOARD`，因此启动、停止或重建 Web 容器都不会操作 9119。为支持离线部署，镜像额外携带插件安装材料，位于 `/opt/hermes-yaoyao-plugin/dashboard`；它不会自行写入另一个 Hermes 容器。
+Docker 镜像运行时只启动本项目的夭夭 Web，不监督或重启 Hermes Dashboard。
+`9119` 必须已经由项目外部的 Hermes 实例提供；Compose 会强制关闭
+`HERMES_YAOYAO_SUPERVISE_DASHBOARD`。用户登录 Web 后，8800 会通过 9119 的
+插件安装接口自动补齐落后的夭夭插件，不会直接操作 Hermes 容器或数据卷。为支持
+离线部署，镜像仍携带 `/opt/hermes-yaoyao-plugin/dashboard` 作为手动安装材料。
 
 复制 Docker 环境示例并启动：
 
@@ -256,7 +261,9 @@ docker compose --env-file docker.env down
 docker compose --env-file docker.env up -d --build
 ```
 
-只有显式执行 `docker compose down --volumes` 才会删除夭夭 Web 的命名卷。Dashboard 插件仍需按前文或 [Agent 安装手册](docs/agent-install.md) 独立安装到外部 Hermes 数据目录。
+只有显式执行 `docker compose down --volumes` 才会删除夭夭 Web 的命名卷。在线
+环境会在登录后通过 9119 自动更新插件；下方手动步骤仅用于离线安装或旧插件缺少
+安全迁移接口的兼容处理。
 
 ### Docker Hermes 容器的插件安装
 

@@ -9,6 +9,7 @@ import type { ServerConfig } from './config.js'
 import { DEFAULT_YAOYAO_PLUGIN_SOURCE, isLoopbackHost, isLoopbackUpstream } from './config.js'
 import { HttpError } from './errors.js'
 import { canonicalEpoch, groupCursor, type RealtimeChannel, RealtimeLeaseStore } from './leases.js'
+import { compareReleaseVersions } from './releases.js'
 import {
   bearerToken,
   DEFAULT_NODE_SCOPES,
@@ -38,7 +39,6 @@ export interface RouteDependencies {
   pairings: NodePairingStore
   uploads: UploadStore
   updates: SystemUpdateManager
-  restartDashboard?: () => Promise<void>
 }
 
 function body(ctx: Koa.Context): JsonObject {
@@ -210,6 +210,83 @@ async function requireYaoyaoStorageReady(
       '检测到旧数据目录冲突，已停止升级以避免覆盖夭夭数据',
       'yaoyao_storage_conflict',
     )
+  }
+}
+
+let yaoyaoReconcileInFlight: Promise<JsonObject> | undefined
+
+function pluginVersionAtLeast(installed: string | undefined, expected: string): boolean {
+  if (!installed) return false
+  try {
+    return compareReleaseVersions(installed, expected) >= 0
+  } catch {
+    return installed === expected
+  }
+}
+
+async function reconcileYaoyaoPlugin(
+  dependencies: RouteDependencies,
+  jar: CookieJar,
+  clientAddress: string | undefined,
+  expectedVersion: string,
+): Promise<JsonObject> {
+  if (yaoyaoReconcileInFlight) return yaoyaoReconcileInFlight
+  const task = (async () => {
+    const installedVersion = await yaoyaoPluginVersion(dependencies, jar)
+    if (pluginVersionAtLeast(installedVersion, expectedVersion)) {
+      return {
+        ok: true,
+        updated: false,
+        installedPluginVersion: installedVersion,
+        expectedPluginVersion: expectedVersion,
+      }
+    }
+
+    await requireYaoyaoStorageReady(dependencies, jar, installedVersion)
+    const pluginSource = dependencies.config.yaoyaoPluginSource
+      ?? DEFAULT_YAOYAO_PLUGIN_SOURCE
+    const installedResult = requireSuccess(await dependencies.upstream.request(
+      '/api/dashboard/agent-plugins/install',
+      jar,
+      {
+        method: 'POST',
+        body: {
+          identifier: pluginSource,
+          force: Boolean(installedVersion),
+          enable: true,
+        },
+        clientAddress,
+      },
+    ))
+
+    let actualVersion: string | undefined
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      actualVersion = await yaoyaoPluginVersion(dependencies, jar)
+      if (pluginVersionAtLeast(actualVersion, expectedVersion)) break
+      await new Promise(resolvePromise => setTimeout(resolvePromise, 250))
+    }
+    if (!pluginVersionAtLeast(actualVersion, expectedVersion)) {
+      throw new HttpError(
+        502,
+        `9119 插件更新后版本仍不匹配：期望 ${expectedVersion}，实际 ${actualVersion || '未安装'}`,
+        'yaoyao_plugin_version_mismatch',
+      )
+    }
+    return {
+      ...installedResult,
+      source: pluginSource,
+      updated: true,
+      installedPluginVersion: actualVersion,
+      expectedPluginVersion: expectedVersion,
+      restarted: false,
+      restartRequired: false,
+    }
+  })()
+  yaoyaoReconcileInFlight = task
+  try {
+    return await task
+  } finally {
+    if (yaoyaoReconcileInFlight === task) yaoyaoReconcileInFlight = undefined
   }
 }
 
@@ -980,6 +1057,16 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       const installedPluginVersion = await yaoyaoPluginVersion(dependencies, jar)
       await requireYaoyaoStorageReady(dependencies, jar, installedPluginVersion)
       try {
+        const release = await dependencies.updates.check(installedPluginVersion)
+        if (!release.latest || release.latest.releaseVersion !== targetVersion) {
+          throw new Error('目标版本不是当前发布源的最新版本')
+        }
+        await reconcileYaoyaoPlugin(
+          dependencies,
+          jar,
+          ctx.req.socket.remoteAddress,
+          release.latest.pluginVersion,
+        )
         json(ctx, 202, await dependencies.updates.startUpdate(targetVersion, installedPluginVersion))
       } catch (error) {
         throw updateFailure(error)
@@ -1003,6 +1090,17 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       } catch (error) {
         throw updateFailure(error)
       }
+    })
+  })
+  router.post('/api/app/plugins/yaoyao/reconcile', async (ctx) => {
+    await withJar(ctx, async (jar) => {
+      await requireGatewayAuthentication(ctx, dependencies, jar)
+      json(ctx, 200, await reconcileYaoyaoPlugin(
+        dependencies,
+        jar,
+        ctx.req.socket.remoteAddress,
+        dependencies.updates.currentManifest().pluginVersion,
+      ))
     })
   })
   router.post('/api/app/plugins/yaoyao/install', async (ctx) => {
@@ -1064,16 +1162,11 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
         return
       }
       const installedResult = parseJson(installResponse)
-      let restarted = false
-      if (dependencies.restartDashboard) {
-        await dependencies.restartDashboard()
-        restarted = true
-      }
       json(ctx, 200, {
         ...installedResult,
         source: pluginSource,
-        restarted,
-        restartRequired: !restarted,
+        restarted: false,
+        restartRequired: false,
       })
     })
   })

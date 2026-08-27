@@ -2,8 +2,6 @@
 
 import { execFileSync } from 'node:child_process'
 import {
-  copyFileSync,
-  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -120,59 +118,6 @@ function stopService() {
   if (loaded()) run('launchctl', ['bootout', `${domain}/${label}`])
 }
 
-function stopDashboard() {
-  try { run('hermes', ['dashboard', '--stop'], { timeout: 30_000 }) } catch { /* already stopped */ }
-}
-
-export function enabledPlugins(runCommand = run) {
-  const raw = runCommand('hermes', ['config', 'get', '--json', 'plugins.enabled']).trim()
-  if (!raw) return []
-  let value
-  try {
-    value = JSON.parse(raw)
-  } catch {
-    fail('Hermes plugins.enabled 未返回有效 JSON')
-  }
-  if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
-    fail('Hermes plugins.enabled 不是字符串数组')
-  }
-  return value
-}
-
-function setEnabledPlugins(value) {
-  run('hermes', ['config', 'set', 'plugins.enabled', JSON.stringify(value)])
-}
-
-function ensureYaoyaoEnabled(previous) {
-  if (!previous.includes('yaoyao')) setEnabledPlugins([...previous, 'yaoyao'])
-}
-
-function atomicDirectory(source, target, scratchRoot, token) {
-  const parent = dirname(target)
-  mkdirSync(parent, { recursive: true })
-  const incoming = join(parent, `.${token}-incoming`)
-  const previous = join(parent, `.${token}-previous`)
-  removeInside(incoming, scratchRoot)
-  removeInside(previous, scratchRoot)
-  cpSync(source, incoming, { recursive: true, preserveTimestamps: true })
-  if (existsSync(target)) renameSync(target, previous)
-  renameSync(incoming, target)
-  return previous
-}
-
-function atomicFile(source, target, scratchRoot, token) {
-  const parent = dirname(target)
-  mkdirSync(parent, { recursive: true })
-  const incoming = join(parent, `.${token}-incoming.yaml`)
-  const previous = join(parent, `.${token}-previous.yaml`)
-  removeInside(incoming, scratchRoot)
-  removeInside(previous, scratchRoot)
-  copyFileSync(source, incoming)
-  if (existsSync(target)) renameSync(target, previous)
-  renameSync(incoming, target)
-  return previous
-}
-
 export function currentTarget(releaseRoot) {
   const current = join(releaseRoot, 'current')
   try {
@@ -227,57 +172,21 @@ async function responseJSON(url) {
   return response.json()
 }
 
-async function verifyRuntime(pluginVersion, timeoutMs = 45_000) {
+async function verifyRuntime(timeoutMs = 45_000) {
   const deadline = Date.now() + timeoutMs
   let lastError = ''
   while (Date.now() < deadline) {
     try {
       const health = await responseJSON('http://127.0.0.1:8800/healthz')
       const ready = await responseJSON('http://127.0.0.1:8800/readyz')
-      const plugins = await responseJSON('http://127.0.0.1:9119/api/dashboard/plugins')
-      const plugin = Array.isArray(plugins) ? plugins.find(item => item?.name === 'yaoyao') : undefined
-      const pluginMatches = pluginVersion ? plugin?.version === pluginVersion : plugin === undefined
-      if (health.ok === true && ready.ok === true && pluginMatches) return
-      lastError = pluginVersion
-        ? `运行版本不匹配：期望插件 ${pluginVersion}`
-        : '上一版本未安装夭夭插件，但回滚后仍检测到插件'
+      if (health.ok === true && ready.ok === true) return
+      lastError = 'Web 服务尚未就绪'
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error)
     }
     await new Promise(resolvePromise => setTimeout(resolvePromise, 500))
   }
   fail(`升级后健康检查失败：${lastError}`)
-}
-
-export function backupPlugin(plan, jobID) {
-  const pluginRoot = join(plan.hermesHome, 'plugins', 'yaoyao')
-  const backupRoot = join(plan.dataHome, 'backups', 'system-update', jobID)
-  const pluginPreviouslyInstalled = existsSync(join(pluginRoot, 'dashboard', 'manifest.json'))
-  mkdirSync(backupRoot, { recursive: true, mode: 0o700 })
-  if (existsSync(join(pluginRoot, 'dashboard'))) {
-    cpSync(join(pluginRoot, 'dashboard'), join(backupRoot, 'dashboard'), { recursive: true, preserveTimestamps: true })
-  }
-  if (existsSync(join(pluginRoot, 'plugin.yaml'))) copyFileSync(join(pluginRoot, 'plugin.yaml'), join(backupRoot, 'plugin.yaml'))
-  return { pluginRoot, backupRoot, pluginPreviouslyInstalled }
-}
-
-export function restorePlugin(pluginRoot, backupRoot, token, pluginPreviouslyInstalled = true) {
-  const dashboardBackup = join(backupRoot, 'dashboard')
-  const manifestBackup = join(backupRoot, 'plugin.yaml')
-  if (!pluginPreviouslyInstalled) {
-    removeInside(join(pluginRoot, 'dashboard'), pluginRoot)
-    removeInside(join(pluginRoot, 'plugin.yaml'), pluginRoot)
-    return
-  }
-  if (!existsSync(dashboardBackup) || !existsSync(manifestBackup)) fail('插件回滚备份不完整')
-  const oldDashboard = atomicDirectory(dashboardBackup, join(pluginRoot, 'dashboard'), pluginRoot, `${token}-restore-dashboard`)
-  const oldManifest = atomicFile(manifestBackup, join(pluginRoot, 'plugin.yaml'), pluginRoot, `${token}-restore-manifest`)
-  removeInside(oldDashboard, pluginRoot)
-  removeInside(oldManifest, pluginRoot)
-}
-
-function backupPluginVersion(backupRoot) {
-  return String(readJSON(join(backupRoot, 'dashboard', 'manifest.json')).version ?? '')
 }
 
 function stageRelease(job, jobPath) {
@@ -317,54 +226,32 @@ async function runUpdate(jobPath, job) {
   if (pluginManifest.version !== target.pluginVersion) fail('构建产物中的插件版本与发布清单不一致')
 
   const previousCurrentTarget = currentTarget(plan.releaseRoot)
-  const { pluginRoot, backupRoot, pluginPreviouslyInstalled } = backupPlugin(plan, id)
-  const previousPluginVersion = pluginPreviouslyInstalled ? backupPluginVersion(backupRoot) : ''
-  const previousEnabledPlugins = enabledPlugins()
   let transitioned = false
-  let previousDashboard = ''
-  let previousPluginYaml = ''
   try {
-    updateJob(jobPath, { state: 'installing', message: `正在安装插件 ${target.pluginVersion}` })
+    updateJob(jobPath, { state: 'installing', message: `正在切换 Web ${target.webVersion}` })
     stopService()
-    stopDashboard()
     transitioned = true
-    previousDashboard = atomicDirectory(
-      join(pluginSource, 'dashboard'), join(pluginRoot, 'dashboard'), pluginRoot, `${id}-dashboard`,
-    )
-    previousPluginYaml = atomicFile(
-      join(pluginSource, 'plugin.yaml'), join(pluginRoot, 'plugin.yaml'), pluginRoot, `${id}-manifest`,
-    )
-    ensureYaoyaoEnabled(previousEnabledPlugins)
     switchCurrent(plan.releaseRoot, finalRoot, id)
 
     updateJob(jobPath, { state: 'restarting', message: '正在启动新版本服务' })
     startService(join(plan.releaseRoot, 'current'), plan, true)
-    updateJob(jobPath, { state: 'verifying', message: '正在验证 8800、9119 和插件版本' })
-    await verifyRuntime(target.pluginVersion)
-    removeInside(previousDashboard, pluginRoot)
-    removeInside(previousPluginYaml, pluginRoot)
+    updateJob(jobPath, { state: 'verifying', message: '正在验证 Web 服务' })
+    await verifyRuntime()
     writeJSON(join(dirname(jobPath), 'last-success.json'), {
       jobId: id,
       previousCurrentTarget,
       previousServiceRoot: plan.previousServiceRoot,
-      previousPluginVersion,
-      pluginPreviouslyInstalled,
-      previousEnabledPlugins,
-      backupRoot,
       target,
       finalRoot,
       commit,
     })
-    updateJob(jobPath, { state: 'succeeded', message: `已升级到 Web ${target.webVersion} + 插件 ${target.pluginVersion}` })
+    updateJob(jobPath, { state: 'succeeded', message: `已升级 Web ${target.webVersion}；插件由 9119 管理` })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (transitioned) {
       updateJob(jobPath, { state: 'rolling_back', message: '升级失败，正在自动恢复上一版本', error: message })
       try {
         stopService()
-        stopDashboard()
-        restorePlugin(pluginRoot, backupRoot, id, pluginPreviouslyInstalled)
-        setEnabledPlugins(previousEnabledPlugins)
         if (previousCurrentTarget) {
           switchCurrent(plan.releaseRoot, previousCurrentTarget, `${id}-rollback`)
           startService(join(plan.releaseRoot, 'current'), plan, true)
@@ -372,7 +259,7 @@ async function runUpdate(jobPath, job) {
           removeCurrent(plan.releaseRoot)
           startService(plan.previousServiceRoot, plan, false)
         }
-        await verifyRuntime(previousPluginVersion)
+        await verifyRuntime()
         updateJob(jobPath, { state: 'failed', message: '升级失败，已自动恢复上一版本', error: message })
       } catch (rollbackError) {
         const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
@@ -391,14 +278,6 @@ async function runRollback(jobPath, job) {
   const record = readJSON(recordPath)
   updateJob(jobPath, { state: 'rolling_back', message: '正在恢复上一版本' })
   stopService()
-  stopDashboard()
-  restorePlugin(
-    join(plan.hermesHome, 'plugins', 'yaoyao'),
-    record.backupRoot,
-    id,
-    record.pluginPreviouslyInstalled !== false,
-  )
-  if (Array.isArray(record.previousEnabledPlugins)) setEnabledPlugins(record.previousEnabledPlugins)
   if (record.previousCurrentTarget) {
     switchCurrent(plan.releaseRoot, record.previousCurrentTarget, id)
     startService(join(plan.releaseRoot, 'current'), plan, true)
@@ -406,9 +285,9 @@ async function runRollback(jobPath, job) {
     removeCurrent(plan.releaseRoot)
     startService(record.previousServiceRoot, plan, false)
   }
-  await verifyRuntime(record.previousPluginVersion)
+  await verifyRuntime()
   rmSync(recordPath, { force: true })
-  updateJob(jobPath, { state: 'rolled_back', message: `已回滚到插件 ${record.previousPluginVersion}` })
+  updateJob(jobPath, { state: 'rolled_back', message: '已回滚 Web 服务；插件继续由 9119 管理' })
 }
 
 async function main() {
