@@ -12,6 +12,7 @@ docker.env
 *.log
 *.pem
 *.key
+hermes-yaoyao-*.tar
 .hermes-yaoyao/
 .codegraph/
 
