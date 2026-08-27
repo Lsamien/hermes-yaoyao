@@ -6,6 +6,7 @@ import CreateGroupDialog from '@/components/groups/CreateGroupDialog.vue'
 import GroupManager from '@/components/groups/GroupManager.vue'
 import { TEAM_PRESETS } from '@/components/groups/teamPresets'
 import { groupMessageToUi, roomSidebarItem } from '@/components/workspace/viewModels'
+import { fallbackTeamAnimalAvatar } from '@/utils/teamAvatar'
 
 const profiles = (...names: string[]) => names.map(name => ({
   id: `local|${name}`, profile: name, displayName: name, nodeId: 'local', nodeLabel: '当前 Hermes',
@@ -21,6 +22,10 @@ function agent(id: string, profile: string, displayName: string, isHost: boolean
 }
 
 describe('group host controls', () => {
+  it('uses the shared stable animal mapping for legacy empty avatars', () => {
+    expect(fallbackTeamAnimalAvatar('22222222-2222-4222-8222-222222222222').id).toBe('bear')
+  })
+
   it('provides office and development presets with unique roles within the Agent limit', () => {
     expect(TEAM_PRESETS.map(preset => preset.name)).toEqual([
       '信息收集团队', '产品设计团队', '软件开发团队', '文案书写团队',
@@ -211,7 +216,7 @@ describe('group host controls', () => {
     wrapper.unmount()
   })
 
-  it('shows and submits an automatic team avatar from selected Agents', async () => {
+  it('shows five animal choices and submits a randomly initialized team avatar', async () => {
     const choices = profiles('yaoyao', 'yaoer').map((profile, index) => ({
       ...profile,
       ...(index === 0 ? { avatar: 'data:image/png;base64,AA==' } : {}),
@@ -223,14 +228,15 @@ describe('group host controls', () => {
     })
     await wrapper.get('input[placeholder="例如：产品评审"]').setValue('头像团队')
     await wrapper.findAll('.agent-picker > button')[1]!.trigger('click')
-    expect(wrapper.findAll('.avatar-picker .team-avatar__member')).toHaveLength(2)
-    expect(wrapper.get('.avatar-picker').text()).toContain('自动组合已选 Agent 的头像')
+    expect(wrapper.findAll('.avatar-picker .animal-avatar-options button')).toHaveLength(5)
+    expect(wrapper.get('.avatar-picker').text()).toContain('选择一个简洁的动物图标')
+    expect(wrapper.get('.avatar-picker .team-avatar__image').attributes('src')).toMatch(/\.png$/)
     await wrapper.get('.solid-button').trigger('click')
     expect(wrapper.emitted('create')?.[0]?.[0]).toMatchObject({
       name: '头像团队',
-      avatar: '',
       members: choices,
     })
+    expect((wrapper.emitted('create')?.[0]?.[0] as { avatar?: string }).avatar).toMatch(/^builtin:team-animal:(fox|whale|owl|rabbit|bear)$/)
     wrapper.unmount()
   })
 

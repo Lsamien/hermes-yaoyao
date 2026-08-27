@@ -184,3 +184,51 @@ final result: passed
 - [x] Verify tag filtering, file grid, session list, and group navigation.
 
 final result: passed
+
+## 团队动物头像 Design QA
+
+- source visual truth path: `/Users/samien/git/hermes-yaoyao/src/client/assets/team-avatars/{fox,whale,owl,rabbit,bear}.png`
+- Web implementation screenshot: `/Users/samien/.codex/visualizations/2026/08/27/01a040a6-d36a-7fb3-bb37-2f181f6fd5e8/team-avatar-web-implementation.png`
+- iOS implementation screenshot: `/Users/samien/.codex/visualizations/2026/08/27/01a040a6-d36a-7fb3-bb37-2f181f6fd5e8/team-avatar-ios-implementation.png`
+- combined comparison evidence: `/Users/samien/.codex/visualizations/2026/08/27/01a040a6-d36a-7fb3-bb37-2f181f6fd5e8/team-avatar-qa-comparison.png`
+- viewport: Web 1035 x 874 CSS px; iPhone 17 simulator 402 x 874 pt
+- pixels and density: source assets 512 x 512 px; Web capture 1035 x 874 px at 1x; iOS capture 1206 x 2622 px at 3x; comparison canvas normalizes both implementations into one 1200 x 1260 px image
+- state: existing legacy team with empty avatar, team list visible, avatar settings visible, light theme
+
+## Full-view comparison evidence
+
+The combined comparison shows the five source animals at full size, the deployed Web team list and settings panel, and the iOS simulator team list and settings picker. Both clients preserve the same silhouette, foreground color, pale background, circular crop, and ordering.
+
+## Focused region comparison evidence
+
+A separate crop was not needed: the combined canvas keeps the Web/iOS avatar-setting rows large enough to inspect all five silhouettes and also retains the small list-avatar state. The original implementation screenshots remain available for pixel-level inspection.
+
+## Findings
+
+- No actionable P0/P1/P2 findings.
+- Fonts and typography: existing platform typography and hierarchy are unchanged; new labels remain readable at Web and iOS caption sizes.
+- Spacing and layout rhythm: five circular choices fit without clipping or crowding; preview, picker, random action, and upload action remain visually grouped.
+- Colors and visual tokens: exact flat foreground/background colors from the source assets are retained; selection uses each platform's existing accent token.
+- Image quality and asset fidelity: source raster assets remain sharp at 23–58 px Web sizes and 34–58 pt iOS sizes, with clean circular masks and no composite-avatar seam or gray center.
+- Copy and content: both clients use the same animal labels, “随机一个”, and “上传图片”; legacy empty avatars explicitly explain that the old composite was replaced.
+
+## Comparison history
+
+- Initial pass: no P0/P1/P2 mismatch found, so no visual-fix iteration was required.
+
+## Primary interactions tested
+
+- Existing empty avatar renders as a deterministic animal in the Web list and settings preview.
+- Web settings expose five selectable animals, random selection, and image upload.
+- iOS team list renders animal avatars; settings expose the same five choices, random selection, and Photos upload.
+- Browser console checked with no new avatar-related errors.
+
+## Implementation checklist
+
+- [x] Five source animals render on Web and iOS.
+- [x] Team avatars remain circular at list and settings sizes.
+- [x] Legacy empty/composite state is replaced deterministically.
+- [x] New teams receive a random animal when no explicit choice is made.
+- [x] Uploaded custom images remain supported.
+
+final result: passed

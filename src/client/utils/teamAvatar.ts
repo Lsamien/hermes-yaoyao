@@ -1,3 +1,41 @@
+import foxAvatar from '@/assets/team-avatars/fox.png'
+import whaleAvatar from '@/assets/team-avatars/whale.png'
+import owlAvatar from '@/assets/team-avatars/owl.png'
+import rabbitAvatar from '@/assets/team-avatars/rabbit.png'
+import bearAvatar from '@/assets/team-avatars/bear.png'
+
+export const TEAM_ANIMAL_AVATAR_PREFIX = 'builtin:team-animal:'
+
+export const TEAM_ANIMAL_AVATARS = [
+  { id: 'fox', label: '狐狸', value: `${TEAM_ANIMAL_AVATAR_PREFIX}fox`, src: foxAvatar },
+  { id: 'whale', label: '鲸鱼', value: `${TEAM_ANIMAL_AVATAR_PREFIX}whale`, src: whaleAvatar },
+  { id: 'owl', label: '猫头鹰', value: `${TEAM_ANIMAL_AVATAR_PREFIX}owl`, src: owlAvatar },
+  { id: 'rabbit', label: '兔子', value: `${TEAM_ANIMAL_AVATAR_PREFIX}rabbit`, src: rabbitAvatar },
+  { id: 'bear', label: '小熊', value: `${TEAM_ANIMAL_AVATAR_PREFIX}bear`, src: bearAvatar },
+] as const
+
+export function teamAnimalAvatar(value?: string) {
+  return TEAM_ANIMAL_AVATARS.find(avatar => avatar.value === value)
+}
+
+export function randomTeamAnimalAvatar(): typeof TEAM_ANIMAL_AVATARS[number] {
+  return TEAM_ANIMAL_AVATARS[Math.floor(Math.random() * TEAM_ANIMAL_AVATARS.length)]!
+}
+
+export function fallbackTeamAnimalAvatar(key: string): typeof TEAM_ANIMAL_AVATARS[number] {
+  let hash = 2166136261
+  for (const byte of new TextEncoder().encode(key || 'team')) {
+    hash ^= byte
+    hash = Math.imul(hash, 16777619) >>> 0
+  }
+  return TEAM_ANIMAL_AVATARS[hash % TEAM_ANIMAL_AVATARS.length]!
+}
+
+export function resolvedTeamAvatarSource(value: string | undefined, fallbackKey: string): string {
+  if (value && /^data:image\/(png|jpeg|webp);base64,/i.test(value)) return value
+  return (teamAnimalAvatar(value) ?? fallbackTeamAnimalAvatar(fallbackKey)).src
+}
+
 const SUPPORTED_TEAM_AVATAR_TYPES = new Set([
   'image/png',
   'image/jpeg',
