@@ -272,7 +272,12 @@ class GroupMergeContractTests(unittest.TestCase):
         self.assertEqual(payload["lifecycle"], ["start", "ready", "shutdown"])
         self.assertEqual(
             payload["storePath"],
-            str(Path(hermes_home) / "plugins" / "yaoyao" / "data" / "group-chat.db"),
+            str(
+                Path(hermes_home).resolve()
+                / "plugin-data"
+                / "yaoyao"
+                / "group-chat.db"
+            ),
         )
 
 

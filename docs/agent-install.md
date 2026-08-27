@@ -128,7 +128,8 @@ test "$(node -e \"console.log(require(process.argv[1]).version)\" "$PLUGIN_DIR/m
 `<profile-home>/plugins/yaoyao/data` 原子迁移到
 `<profile-home>/plugin-data/yaoyao`。后者独立于插件安装树，后续通过 Hermes
 插件接口替换 `plugins/yaoyao` 时不会丢失运行数据。若两个目录同时包含数据，
-插件不会自动合并；应人工核对后保留唯一权威目录。
+插件不会自动合并，运行时仍只读取 `plugin-data/yaoyao`；应人工核对后移出旧目录，
+最终只保留这一权威数据目录。
 
 完成这次兼容版本启动后，后续可在已登录的 8800 会话中调用：
 

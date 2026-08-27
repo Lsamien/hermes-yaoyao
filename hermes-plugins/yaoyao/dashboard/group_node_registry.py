@@ -12,6 +12,11 @@ from typing import Mapping
 from urllib.parse import urlsplit, urlunsplit
 import uuid
 
+try:
+    from .data_paths import ensure_durable_data_root
+except ImportError:  # Loaded by the Dashboard plugin loader as a top-level module.
+    from data_paths import ensure_durable_data_root
+
 
 class NodeRegistryError(RuntimeError):
     pass
@@ -32,7 +37,7 @@ class PairedNodeRegistry:
     @classmethod
     def from_environment(cls) -> "PairedNodeRegistry":
         hermes_home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
-        return cls(hermes_home / "plugins" / "yaoyao" / "data")
+        return cls(ensure_durable_data_root(hermes_home).data_root)
 
     def register(self, command: Mapping[str, object]) -> dict[str, object]:
         allowed = {

@@ -99,7 +99,8 @@ Content-Type: application/json
 
 插件数据会从旧的 `<profile-home>/plugins/yaoyao/data` 一次性迁移到
 `<profile-home>/plugin-data/yaoyao`。如果旧、新目录同时包含数据，安装接口会
-返回 `409 yaoyao_storage_conflict`，不会覆盖任一目录。旧版插件没有迁移检查
+返回 `409 yaoyao_storage_conflict`，不会覆盖任一目录；运行时仍以
+`plugin-data/yaoyao` 为唯一权威目录，不会回退读取旧数据。旧版插件没有迁移检查
 接口时，也会返回 `409 yaoyao_storage_migration_required`；此时先按上面的
 `dashboard/` 局部同步方式安装一次当前兼容版本并重启，之后才能使用一键升级。
 

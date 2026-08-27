@@ -35,9 +35,10 @@ def _has_entries(path: Path) -> bool:
 def ensure_durable_data_root(profile_home: Path) -> DataPathStatus:
     """Move the legacy data directory once, without merging ambiguous trees.
 
-    When both locations contain data, continue serving the legacy tree and
-    report a conflict. The install coordinator refuses a full plugin replace
-    until an operator resolves that conflict, preventing silent data loss.
+    The durable tree is always the runtime authority once it exists. When both
+    locations contain data, keep both untouched and report a conflict so the
+    install coordinator can refuse a full plugin replace without making the
+    application silently fall back to stale legacy state.
     """
 
     home = Path(profile_home).expanduser().resolve()
@@ -49,14 +50,13 @@ def ensure_durable_data_root(profile_home: Path) -> DataPathStatus:
         return DataPathStatus(durable, True, False, False, False)
 
     if legacy.is_symlink() or durable.is_symlink():
-        return DataPathStatus(legacy, False, False, True, True)
+        return DataPathStatus(durable, False, False, True, True)
 
     if durable.exists():
         if _has_entries(legacy):
-            return DataPathStatus(legacy, False, False, True, True)
+            return DataPathStatus(durable, False, False, True, True)
         return DataPathStatus(durable, True, False, True, False)
 
     durable.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.replace(legacy, durable)
     return DataPathStatus(durable, True, True, False, False)
-
