@@ -157,10 +157,10 @@ describe('group host controls', () => {
       global: { stubs: { teleport: true } },
     })
     await nextTick()
-    await wrapper.get('input[placeholder="例如：产品评审"]').setValue('主持人验收')
+    await wrapper.get('input[placeholder="例如：产品评审"]').setValue('管理员验收')
     const profileButtons = wrapper.findAll('.agent-picker > button')
     await profileButtons[1]!.trigger('click')
-    const host = wrapper.get<HTMLSelectElement>('select[aria-label="主持人"]')
+    const host = wrapper.get<HTMLSelectElement>('select[aria-label="管理员"]')
     await host.setValue('local|yaoer')
     await profileButtons[1]!.trigger('click')
     expect(host.element.value).toBe('local|yaoyao')
@@ -170,7 +170,7 @@ describe('group host controls', () => {
     await wrapper.get('.solid-button').trigger('click')
 
     expect(wrapper.emitted('create')?.[0]?.[0]).toEqual({
-      name: '主持人验收', members: profiles('yaoyao', 'yaoer'), hostProfile: 'local|yaoer', autoReply: true, replyRounds: 3,
+      name: '管理员验收', members: profiles('yaoyao', 'yaoer'), hostProfile: 'local|yaoer', autoReply: true, replyRounds: 3,
     })
     wrapper.unmount()
   })
@@ -182,7 +182,7 @@ describe('group host controls', () => {
       global: { stubs: { teleport: true } },
     })
     await nextTick()
-    expect(wrapper.find('select[aria-label="主持人"]').exists()).toBe(false)
+    expect(wrapper.find('select[aria-label="管理员"]').exists()).toBe(false)
     expect(wrapper.find('input[aria-label="启用自动回复"]').exists()).toBe(true)
     await wrapper.get('input[placeholder="例如：产品评审"]').setValue('v4 房间')
     await wrapper.get('.solid-button').trigger('click')
@@ -251,7 +251,7 @@ describe('group host controls', () => {
         hostEnabled: true,
       },
     })
-    const selector = wrapper.get<HTMLSelectElement>('select[aria-label="主持人"]')
+    const selector = wrapper.get<HTMLSelectElement>('select[aria-label="管理员"]')
     expect(selector.element.value).toBe('agent-1')
     expect(wrapper.findAll('.host-badge')).toHaveLength(1)
     await selector.setValue('agent-2')
@@ -261,7 +261,7 @@ describe('group host controls', () => {
     await wrapper.get('button[aria-label="设置瑶儿"]').trigger('click')
     await nextTick()
     const dialog = document.querySelector('[role="dialog"][aria-label="瑶儿 Agent 设置"]')
-    expect(dialog?.textContent).toContain('主持人始终处理用户无 @ 消息')
+    expect(dialog?.textContent).toContain('管理员始终处理用户无 @ 消息')
     expect(dialog?.querySelector('input[aria-label="无需 @ 也回复"]')).not.toBeNull()
     wrapper.unmount()
   })

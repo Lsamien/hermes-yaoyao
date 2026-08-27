@@ -89,4 +89,19 @@ describe('authentication and CSRF protocol', () => {
       unsubscribe()
     }
   })
+
+  it('surfaces the first structured upstream validation error', async () => {
+    setApiCsrfToken('csrf-validation')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      detail: [{ loc: ['body', 'avatar'], msg: 'Value error, unsupported team avatar', type: 'value_error' }],
+    }), { status: 422, headers: { 'content-type': 'application/json' } })))
+
+    await expect(apiRequest('/api/app/groups/rooms', {
+      method: 'POST',
+      body: { avatar: 'invalid' },
+    })).rejects.toMatchObject({
+      status: 422,
+      message: 'body.avatar：Value error, unsupported team avatar',
+    })
+  })
 })

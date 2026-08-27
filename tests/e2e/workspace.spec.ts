@@ -55,7 +55,7 @@ test('navigates every 9119 workspace without blank transitions', async ({ page }
   await expect(page.getByRole('button', { name: '新建团队' })).toBeVisible()
   await expect(page.getByRole('button', { name: '新建团队' })).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(page.getByRole('button', { name: '新建团队' })).toHaveCSS('font-weight', '580')
-  await expect(page.getByRole('button', { name: '管理团队' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '管理团队', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '发送消息' })).toBeVisible()
 
   await page.goto('/files')
@@ -143,7 +143,7 @@ test('shows the team animal avatar in the list and five choices during creation'
 
 test('updates an existing team avatar from the Web manager', async ({ page }) => {
   await page.getByRole('button', { name: '团队' }).click()
-  await page.getByRole('button', { name: '管理团队' }).click()
+  await page.getByRole('button', { name: '管理团队', exact: true }).click()
 
   const manager = page.locator('.group-manager')
   const preview = manager.getByRole('img', { name: '设计与工程协作团队头像' })
@@ -162,34 +162,34 @@ test('updates an existing team avatar from the Web manager', async ({ page }) =>
 
 test('selects one protocol v5 host independently from no-mention replies', async ({ page }) => {
   await page.getByRole('button', { name: '团队' }).click()
-  await expect(page.locator('.group-host-chip')).toHaveText('主持人 夭夭')
+  await expect(page.locator('.group-host-chip')).toHaveText('管理员 夭夭')
 
   await page.getByRole('button', { name: '新建团队' }).click()
   const createDialog = page.getByRole('dialog', { name: '新建团队' })
   await createDialog.getByRole('button', { name: /yaoer/ }).click()
-  await createDialog.getByLabel('主持人').selectOption('yaoer')
+  await createDialog.getByLabel('管理员').selectOption({ label: '瑶儿' })
   await expect(createDialog.getByLabel('所有成员无需 @ 也回复')).toBeChecked()
   await createDialog.getByRole('button', { name: '关闭' }).click()
 
-  await page.getByRole('button', { name: '管理团队' }).click()
+  await page.getByRole('button', { name: '管理团队', exact: true }).click()
   const manager = page.locator('.group-manager')
-  await expect(manager.getByLabel('主持人')).toHaveValue('33333333-3333-4333-8333-333333333333')
+  await expect(manager.getByLabel('管理员')).toHaveValue('33333333-3333-4333-8333-333333333333')
   const promoteRequest = page.waitForRequest(request => request.method() === 'PATCH' && request.url().endsWith('/agents/34343434-3434-4434-8434-343434343434'))
-  await manager.getByLabel('主持人').selectOption({ label: '瑶儿' })
+  await manager.getByLabel('管理员').selectOption({ label: '瑶儿' })
   expect((await promoteRequest).postDataJSON()).toMatchObject({ isHost: true })
-  await expect(manager.locator('article').filter({ hasText: '瑶儿' }).getByText('主持人', { exact: true })).toBeVisible()
-  await expect(page.locator('.group-host-chip')).toHaveText('主持人 瑶儿')
+  await expect(manager.locator('article').filter({ hasText: '瑶儿' }).getByText('管理员', { exact: true })).toBeVisible()
+  await expect(page.locator('.group-host-chip')).toHaveText('管理员 瑶儿')
 
   const restoreRequest = page.waitForRequest(request => request.method() === 'PATCH' && request.url().endsWith('/agents/33333333-3333-4333-8333-333333333333'))
-  await manager.getByLabel('主持人').selectOption({ label: '夭夭' })
+  await manager.getByLabel('管理员').selectOption({ label: '夭夭' })
   expect((await restoreRequest).postDataJSON()).toMatchObject({ isHost: true })
-  await expect(page.locator('.group-host-chip')).toHaveText('主持人 夭夭')
+  await expect(page.locator('.group-host-chip')).toHaveText('管理员 夭夭')
 })
 
 test('edits every protocol v5 Agent setting with one inspector close control', async ({ page }) => {
   await page.getByRole('button', { name: '团队' }).click()
   await expect(page.getByRole('heading', { name: '设计验收' })).toBeVisible()
-  await page.getByRole('button', { name: '管理团队' }).click()
+  await page.getByRole('button', { name: '管理团队', exact: true }).click()
 
   await expect(page.getByRole('button', { name: '关闭团队管理' })).toHaveCount(1)
   await expect(page.getByRole('button', { name: '关闭预览' })).toHaveCount(0)

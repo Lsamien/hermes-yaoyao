@@ -777,6 +777,7 @@ class GroupSettingsContractTests(unittest.TestCase):
 
         for invalid in (
             "https://example.com/avatar.png",
+            "builtin:team-animal:unknown",
             "data:image/svg+xml;base64,AA==",
             "data:image/png;base64,***",
         ):
@@ -787,6 +788,17 @@ class GroupSettingsContractTests(unittest.TestCase):
                     "avatar": invalid,
                     "agents": [{"profile": "planner"}],
                 })
+
+    def test_builtin_team_avatars_are_valid_room_values(self) -> None:
+        for avatar in PROTOCOL.BUILTIN_TEAM_AVATARS:
+            with self.subTest(avatar=avatar):
+                request = PROTOCOL.CreateRoomRequest.model_validate({
+                    "requestId": request_id(),
+                    "name": "动物头像团队",
+                    "avatar": avatar,
+                    "agents": [{"profile": "planner"}],
+                })
+                self.assertEqual(request.avatar, avatar)
 
     def test_reserved_all_aliases_cannot_be_agent_display_names(self) -> None:
         model_payloads = (

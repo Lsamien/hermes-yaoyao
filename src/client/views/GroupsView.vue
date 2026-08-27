@@ -47,6 +47,8 @@ const modelOptionsError = ref<Record<string, string>>({})
 const agentUpdateBusy = ref<Record<string, boolean>>({})
 const agentUpdateError = ref<Record<string, string>>({})
 const managerError = ref('')
+const createError = ref('')
+const creatingRoom = ref(false)
 const roomActionMenu = ref<{ roomId: string; topicId?: string; x: number; y: number } | null>(null)
 const topicActionRenaming = ref(false)
 const topicActionRenameValue = ref('')
@@ -199,14 +201,14 @@ const mentionOptions = computed<ComposerOption[]>(() => [
   ...displayAgents.value.map(agent => ({
     id: agent.id,
     label: agent.displayName || agent.profile,
-    detail: groups.hostProtocol && agent.isHost ? `主持人 · ${agent.profile}` : agent.profile,
+    detail: groups.hostProtocol && agent.isHost ? `管理员 · ${agent.profile}` : agent.profile,
     disabled: !agent.enabled,
   })),
 ])
 const roomSubtitle = computed(() => {
   if (!groups.selectedRoom) return '选择或新建一个团队'
-  const host = hostAgent.value ? `主持人 ${hostAgent.value.displayName || hostAgent.value.profile} · ` : ''
-  const mode = groups.selectedRoom.orchestrationMode === 'host' ? '主持流程 · ' : ''
+  const host = hostAgent.value ? `管理员 ${hostAgent.value.displayName || hostAgent.value.profile} · ` : ''
+  const mode = groups.selectedRoom.orchestrationMode === 'host' ? '管理员协调 · ' : ''
   return `${groups.selectedRoom.name} · ${mode}${host}${groups.agents.length} 个 Agent · 最多 ${groups.selectedRoom.maxReplyRounds} 轮回复`
 })
 const activeAgentIds = computed(() => {
@@ -321,6 +323,7 @@ async function openSelectedRoomManager() {
 async function openCreateGroup() {
   try { await groups.refreshNodes() }
   catch { /* A node refresh must not prevent creating a local-only group. */ }
+  createError.value = ''
   createOpen.value = true
 }
 
@@ -392,24 +395,32 @@ async function startTopic(roomId: string) {
 
 async function createRoom(payload: { name: string; avatar?: string; members: Array<GroupProfileOption & { description?: string }>; autoReply: boolean; replyRounds: number; instructions?: string; hostProfile?: string; orchestrationMode?: 'free' | 'host' }) {
   const hostProfile = payload.hostProfile || payload.members[0]?.id
-  const detail = await groups.createRoom({
-    name: payload.name,
-    ...(groups.roomAvatarProtocol ? { avatar: payload.avatar ?? '' } : {}),
-    ...(groups.roomInstructionsProtocol ? { instructions: payload.instructions ?? '' } : {}),
-    agents: payload.members.map(member => ({
-      profile: member.profile,
-      nodeId: member.nodeId,
-      nodeLabel: member.nodeLabel,
-      displayName: member.displayName,
-      description: member.description,
-      replyWithoutMention: payload.autoReply,
-      ...(groups.hostProtocol ? { isHost: member.id === hostProfile } : {}),
-    })),
-    maxReplyRounds: payload.replyRounds,
-    ...(groups.hostFlowProtocol ? { orchestrationMode: payload.orchestrationMode ?? 'free' } : {}),
-  })
-  createOpen.value = false
-  await router.push(groupRoute(detail.id, groups.selectedTopicId))
+  createError.value = ''
+  creatingRoom.value = true
+  try {
+    const detail = await groups.createRoom({
+      name: payload.name,
+      ...(groups.roomAvatarProtocol ? { avatar: payload.avatar ?? '' } : {}),
+      ...(groups.roomInstructionsProtocol ? { instructions: payload.instructions ?? '' } : {}),
+      agents: payload.members.map(member => ({
+        profile: member.profile,
+        nodeId: member.nodeId,
+        nodeLabel: member.nodeLabel,
+        displayName: member.displayName,
+        description: member.description,
+        replyWithoutMention: payload.autoReply,
+        ...(groups.hostProtocol ? { isHost: member.id === hostProfile } : {}),
+      })),
+      maxReplyRounds: payload.replyRounds,
+      ...(groups.hostFlowProtocol ? { orchestrationMode: payload.orchestrationMode ?? 'free' } : {}),
+    })
+    createOpen.value = false
+    await router.push(groupRoute(detail.id, groups.selectedTopicId))
+  } catch (cause) {
+    createError.value = cause instanceof Error ? cause.message : '创建团队失败'
+  } finally {
+    creatingRoom.value = false
+  }
 }
 
 async function send(payload: ComposerSubmit) {
@@ -690,8 +701,8 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
       >
         <template #header-actions>
           <div class="group-header-actions">
-            <span v-if="hostAgent" class="group-host-chip" :title="`用户未明确 @ 时由 ${hostAgent.displayName || hostAgent.profile} 负责回应`">主持人 {{ hostAgent.displayName || hostAgent.profile }}</span>
-            <div class="group-avatars" aria-label="团队成员"><AgentAvatar v-for="agent in agents.slice(0, 4)" :key="agent.id" :name="agent.name" :avatar="agent.nodeId === 'local' ? agentAvatars[agent.profile || ''] || '' : ''" :size="24" :title="agent.isHost ? `${agent.name} · 主持人` : agent.name" /><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
+            <span v-if="hostAgent" class="group-host-chip" :title="`用户未明确 @ 时由管理员 ${hostAgent.displayName || hostAgent.profile} 负责回应`">管理员 {{ hostAgent.displayName || hostAgent.profile }}</span>
+            <div class="group-avatars" aria-label="团队成员"><AgentAvatar v-for="agent in agents.slice(0, 4)" :key="agent.id" :name="agent.name" :avatar="agent.nodeId === 'local' ? agentAvatars[agent.profile || ''] || '' : ''" :size="24" :title="agent.isHost ? `${agent.name} · 管理员` : agent.name" /><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
             <button class="icon-button" type="button" title="管理团队" aria-label="管理团队" :disabled="!groups.selectedRoom" @click="openSelectedRoomManager"><AppIcon name="dots" /></button>
           </div>
         </template>
@@ -748,7 +759,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
   </WorkspaceView>
 
   <FloatingResourceSearch section="groups" label="搜索团队" :items="roomSidebarItems" @select="selectRoom" />
-  <CreateGroupDialog :open="createOpen" :profiles="profiles" :avatar-enabled="groups.roomAvatarProtocol" :host-enabled="groups.hostProtocol" :host-flow-enabled="groups.hostFlowProtocol" :room-instructions-enabled="groups.roomInstructionsProtocol" :busy="groups.isLoading" @close="createOpen = false" @create="createRoom" />
+  <CreateGroupDialog :open="createOpen" :profiles="profiles" :avatar-enabled="groups.roomAvatarProtocol" :host-enabled="groups.hostProtocol" :host-flow-enabled="groups.hostFlowProtocol" :room-instructions-enabled="groups.roomInstructionsProtocol" :error="createError" :busy="groups.isLoading || creatingRoom" @close="createOpen = false" @create="createRoom" />
   <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="addPreviewToComposer" @source="preview = null" />
   <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" :can-add="uploadsEnabled" @add="addMediaToComposer" />
 

@@ -181,7 +181,7 @@ function canRemoveAgent(agent: GroupAgent): boolean {
 function isRemoteAgent(agent: GroupAgent): boolean { return agent.nodeId !== 'local' }
 
 function removeAgentTitle(agent: GroupAgent): string {
-  return canRemoveAgent(agent) ? '移除' : agent.isHost ? '需要另一位已启用成员才能移除主持人' : '团队必须保留至少一位成员'
+  return canRemoveAgent(agent) ? '移除' : agent.isHost ? '需要另一位已启用成员才能移除管理员' : '团队必须保留至少一位成员'
 }
 
 function openAgentSettings(agent: GroupAgent) {
@@ -275,10 +275,10 @@ function statusLabel(status: GroupAgent['status']): string {
       <label v-if="roomInstructionsEnabled"><span>说明<small>所有 Agent 都会在回复前查阅，可填写协作规则和形式准则。</small></span><textarea v-model="form.instructions" maxlength="4000" rows="5" aria-label="团队说明" placeholder="例如：先核对事实；结论使用中文；发布前等待确认。" @change="saveRoom" /></label>
       <label class="rounds"><span>最多回复轮数<small>-1 表示无限</small></span><input v-model.number="form.replyRounds" type="number" min="-1" max="100" aria-label="最多回复轮数" @change="saveRoom" /></label>
       <label v-if="hostFlowEnabled" class="flow-mode">
-        <span>协作模式<small>主持人可按依赖逐步调度，也可一次 @ 多人并列执行。</small></span>
+        <span>协作模式<small>管理员可按依赖逐步调度，也可一次 @ 多人并列执行。</small></span>
         <select v-model="form.orchestrationMode" aria-label="协作模式" :disabled="busy || hasActiveAgents" :title="hasActiveAgents ? '请等待当前回复完成或先中断 Agent' : ''" @change="saveRoom">
           <option value="free">自由讨论</option>
-          <option value="host">主持流程</option>
+          <option value="host">管理员协调</option>
         </select>
       </label>
     </section>
@@ -286,8 +286,8 @@ function statusLabel(status: GroupAgent['status']): string {
     <section>
       <div class="section-heading"><h3>成员 <em>{{ agents.length }}/8</em></h3></div>
       <label v-if="hostEnabled" class="host-selector">
-        <span>主持人<small>用户没有明确 @ 时始终负责回应；“无需 @ 也回复”仍独立生效。</small></span>
-        <select :value="hostAgent?.id || ''" aria-label="主持人" :disabled="busy" @change="selectHost">
+        <span>管理员<small>用户没有明确 @ 时始终负责回应；“无需 @ 也回复”仍独立生效。</small></span>
+        <select :value="hostAgent?.id || ''" aria-label="管理员" :disabled="busy" @change="selectHost">
           <option v-for="agent in agents" :key="agent.id" :value="agent.id" :disabled="!agent.enabled && !agent.isHost">{{ agent.displayName }}</option>
         </select>
       </label>
@@ -295,7 +295,7 @@ function statusLabel(status: GroupAgent['status']): string {
       <div class="agent-list">
         <article v-for="agent in agents" :key="agent.id">
           <span class="agent-avatar"><AgentAvatar :name="agent.displayName" :avatar="agent.nodeId === 'local' ? agentAvatars[agent.profile] || '' : ''" :size="32" /><i :class="`status-${agent.status}`" /></span>
-          <span class="agent-copy"><span class="agent-name-line"><strong>{{ agent.displayName }}</strong><em v-if="hostEnabled && agent.isHost" class="host-badge">主持人</em></span><small>{{ agent.profile }}<template v-if="agent.nodeId !== 'local'"> · {{ agent.nodeLabel || agent.nodeId.slice(0, 8) }}</template> · {{ statusLabel(agent.status) }}</small></span>
+          <span class="agent-copy"><span class="agent-name-line"><strong>{{ agent.displayName }}</strong><em v-if="hostEnabled && agent.isHost" class="host-badge">管理员</em></span><small>{{ agent.profile }}<template v-if="agent.nodeId !== 'local'"> · {{ agent.nodeLabel || agent.nodeId.slice(0, 8) }}</template> · {{ statusLabel(agent.status) }}</small></span>
           <button class="agent-action" type="button" :title="`设置 ${agent.displayName}`" :aria-label="`设置${agent.displayName}`" @click="openAgentSettings(agent)"><AppIcon name="settings" :size="14" /></button>
           <button v-if="agent.status === 'running' || agent.status === 'queued'" class="agent-action" type="button" title="中断" @click="emit('interruptAgent', agent.id)"><AppIcon name="stop" :size="13" /></button>
           <button class="agent-action danger" type="button" :title="removeAgentTitle(agent)" :aria-label="`移除${agent.displayName}`" :disabled="!canRemoveAgent(agent) || busy" @click="emit('removeAgent', agent.id)"><AppIcon name="trash" :size="14" /></button>
@@ -322,7 +322,7 @@ function statusLabel(status: GroupAgent['status']): string {
         <header>
           <span>
             <small>Agent 设置</small>
-            <strong class="settings-agent-name">{{ selectedAgent.displayName }}<em v-if="hostEnabled && selectedAgent.isHost" class="host-badge">主持人</em></strong>
+            <strong class="settings-agent-name">{{ selectedAgent.displayName }}<em v-if="hostEnabled && selectedAgent.isHost" class="host-badge">管理员</em></strong>
           </span>
           <button class="agent-settings-close" type="button" aria-label="关闭 Agent 设置" title="关闭 Agent 设置" @click="closeAgentSettings"><AppIcon name="close" :size="17" /></button>
         </header>
@@ -360,7 +360,7 @@ function statusLabel(status: GroupAgent['status']): string {
             <label><input v-model="agentDrafts[selectedAgent.id].enabled" type="checkbox" aria-label="启用" @change="markDirty(selectedAgent.id)" />启用</label>
             <label><input v-model="agentDrafts[selectedAgent.id].replyWithoutMention" type="checkbox" :aria-label="hostEnabled ? '无需 @ 也回复' : '自动回复'" @change="markDirty(selectedAgent.id)" />{{ hostEnabled ? '无需 @ 也回复' : '自动回复' }}</label>
           </div>
-          <p v-if="hostEnabled" class="host-explanation">{{ form.orchestrationMode === 'host' ? '主持流程下此开关暂不触发自动并发；切回自由讨论后继续按原设置生效。' : (selectedAgent.isHost ? '主持人始终处理用户无 @ 消息；此开关仅决定是否自动参与 Agent 发出的无 @ 消息。' : '开启后，该成员会自动参与未明确 @ 的消息；用户无 @ 消息仍由主持人兜底。') }}</p>
+          <p v-if="hostEnabled" class="host-explanation">{{ form.orchestrationMode === 'host' ? '管理员协调下此开关暂不触发自动并发；切回自由讨论后继续按原设置生效。' : (selectedAgent.isHost ? '管理员始终处理用户无 @ 消息；此开关仅决定是否自动参与 Agent 发出的无 @ 消息。' : '开启后，该成员会自动参与未明确 @ 的消息；用户无 @ 消息仍由管理员兜底。') }}</p>
           <p v-if="agentUpdateError?.[selectedAgent.id]" class="agent-save-error" role="alert">{{ agentUpdateError[selectedAgent.id] }}</p>
           <div class="editor-actions">
             <button class="quiet-button" type="button" :disabled="busy || !hasAgentChanges(selectedAgent)" @click="resetAgent(selectedAgent)">取消更改</button>

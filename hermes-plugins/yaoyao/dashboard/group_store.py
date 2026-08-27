@@ -1073,7 +1073,7 @@ class GroupStore:
                 (room["id"],),
             ).fetchone()
             if host is None:
-                raise GroupStoreError("GroupStore room has no host candidate")
+                raise GroupStoreError("GroupStore room has no administrator candidate")
             connection.execute(
                 "UPDATE group_agents SET is_host = 1 WHERE id = ? AND room_id = ?",
                 (host["id"], room["id"]),
@@ -1601,7 +1601,7 @@ class GroupStore:
             try:
                 connection.execute(host_definition)
             except sqlite3.IntegrityError as error:
-                raise GroupStoreError("Room hosts are not unique") from error
+                raise GroupStoreError("Room administrators are not unique") from error
         active_runtime_definition = """CREATE UNIQUE INDEX
             idx_group_agent_runs_active_runtime
             ON group_agent_runs(runtime_session_id)
@@ -2575,10 +2575,10 @@ class GroupStore:
                 raise ValueError("isHost must be a boolean")
             if requested_host is False and bool(previous["is_host"]):
                 raise GroupConflictError(
-                    "Current host cannot be cleared without selecting a replacement"
+                    "Current administrator cannot be cleared without selecting a replacement"
                 )
             if requested_host is True and command.get("enabled") is False:
-                raise GroupConflictError("Host Agent must be enabled")
+                raise GroupConflictError("Administrator Agent must be enabled")
             replacement_id: str | None = None
             if (
                 bool(previous["is_host"])
@@ -2592,7 +2592,7 @@ class GroupStore:
                 )
                 if replacement is None:
                     raise GroupConflictError(
-                        "Host Agent cannot be disabled without an enabled replacement"
+                        "Administrator Agent cannot be disabled without an enabled replacement"
                     )
                 replacement_id = str(replacement["id"])
             assignments: list[str] = []
@@ -2769,7 +2769,7 @@ class GroupStore:
                 )
                 if replacement is None:
                     raise GroupConflictError(
-                        "Host Agent cannot be removed without an enabled replacement"
+                        "Administrator Agent cannot be removed without an enabled replacement"
                     )
                 switched = self._switch_host(
                     connection,
@@ -3761,7 +3761,7 @@ class GroupStore:
                     None,
                 )
                 if host is None:
-                    raise GroupStoreError("Host flow has no enabled host Agent")
+                    raise GroupStoreError("Administrator flow has no enabled administrator Agent")
                 target_ids, warnings = [str(host["id"])], []
                 explicit_ids = []
             else:
@@ -4463,7 +4463,7 @@ class GroupStore:
                 None,
             )
             if current_host is None:
-                raise GroupStoreError("Host flow has no enabled host Agent")
+                raise GroupStoreError("Administrator flow has no enabled administrator Agent")
             canonical_agent_ids = [str(current_host["id"])]
             reply_modes = {str(current_host["id"]): "automatic"}
             unfinished_sibling = connection.execute(
@@ -6193,7 +6193,7 @@ class GroupStore:
             (room_id,),
         ).fetchone()
         if host is None:
-            raise GroupStoreError("Room host is missing")
+            raise GroupStoreError("Room administrator is missing")
         return host
 
     @staticmethod
@@ -6223,7 +6223,7 @@ class GroupStore:
             return None
         replacement = self._owned_agent(connection, room_id, agent_id)
         if not replacement["enabled"]:
-            raise GroupConflictError("Host Agent must be enabled")
+            raise GroupConflictError("Administrator Agent must be enabled")
         connection.execute(
             """UPDATE group_agents SET is_host = 0, updated_at = ?
             WHERE id = ? AND room_id = ?""",
@@ -6820,7 +6820,7 @@ class GroupStore:
             raise GroupConflictError("Agent display name must be unique within a room")
         host_count = sum(bool(agent["is_host"]) for agent in agents)
         if host_count > 1:
-            raise GroupConflictError("Room may contain only one host Agent")
+            raise GroupConflictError("Room may contain only one administrator Agent")
         if host_count == 0:
             agents[0]["is_host"] = True
         return agents

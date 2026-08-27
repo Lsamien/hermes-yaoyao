@@ -58,6 +58,15 @@ function errorMessage(payload: unknown, fallback: string): string {
     for (const candidate of [record.message, record.error, nested?.message, record.detail]) {
       if (typeof candidate === 'string' && candidate.trim()) return candidate.trim()
     }
+    if (Array.isArray(record.detail)) {
+      const validation = record.detail.find(item => item && typeof item === 'object') as Record<string, unknown> | undefined
+      if (validation && typeof validation.msg === 'string' && validation.msg.trim()) {
+        const location = Array.isArray(validation.loc)
+          ? validation.loc.filter(item => typeof item === 'string' || typeof item === 'number').join('.')
+          : ''
+        return location ? `${location}：${validation.msg.trim()}` : validation.msg.trim()
+      }
+    }
   }
   if (typeof payload === 'string' && payload.trim()) return payload.trim()
   return fallback

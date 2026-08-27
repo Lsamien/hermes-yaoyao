@@ -44,6 +44,13 @@ REASONING_EFFORTS = frozenset({
     "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
 })
 ORCHESTRATION_MODES = frozenset({"free", "host"})
+BUILTIN_TEAM_AVATARS = frozenset({
+    "builtin:team-animal:fox",
+    "builtin:team-animal:whale",
+    "builtin:team-animal:owl",
+    "builtin:team-animal:rabbit",
+    "builtin:team-animal:bear",
+})
 _ROOM_AVATAR_PATTERN = re.compile(
     r"^data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$",
     re.IGNORECASE,
@@ -99,17 +106,19 @@ def limits_payload() -> dict[str, int]:
 
 
 def normalize_room_avatar(value: object) -> str:
-    """Validate a persisted custom avatar; an empty string selects auto mode."""
+    """Validate a persisted built-in or custom team avatar."""
     if not isinstance(value, str):
-        raise ValueError("avatar must be a data image URL or an empty string")
+        raise ValueError("avatar must be a built-in avatar, data image URL, or an empty string")
     normalized = value.strip()
     if not normalized:
         return ""
+    if normalized in BUILTIN_TEAM_AVATARS:
+        return normalized
     if len(normalized) > MAX_ROOM_AVATAR_LENGTH:
         raise ValueError("avatar is too large")
     match = _ROOM_AVATAR_PATTERN.fullmatch(normalized)
     if match is None:
-        raise ValueError("avatar must be a PNG, JPEG, or WebP data image URL")
+        raise ValueError("avatar must be a known built-in avatar or a PNG, JPEG, or WebP data image URL")
     try:
         decoded = base64.b64decode(match.group(2), validate=True)
     except (binascii.Error, ValueError) as error:
@@ -207,7 +216,7 @@ class CreateRoomRequest(GroupModel):
     @model_validator(mode="after")
     def validate_unique_host(self) -> "CreateRoomRequest":
         if sum(agent.is_host for agent in self.agents) > 1:
-            raise ValueError("Room may contain only one host Agent")
+            raise ValueError("Room may contain only one administrator Agent")
         return self
 
 

@@ -67,7 +67,7 @@ class GroupHostContractTests(unittest.TestCase):
         })
         self.assertEqual(flow.orchestration_mode, "host")
 
-        with self.assertRaisesRegex(ValueError, "only one host"):
+        with self.assertRaisesRegex(ValueError, "only one administrator"):
             PROTOCOL.CreateRoomRequest.model_validate({
                 "requestId": new_id(),
                 "name": "非法群",
@@ -582,7 +582,7 @@ class GroupHostContractTests(unittest.TestCase):
                 "cwd": "",
                 "agents": [{"profile": "host", "isHost": True}],
             })
-            created = self._send(store, room["id"], "请主持", [])
+            created = self._send(store, room["id"], "请管理员", [])
             [run] = created["runs"]
             claimed = store.claim_next_runnable_run()
             projection = store.read_run_projection(claimed["id"])
@@ -592,7 +592,7 @@ class GroupHostContractTests(unittest.TestCase):
             )
             envelope = json.loads(prompt.rsplit("GROUP_CONTEXT_JSON=", 1)[1])
             self.assertIs(envelope["run"]["requiredReply"], True)
-            self.assertIn("唯一主持人", prompt)
+            self.assertIn("唯一管理员", prompt)
             self.assertNotIn("[[YAOYAO_NO_REPLY_V1]]", prompt)
 
             before = store.latest_cursor()
@@ -685,11 +685,11 @@ class GroupHostContractTests(unittest.TestCase):
             store.initialize()
             room = store.create_room({
                 "requestId": new_id(),
-                "name": "主持流程群",
+                "name": "管理员协调群",
                 "cwd": "",
                 "orchestrationMode": "host",
                 "agents": [
-                    {"profile": "host", "displayName": "主持人", "isHost": True},
+                    {"profile": "host", "displayName": "管理员", "isHost": True},
                     {"profile": "one", "displayName": "成员一"},
                     {"profile": "two", "displayName": "成员二"},
                 ],
@@ -738,7 +738,7 @@ class GroupHostContractTests(unittest.TestCase):
                 "cwd": "",
                 "orchestrationMode": "host",
                 "agents": [
-                    {"profile": "host", "displayName": "主持人", "isHost": True},
+                    {"profile": "host", "displayName": "管理员", "isHost": True},
                     {"profile": "one", "displayName": "成员一"},
                     {"profile": "two", "displayName": "成员二"},
                 ],
@@ -826,11 +826,11 @@ class GroupHostContractTests(unittest.TestCase):
             store.initialize()
             room = store.create_room({
                 "requestId": new_id(),
-                "name": "主持复核群",
+                "name": "管理员复核团队",
                 "cwd": "",
                 "orchestrationMode": "host",
                 "agents": [
-                    {"profile": "host", "displayName": "主持人", "isHost": True},
+                    {"profile": "host", "displayName": "管理员", "isHost": True},
                     {"profile": "worker", "displayName": "执行者"},
                     {"profile": "other", "displayName": "其他成员"},
                 ],
@@ -896,7 +896,7 @@ class GroupHostContractTests(unittest.TestCase):
                 "cwd": "",
                 "orchestrationMode": "host",
                 "agents": [
-                    {"profile": "host", "displayName": "主持人", "isHost": True},
+                    {"profile": "host", "displayName": "管理员", "isHost": True},
                     {"profile": "one", "displayName": "成员一"},
                     {"profile": "two", "displayName": "成员二"},
                 ],

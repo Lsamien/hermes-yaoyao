@@ -22,7 +22,7 @@ interface CreateGroupPayload {
   orchestrationMode?: 'free' | 'host'
 }
 
-const props = withDefaults(defineProps<{ open: boolean; profiles: GroupProfileOption[]; avatarEnabled?: boolean; hostEnabled?: boolean; hostFlowEnabled?: boolean; roomInstructionsEnabled?: boolean; busy?: boolean }>(), {
+const props = withDefaults(defineProps<{ open: boolean; profiles: GroupProfileOption[]; avatarEnabled?: boolean; hostEnabled?: boolean; hostFlowEnabled?: boolean; roomInstructionsEnabled?: boolean; error?: string; busy?: boolean }>(), {
   avatarEnabled: false,
   hostEnabled: false,
   hostFlowEnabled: false,
@@ -175,7 +175,7 @@ function create() {
           <section v-if="selectedPreset" class="role-mapping" aria-labelledby="role-mapping-label">
             <div class="role-mapping__heading"><span id="role-mapping-label">角色分配</span><small>{{ selectedPreset.roles.length }} 个角色已对应当前 Agent</small></div>
             <label v-for="(role, index) in selectedPreset.roles" :key="role.name">
-              <span><strong>{{ role.name }}<em v-if="hostEnabled && role.host">主持人</em></strong><small>{{ role.description }}</small></span>
+              <span><strong>{{ role.name }}<em v-if="hostEnabled && role.host">管理员</em></strong><small>{{ role.description }}</small></span>
               <select :value="selected[index]" :aria-label="`${role.name}对应的 Agent`" @change="assignRole(index, ($event.target as HTMLSelectElement).value)">
                 <option v-for="profile in profiles" :key="profile.id" :value="profile.id">{{ profile.displayName }} · {{ profile.nodeLabel }}</option>
               </select>
@@ -189,22 +189,23 @@ function create() {
             <p v-if="!profiles.length">当前没有可用 Agent，请先在 Hermes 配置 Profile。</p>
           </div>
           <label v-if="hostEnabled && !selectedPreset" class="host-picker">
-            <span>主持人<small>用户没有明确 @ 时，主持人始终负责回应。</small></span>
-            <select v-model="hostProfile" aria-label="主持人">
+            <span>管理员<small>用户没有明确 @ 时，管理员始终负责回应。</small></span>
+            <select v-model="hostProfile" aria-label="管理员">
               <option v-for="profileID in selected" :key="profileID" :value="profileID">{{ profiles.find(profile => profile.id === profileID)?.displayName || profileID }}</option>
             </select>
           </label>
           <label v-if="hostFlowEnabled" class="host-picker">
-            <span>协作模式<small>主持人可按依赖串行调度，也可一次 @ 多人并列执行；整批结束后统一复核。</small></span>
+            <span>协作模式<small>管理员可按依赖串行调度，也可一次 @ 多人并列执行；整批结束后统一复核。</small></span>
             <select v-model="orchestrationMode" aria-label="协作模式">
               <option value="free">自由讨论</option>
-              <option value="host">主持流程</option>
+              <option value="host">管理员协调</option>
             </select>
           </label>
           <div class="dialog-settings">
             <label><input v-model="autoReply" type="checkbox" :aria-label="hostEnabled ? '所有成员无需 @ 也回复' : '启用自动回复'" />{{ hostEnabled ? (orchestrationMode === 'host' ? '自由讨论时无需 @ 也回复' : '所有成员无需 @ 也回复') : '启用自动回复' }}</label>
             <label>最多轮数 <input v-model.number="replyRounds" type="number" min="1" max="12" /></label>
           </div>
+          <p v-if="error" class="create-error" role="alert">{{ error }}</p>
           <footer><button class="quiet-button" type="button" @click="emit('close')">取消</button><button class="solid-button" type="button" :disabled="!valid || busy" @click="create">{{ busy ? '创建中…' : '创建团队' }}</button></footer>
         </section>
       </div>
@@ -224,6 +225,7 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
 .role-mapping { margin-top: 17px; padding: 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-soft); }.role-mapping > label { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 42%); align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }.role-mapping > label:first-of-type { border-top: 0; }.role-mapping > label > span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.role-mapping strong { display: flex; align-items: center; gap: 6px; font-size: 10px; }.role-mapping strong em { padding: 2px 5px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-size: 8px; font-style: normal; font-weight: 600; }.role-mapping small { color: var(--text-muted); font-size: 9px; line-height: 1.4; }.role-mapping select { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; outline: none; background: var(--surface-raised); color: var(--text-primary); font-size: 9px; }.role-mapping select:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }
 .host-picker { display: grid; grid-template-columns: minmax(0, 1fr) 148px; align-items: center; gap: 12px; margin-top: 13px; padding: 11px; border: 1px solid var(--line); border-radius: 10px; color: var(--text-secondary); font-size: 10px; }.host-picker > span { display: flex; min-width: 0; flex-direction: column; gap: 3px; font-weight: 650; }.host-picker small { color: var(--text-muted); font-size: 9px; font-weight: 400; line-height: 1.45; }.host-picker select { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; outline: 0; background: var(--surface-soft); color: var(--text-primary); font-size: 10px; }.host-picker select:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }
 .dialog-settings { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 15px; padding: 11px; border-radius: 10px; background: var(--surface-soft); }.dialog-settings label { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 10px; }.dialog-settings input[type="checkbox"] { accent-color: var(--accent); }.dialog-settings input[type="number"] { width: 51px; padding: 4px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-raised); color: var(--text-primary); text-align: center; }
+.create-error { margin: 12px 0 0; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--danger) 34%, var(--line)); border-radius: 9px; background: color-mix(in srgb, var(--danger) 7%, transparent); color: var(--danger); font-size: 9px; line-height: 1.45; }
 footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .dialog-fade-enter-active, .dialog-fade-leave-active { transition: opacity 140ms ease; }.dialog-fade-enter-active .create-dialog, .dialog-fade-leave-active .create-dialog { transition: transform 170ms var(--ease-out); }.dialog-fade-enter-from, .dialog-fade-leave-to { opacity: 0; }.dialog-fade-enter-from .create-dialog, .dialog-fade-leave-to .create-dialog { transform: translateY(8px) scale(.985); }
 @media (max-width: 620px) { .preset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.role-mapping > label { grid-template-columns: 1fr; gap: 6px; }.host-picker { grid-template-columns: 1fr; }.host-picker select { width: 100%; } }
