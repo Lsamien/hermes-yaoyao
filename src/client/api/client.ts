@@ -107,8 +107,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     if (!response.ok) {
       const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : undefined
       const code = typeof record?.code === 'string' ? record.code : undefined
-      if ((response.status === 401 || response.status === 403)
-        && code !== 'invalid_csrf'
+      if (response.status === 401
         && options.notifyUnauthorized !== false) {
         for (const listener of unauthorizedListeners) listener()
       }

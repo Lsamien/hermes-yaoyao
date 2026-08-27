@@ -5,6 +5,7 @@ import request from 'supertest'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApplication, type ApplicationRuntime } from '../../src/server/app.js'
 import type { ServerConfig } from '../../src/server/config.js'
+import { systemUpdateRequestAllowed } from '../../src/server/routes.js'
 import { SystemUpdateManager } from '../../src/server/updateManager.js'
 
 const runtimes: ApplicationRuntime[] = []
@@ -27,6 +28,13 @@ function json(value: unknown, init: ResponseInit = {}) {
 }
 
 describe('system update routes', () => {
+  it('allows loopback updates and requires an explicit opt-in for LAN clients', () => {
+    expect(systemUpdateRequestAllowed('127.0.0.1')).toBe(true)
+    expect(systemUpdateRequestAllowed('::ffff:127.0.0.1')).toBe(true)
+    expect(systemUpdateRequestAllowed('192.168.1.8')).toBe(false)
+    expect(systemUpdateRequestAllowed('192.168.1.8', true)).toBe(true)
+  })
+
   it('checks and queues a fixed Web/plugin release through authenticated CSRF routes', async () => {
     const root = mkdtempSync(join(tmpdir(), 'hermes-system-update-routes-'))
     roots.push(root)

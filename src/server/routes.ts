@@ -26,7 +26,7 @@ import {
   UpstreamClient,
 } from './upstream.js'
 import { receiveGroupUploads, uploadMarkdown, UploadStore } from './uploads.js'
-import { SystemUpdateManager } from './updateManager.js'
+import { SystemUpdateManager, type SystemUpdateStatus } from './updateManager.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -213,10 +213,31 @@ async function requireYaoyaoStorageReady(
   }
 }
 
-function requireLocalSystemUpdate(ctx: Koa.Context, dependencies: RouteDependencies): void {
-  if (dependencies.config.allowRemoteUpdate) return
+export function systemUpdateRequestAllowed(address: string, allowRemoteUpdate = false): boolean {
+  if (allowRemoteUpdate) return true
+  return isLoopbackHost(address.replace(/^::ffff:/, ''))
+}
+
+function localSystemUpdateAllowed(ctx: Koa.Context, dependencies: RouteDependencies): boolean {
   const address = (ctx.req.socket.remoteAddress ?? '').replace(/^::ffff:/, '')
-  if (!isLoopbackHost(address)) {
+  return systemUpdateRequestAllowed(address, dependencies.config.allowRemoteUpdate)
+}
+
+function systemUpdateStatusForRequest(
+  ctx: Koa.Context,
+  dependencies: RouteDependencies,
+  status: SystemUpdateStatus,
+): SystemUpdateStatus {
+  if (!status.supported || localSystemUpdateAllowed(ctx, dependencies)) return status
+  return {
+    ...status,
+    supported: false,
+    unsupportedReason: '系统升级默认只允许在本机执行；可通过服务配置显式允许远程升级',
+  }
+}
+
+function requireLocalSystemUpdate(ctx: Koa.Context, dependencies: RouteDependencies): void {
+  if (!localSystemUpdateAllowed(ctx, dependencies)) {
     throw new HttpError(
       403,
       '系统升级默认只允许在本机执行',
@@ -925,7 +946,11 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     await withJar(ctx, async (jar) => {
       await requireGatewayAuthentication(ctx, dependencies, jar)
       const installedPluginVersion = await yaoyaoPluginVersion(dependencies, jar)
-      json(ctx, 200, dependencies.updates.status(installedPluginVersion))
+      json(ctx, 200, systemUpdateStatusForRequest(
+        ctx,
+        dependencies,
+        dependencies.updates.status(installedPluginVersion),
+      ))
     })
   })
   router.post('/api/app/system/update/check', async (ctx) => {
@@ -933,7 +958,11 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       await requireGatewayAuthentication(ctx, dependencies, jar)
       const installedPluginVersion = await yaoyaoPluginVersion(dependencies, jar)
       try {
-        json(ctx, 200, await dependencies.updates.check(installedPluginVersion))
+        json(ctx, 200, systemUpdateStatusForRequest(
+          ctx,
+          dependencies,
+          await dependencies.updates.check(installedPluginVersion),
+        ))
       } catch (error) {
         throw updateFailure(error)
       }

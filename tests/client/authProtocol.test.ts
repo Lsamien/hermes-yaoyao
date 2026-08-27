@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bootstrap, login } from '@/api/auth'
-import { clearApiSecurityContext } from '@/api/client'
+import {
+  apiRequest,
+  clearApiSecurityContext,
+  onApiUnauthorized,
+  setApiCsrfToken,
+} from '@/api/client'
 
 afterEach(() => {
   clearApiSecurityContext()
@@ -60,5 +65,28 @@ describe('authentication and CSRF protocol', () => {
     await bootstrap()
     await expect(login({ username: 'name', password: 'wrong' })).rejects.toMatchObject({ status: 401 })
     await expect(login({ username: 'name', password: 'correct' })).resolves.toMatchObject({ user: { id: 'user-1' } })
+  })
+
+  it('keeps the login session for an authenticated 403 permission error', async () => {
+    let expirations = 0
+    const unsubscribe = onApiUnauthorized(() => { expirations += 1 })
+    setApiCsrfToken('csrf-permission')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      message: '系统升级默认只允许在本机执行',
+      code: 'remote_system_update_disabled',
+    }), { status: 403, headers: { 'content-type': 'application/json' } })))
+    try {
+      await expect(apiRequest('/api/app/system/update/apply', {
+        method: 'POST',
+        body: { targetVersion: '0.3.0' },
+      })).rejects.toMatchObject({
+        status: 403,
+        code: 'remote_system_update_disabled',
+        message: '系统升级默认只允许在本机执行',
+      })
+      expect(expirations).toBe(0)
+    } finally {
+      unsubscribe()
+    }
   })
 })
