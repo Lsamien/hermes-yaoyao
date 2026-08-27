@@ -49,15 +49,51 @@ function updateJob(jobPath, patch) {
   writeJSON(jobPath, { ...current, ...patch, updatedAt: new Date().toISOString() })
 }
 
+const COMMAND_OUTPUT_LIMIT = 6_000
+
+function cleanCommandOutput(value) {
+  if (value === undefined || value === null) return ''
+  return String(value)
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)([^@\s/]+)@/gi, '$1***@')
+    .replace(/([?&](?:access_token|token|password)=)[^&\s]+/gi, '$1***')
+    .trim()
+}
+
+function outputTail(value) {
+  if (value.length <= COMMAND_OUTPUT_LIMIT) return value
+  return `…已省略前面的输出…\n${value.slice(-COMMAND_OUTPUT_LIMIT)}`
+}
+
+export function formatCommandFailure(command, args, error) {
+  const commandLine = cleanCommandOutput([command, ...args].join(' '))
+  const status = typeof error?.status === 'number'
+    ? `，退出码 ${error.status}`
+    : error?.signal ? `，信号 ${error.signal}` : ''
+  const stdout = cleanCommandOutput(error?.stdout)
+  const stderr = cleanCommandOutput(error?.stderr)
+  let detail = [stdout, stderr].filter(Boolean).join('\n')
+  if (!detail) {
+    detail = cleanCommandOutput(error instanceof Error ? error.message : error)
+      .replace(/^Command failed:[^\n]*(?:\n|$)/, '')
+      .trim()
+  }
+  return `${commandLine} 失败${status}${detail ? `\n${outputTail(detail)}` : ''}`
+}
+
 function run(command, args, options = {}) {
-  return execFileSync(command, args, {
-    cwd: options.cwd,
-    env: options.env ?? process.env,
-    encoding: 'utf8',
-    stdio: options.inherit ? 'inherit' : 'pipe',
-    timeout: options.timeout ?? 120_000,
-    maxBuffer: 8 * 1_024 * 1_024,
-  })
+  try {
+    return execFileSync(command, args, {
+      cwd: options.cwd,
+      env: options.env ?? process.env,
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: options.timeout ?? 120_000,
+      maxBuffer: 8 * 1_024 * 1_024,
+    })
+  } catch (error) {
+    throw new Error(formatCommandFailure(command, args, error))
+  }
 }
 
 function pathInside(path, parent) {
@@ -258,8 +294,9 @@ function stageRelease(job, jobPath) {
   }
 
   updateJob(jobPath, { state: 'building', message: `正在构建 Web ${target.webVersion}` })
-  run('npm', ['ci'], { cwd: staging, inherit: true, timeout: 600_000 })
-  run('npm', ['run', 'build'], { cwd: staging, inherit: true, timeout: 600_000 })
+  const buildEnvironment = { ...process.env, NODE_ENV: 'development' }
+  run('npm', ['ci', '--include=dev'], { cwd: staging, env: buildEnvironment, timeout: 600_000 })
+  run('npm', ['run', 'build'], { cwd: staging, env: buildEnvironment, timeout: 600_000 })
   const finalRoot = join(releasesRoot, `${target.releaseVersion}-${commit.slice(0, 12)}`)
   if (existsSync(finalRoot)) removeInside(staging, releasesRoot)
   else renameSync(staging, finalRoot)

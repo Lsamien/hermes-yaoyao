@@ -2,7 +2,7 @@ import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { backupPlugin, currentTarget, restorePlugin, switchCurrent, validateManifest } from '../bin/hermes-yaoyao-updater.mjs'
+import { backupPlugin, currentTarget, formatCommandFailure, restorePlugin, switchCurrent, validateManifest } from '../bin/hermes-yaoyao-updater.mjs'
 
 const roots: string[] = []
 afterEach(() => {
@@ -30,6 +30,22 @@ describe('standalone updater primitives', () => {
       pluginVersion: '1.8.0',
       gitTag: 'v0.3.0',
     })).toThrow('版本组合不一致')
+  })
+
+  it('keeps useful command output while redacting credentials', () => {
+    const error = Object.assign(new Error('Command failed'), {
+      status: 127,
+      stdout: '\u001B[31m发布版本校验通过\u001B[0m',
+      stderr: 'https://secret@example.test/release.git\nsh: vue-tsc: command not found',
+    })
+
+    const message = formatCommandFailure('npm', ['run', 'build'], error)
+    expect(message).toContain('npm run build 失败，退出码 127')
+    expect(message).toContain('发布版本校验通过')
+    expect(message).toContain('https://***@example.test/release.git')
+    expect(message).toContain('vue-tsc: command not found')
+    expect(message).not.toContain('secret')
+    expect(message).not.toContain('\u001B')
   })
 
   it('backs up and restores plugin code without touching durable plugin data', () => {

@@ -11,6 +11,13 @@ const lock = await json('package-lock.json')
 const pluginManifest = await json('hermes-plugins/yaoyao/dashboard/manifest.json')
 const pluginYaml = await readFile(resolve(root, 'hermes-plugins/yaoyao/plugin.yaml'), 'utf8')
 const pluginYamlVersion = pluginYaml.match(/^version:\s*["']?([^"'\s]+)["']?\s*$/m)?.[1]
+const updaterBuildPackages = [
+  '@vitejs/plugin-vue',
+  '@vue/tsconfig',
+  'typescript',
+  'vite',
+  'vue-tsc',
+]
 
 const failures = []
 if (release.schemaVersion !== 1) failures.push('release.json schemaVersion 必须为 1')
@@ -22,6 +29,11 @@ if (lock.version !== release.webVersion || lock.packages?.['']?.version !== rele
 }
 if (pluginManifest.version !== release.pluginVersion) failures.push('插件 manifest.json 版本与 release.json 不一致')
 if (pluginYamlVersion !== release.pluginVersion) failures.push('plugin.yaml 版本与 release.json 不一致')
+for (const dependency of updaterBuildPackages) {
+  if (typeof pkg.dependencies?.[dependency] !== 'string') {
+    failures.push(`升级构建依赖 ${dependency} 必须位于 dependencies，以兼容旧版后台升级器`)
+  }
+}
 
 if (failures.length) {
   for (const failure of failures) process.stderr.write(`- ${failure}\n`)

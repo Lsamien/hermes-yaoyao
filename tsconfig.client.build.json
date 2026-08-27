@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.client.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.client.build.tsbuildinfo"
+  },
+  "include": ["src/client/**/*.ts", "src/client/**/*.vue", "src/shared/**/*.ts"]
+}

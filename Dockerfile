@@ -8,7 +8,7 @@ COPY package.json package-lock.json ./
 COPY release.json ./
 RUN npm ci
 
-COPY tsconfig.json tsconfig.client.json tsconfig.server.json vite.config.ts ./
+COPY tsconfig.json tsconfig.client.json tsconfig.client.build.json tsconfig.server.json vite.config.ts ./
 COPY index.html ./
 COPY public ./public
 COPY scripts ./scripts
