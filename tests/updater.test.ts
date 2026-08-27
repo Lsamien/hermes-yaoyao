@@ -2,7 +2,7 @@ import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { backupPlugin, currentTarget, formatCommandFailure, restorePlugin, switchCurrent, validateManifest } from '../bin/hermes-yaoyao-updater.mjs'
+import { backupPlugin, currentTarget, enabledPlugins, formatCommandFailure, restorePlugin, switchCurrent, validateManifest } from '../bin/hermes-yaoyao-updater.mjs'
 
 const roots: string[] = []
 afterEach(() => {
@@ -46,6 +46,21 @@ describe('standalone updater primitives', () => {
     expect(message).toContain('vue-tsc: command not found')
     expect(message).not.toContain('secret')
     expect(message).not.toContain('\u001B')
+  })
+
+  it('requests Hermes plugin configuration as JSON', () => {
+    const calls: Array<{ command: string, args: string[] }> = []
+    const plugins = enabledPlugins((command: string, args: string[]) => {
+      calls.push({ command, args })
+      return '["yaoyao", "other"]\n'
+    })
+
+    expect(plugins).toEqual(['yaoyao', 'other'])
+    expect(calls).toEqual([{
+      command: 'hermes',
+      args: ['config', 'get', '--json', 'plugins.enabled'],
+    }])
+    expect(() => enabledPlugins(() => '- yaoyao\n')).toThrow('未返回有效 JSON')
   })
 
   it('backs up and restores plugin code without touching durable plugin data', () => {

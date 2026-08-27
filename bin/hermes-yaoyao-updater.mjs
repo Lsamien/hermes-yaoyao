@@ -124,10 +124,15 @@ function stopDashboard() {
   try { run('hermes', ['dashboard', '--stop'], { timeout: 30_000 }) } catch { /* already stopped */ }
 }
 
-function enabledPlugins() {
-  const raw = run('hermes', ['config', 'get', 'plugins.enabled']).trim()
+export function enabledPlugins(runCommand = run) {
+  const raw = runCommand('hermes', ['config', 'get', '--json', 'plugins.enabled']).trim()
   if (!raw) return []
-  const value = JSON.parse(raw)
+  let value
+  try {
+    value = JSON.parse(raw)
+  } catch {
+    fail('Hermes plugins.enabled 未返回有效 JSON')
+  }
   if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
     fail('Hermes plugins.enabled 不是字符串数组')
   }
