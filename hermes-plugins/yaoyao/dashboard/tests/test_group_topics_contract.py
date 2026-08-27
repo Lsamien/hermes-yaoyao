@@ -11,7 +11,7 @@ import unittest
 import uuid
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import UploadFile
 from starlette.datastructures import Headers
@@ -54,6 +54,7 @@ class GroupTopicsContractTests(unittest.TestCase):
             if hasattr(route, "methods")
         }
         self.assertIn(("/v1/rooms/{room_id}/topics", ("GET",)), route_methods)
+        self.assertIn(("/v1/topics", ("GET",)), route_methods)
         self.assertIn(
             ("/v1/rooms/{room_id}/topics/{topic_id}", ("PATCH",)),
             route_methods,
@@ -70,6 +71,93 @@ class GroupTopicsContractTests(unittest.TestCase):
         self.assertIn(
             ("/v1/rooms/{room_id}/uploads", ("POST",)), route_methods
         )
+
+    def test_capabilities_advertise_global_topics(self) -> None:
+        with patch.object(
+            group_plugin_api,
+            "_store_call",
+            new_callable=AsyncMock,
+            side_effect=[new_id(), 0],
+        ):
+            payload = asyncio.run(group_plugin_api.capabilities())
+        self.assertIn("globalTopics", payload["features"])
+
+    def test_global_topics_are_stably_paginated_and_exclude_archived_scope(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = GroupStore(Path(directory) / "group.db")
+            store.initialize()
+
+            def make_room(name: str) -> dict[str, object]:
+                return store.create_room({
+                    "requestId": new_id(),
+                    "name": name,
+                    "cwd": "",
+                    "agents": [{"profile": "default"}],
+                })
+
+            def make_topic(room_id: str, title: str) -> str:
+                created = store.create_human_message(
+                    room_id,
+                    request_id=new_id(),
+                    client_message_id=new_id(),
+                    topic_id=new_id(),
+                    content=title,
+                    mention_agent_ids=[],
+                )
+                return created["message"]["topicId"]
+
+            room_a = make_room("设计团队")
+            room_b = make_room("发布团队")
+            archived_room = make_room("归档团队")
+            pinned_id = make_topic(room_a["id"], "置顶但较早")
+            recent_a_id = make_topic(room_a["id"], "最近二")
+            archived_topic_id = make_topic(room_a["id"], "归档话题")
+            recent_b_id = make_topic(room_b["id"], "最近一")
+            hidden_room_topic_id = make_topic(archived_room["id"], "隐藏团队话题")
+
+            with store.write_transaction() as connection:
+                values = {
+                    pinned_id: (1, 100.0, 0),
+                    recent_a_id: (0, 300.0, 0),
+                    archived_topic_id: (1, 500.0, 1),
+                    recent_b_id: (0, 300.0, 0),
+                    hidden_room_topic_id: (1, 600.0, 0),
+                }
+                for topic_id, (pinned, updated_at, archived) in values.items():
+                    connection.execute(
+                        "UPDATE group_topics SET pinned = ?, updated_at = ?, archived = ? WHERE id = ?",
+                        (pinned, updated_at, archived, topic_id),
+                    )
+                connection.execute(
+                    "UPDATE group_rooms SET archived = 1 WHERE id = ?",
+                    (archived_room["id"],),
+                )
+
+            first = store.list_global_topics(limit=2, cursor=None)
+            second = store.list_global_topics(limit=2, cursor=first.next_cursor)
+            ordered_recent = sorted(
+                [recent_a_id, recent_b_id], reverse=True
+            )
+            self.assertEqual(
+                [item["id"] for item in first.items],
+                [pinned_id, ordered_recent[0]],
+            )
+            self.assertEqual(
+                [item["id"] for item in second.items],
+                [ordered_recent[1]],
+            )
+            self.assertIsNotNone(first.next_cursor)
+            self.assertIsNone(second.next_cursor)
+            self.assertNotIn(archived_topic_id, {
+                item["id"] for item in [*first.items, *second.items]
+            })
+            self.assertNotIn(hidden_room_topic_id, {
+                item["id"] for item in [*first.items, *second.items]
+            })
+            with self.assertRaisesRegex(ValueError, "cursor is malformed"):
+                store.list_global_topics(limit=2, cursor="not-a-valid-cursor")
 
     def test_group_upload_persists_server_readable_attachment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

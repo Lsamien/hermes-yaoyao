@@ -72,6 +72,17 @@ export async function getPinnedGroupTopics(limit = 100): Promise<GroupTopicPage>
   return { items: values(source.items ?? source.topics ?? payload).map(normalizeGroupTopic).filter(topic => topic.id && topic.roomId), nextCursor: null }
 }
 
+export async function getGlobalGroupTopics(cursor?: string, limit = 50): Promise<GroupTopicPage> {
+  const payload = unwrapData(await apiRequest<unknown>(apiUrl(`${BASE}/topics`, {
+    cursor, limit: Math.max(1, Math.min(100, limit)),
+  })))
+  const source = record(payload)
+  return {
+    items: values(source.items ?? source.topics ?? payload).map(normalizeGroupTopic).filter(topic => topic.id && topic.roomId),
+    nextCursor: typeof source.nextCursor === 'string' ? source.nextCursor : typeof source.next_cursor === 'string' ? source.next_cursor : null,
+  }
+}
+
 export async function updateGroupTopic(roomId: string, topicId: string, input: { title?: string; pinned?: boolean }): Promise<GroupTopicSummary> {
   return normalizeGroupTopic(unwrapData(await apiRequest<unknown>(`${BASE}/rooms/${encodeURIComponent(roomId)}/topics/${encodeURIComponent(topicId)}`, {
     method: 'PATCH', body: { requestId: requestId(), ...input } as JsonValue,

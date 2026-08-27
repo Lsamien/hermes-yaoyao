@@ -1967,6 +1967,70 @@ class GroupStore:
             )
         return CursorPage(items=items, next_cursor=next_cursor)
 
+    def list_global_topics(
+        self, *, limit: int, cursor: str | None
+    ) -> CursorPage:
+        """Return active topics across active rooms in stable professional order."""
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or not 1 <= limit <= 100
+        ):
+            raise ValueError("limit must be an integer from 1 to 100")
+        cursor_values = (
+            self._decode_global_topic_cursor(cursor)
+            if cursor is not None
+            else None
+        )
+        query = """SELECT topic.*,
+            (SELECT COUNT(*) FROM group_messages AS counted
+             WHERE counted.topic_id = topic.id AND counted.visible = 1)
+                AS message_count,
+            COALESCE((SELECT CASE WHEN TRIM(latest.content) != ''
+                                  THEN latest.content ELSE latest.error END
+             FROM group_messages AS latest
+             WHERE latest.topic_id = topic.id AND latest.visible = 1
+               AND (TRIM(latest.content) != '' OR TRIM(latest.error) != '')
+             ORDER BY latest.seq DESC LIMIT 1), '') AS preview,
+            (SELECT COUNT(*) FROM group_messages AS unread
+             WHERE unread.topic_id = topic.id AND unread.visible = 1
+               AND unread.sender_kind = 'agent'
+               AND (TRIM(unread.content) != '' OR TRIM(unread.error) != '')
+               AND unread.seq > topic.last_read_message_seq) AS unread_count,
+            COALESCE((SELECT MAX(visible_message.seq)
+             FROM group_messages AS visible_message
+             WHERE visible_message.topic_id = topic.id
+               AND visible_message.visible = 1), 0) AS latest_message_seq
+            FROM group_topics AS topic
+            INNER JOIN group_rooms AS room ON room.id = topic.room_id
+            WHERE topic.archived = 0 AND room.archived = 0"""
+        params: list[object] = []
+        if cursor_values is not None:
+            pinned, updated_at, topic_id = cursor_values
+            query += """ AND (
+                topic.pinned < ? OR (
+                    topic.pinned = ? AND (
+                        topic.updated_at < ? OR (
+                            topic.updated_at = ? AND topic.id < ?
+                        )
+                    )
+                )
+            )"""
+            params.extend((pinned, pinned, updated_at, updated_at, topic_id))
+        query += " ORDER BY topic.pinned DESC, topic.updated_at DESC, topic.id DESC LIMIT ?"
+        params.append(limit + 1)
+        with self.read_transaction() as connection:
+            rows = connection.execute(query, params).fetchall()
+        has_more = len(rows) > limit
+        items = [self._topic_summary(row) for row in rows[:limit]]
+        next_cursor = None
+        if has_more and items:
+            last = rows[limit - 1]
+            next_cursor = self._encode_global_topic_cursor(
+                bool(last["pinned"]), last["updated_at"], last["id"]
+            )
+        return CursorPage(items=items, next_cursor=next_cursor)
+
     def list_pinned_topics(self, *, limit: int) -> CursorPage:
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
             raise ValueError("limit must be an integer from 1 to 100")
@@ -7311,3 +7375,57 @@ class GroupStore:
         if room_id != expected_room_id:
             raise ValueError("cursor does not belong to room")
         return updated_at, topic_id
+
+    @staticmethod
+    def _encode_global_topic_cursor(
+        pinned: bool, updated_at: float, topic_id: str
+    ) -> str:
+        raw = json.dumps(
+            ["global-topic", int(pinned), updated_at, topic_id],
+            separators=(",", ":"),
+        ).encode()
+        return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    @classmethod
+    def _decode_global_topic_cursor(
+        cls, cursor: str
+    ) -> tuple[int, float, str]:
+        if (
+            not isinstance(cursor, str)
+            or not cursor
+            or not re.fullmatch(r"[A-Za-z0-9_-]+", cursor)
+        ):
+            raise ValueError("cursor is malformed")
+        try:
+            raw = base64.b64decode(
+                cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True
+            )
+            decoded = json.loads(raw.decode("utf-8"))
+            if (
+                not isinstance(decoded, list)
+                or len(decoded) != 4
+                or decoded[0] != "global-topic"
+                or isinstance(decoded[1], bool)
+                or decoded[1] not in (0, 1)
+                or isinstance(decoded[2], bool)
+                or not isinstance(decoded[2], (int, float))
+                or not math.isfinite(decoded[2])
+            ):
+                raise ValueError
+            pinned = int(decoded[1])
+            updated_at = float(decoded[2])
+            topic_id = cls._canonical_uuid(decoded[3], "cursor topic id")
+            if cursor != cls._encode_global_topic_cursor(
+                bool(pinned), updated_at, topic_id
+            ):
+                raise ValueError
+            return pinned, updated_at, topic_id
+        except (
+            ValueError,
+            TypeError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            binascii.Error,
+            OverflowError,
+        ) as error:
+            raise ValueError("cursor is malformed") from error

@@ -1137,7 +1137,8 @@ async def capabilities() -> dict[str, object]:
         "limits": limits_payload(),
         "eventTypes": sorted(EVENT_TYPES),
         "features": [
-            "hostFlow", "roomInstructions", "roomAvatar", "nodeWorker", "nodeRegistry"
+            "hostFlow", "roomInstructions", "roomAvatar", "globalTopics",
+            "nodeWorker", "nodeRegistry"
         ],
     }
 
@@ -1162,6 +1163,16 @@ async def list_topics(
     page = await _store_call(
         "list_topics", str(room_id), limit=limit, cursor=cursor,
         archived=archived,
+    )
+    return {"items": page.items, "nextCursor": page.next_cursor}
+
+
+async def list_global_topics(
+    limit: int = Query(default=50, ge=1, le=100),
+    cursor: str | None = Query(default=None, min_length=1, max_length=4096),
+) -> dict[str, object]:
+    page = await _store_call(
+        "list_global_topics", limit=limit, cursor=cursor
     )
     return {"items": page.items, "nextCursor": page.next_cursor}
 
@@ -1535,6 +1546,7 @@ def _build_router() -> APIRouter:
     )
     built.add_api_route("/capabilities", capabilities, methods=["GET"])
     built.add_api_route("/rooms", list_rooms, methods=["GET"])
+    built.add_api_route("/topics", list_global_topics, methods=["GET"])
     built.add_api_route("/topics/pinned", list_pinned_topics, methods=["GET"])
     built.add_api_route("/rooms", create_room, methods=["POST"])
     built.add_api_route("/rooms/{room_id}", get_room, methods=["GET"])

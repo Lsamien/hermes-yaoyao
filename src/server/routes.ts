@@ -976,6 +976,11 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       search: searchFrom(ctx, ['limit']),
     })
   })
+  router.get('/api/app/groups/topics', async (ctx) => {
+    await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/topics', {
+      search: searchFrom(ctx, ['limit', 'cursor']),
+    })
+  })
   router.post('/api/app/groups/rooms', async (ctx) => {
     await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/rooms', {
       method: 'POST', requestBody: body(ctx),

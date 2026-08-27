@@ -336,6 +336,17 @@ describe('8800 BFF', () => {
     const topicID = '22222222-2222-4222-8222-222222222222'
 
     await request(runtime.app.callback())
+      .get('/api/app/groups/topics?limit=40&cursor=next-global-topic&archived=true&ignored=drop-me')
+      .set('Host', '127.0.0.1:8800')
+      .expect(200)
+    const globalTopics = records.at(-1)!
+    expect(globalTopics.path).toBe('/api/plugins/yaoyao/v1/topics')
+    expect(globalTopics.search.get('limit')).toBe('40')
+    expect(globalTopics.search.get('cursor')).toBe('next-global-topic')
+    expect(globalTopics.search.has('archived')).toBe(false)
+    expect(globalTopics.search.has('ignored')).toBe(false)
+
+    await request(runtime.app.callback())
       .get(`/api/app/groups/rooms/${roomID}/topics?limit=25&cursor=next-topic&archived=true&ignored=drop-me`)
       .set('Host', '127.0.0.1:8800')
       .expect(200)
