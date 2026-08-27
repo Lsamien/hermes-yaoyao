@@ -18,6 +18,7 @@ import type { ServerConfig } from './config.js'
 import { DEFAULT_YAOYAO_RELEASE_SOURCE } from './config.js'
 import {
   compareReleaseVersions,
+  parseReleaseManifest,
   readReleaseManifest,
   type ReleaseManifest,
 } from './releases.js'
@@ -91,11 +92,56 @@ export interface SystemUpdateManagerOptions {
 
 function run(command: string, args: string[], timeout = 30_000): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    execFile(command, args, { encoding: 'utf8', timeout, maxBuffer: 4 * 1_024 * 1_024 }, (error, stdout) => {
-      if (error) reject(error)
+    execFile(command, args, { encoding: 'utf8', timeout, maxBuffer: 4 * 1_024 * 1_024 }, (error, stdout, stderr) => {
+      if (error) {
+        const detail = stderr.trim()
+        reject(detail ? new Error(detail) : error)
+      }
       else resolvePromise(stdout)
     })
   })
+}
+
+export function releaseManifestURL(source: string, tag: string): URL | undefined {
+  try {
+    const url = new URL(source)
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return undefined
+    url.hash = ''
+    url.search = ''
+    url.pathname = `${url.pathname.replace(/\/+$/, '').replace(/\.git$/, '')}/raw/${encodeURIComponent(tag)}/release.json`
+    return url
+  } catch {
+    return undefined
+  }
+}
+
+async function fetchReleaseManifest(source: string, tag: string): Promise<ReleaseManifest | undefined> {
+  const url = releaseManifestURL(source, tag)
+  if (!url) return undefined
+  let response: Response
+  try {
+    response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(15_000) })
+  } catch {
+    return undefined
+  }
+  if (!response.ok) return undefined
+  try {
+    return parseReleaseManifest(await response.json())
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error('远端 release.json 不是有效的 JSON')
+    throw error
+  }
+}
+
+function exactTagCommit(output: string): string | undefined {
+  let commit: string | undefined
+  for (const line of output.split('\n')) {
+    const [candidate = '', reference = ''] = line.trim().split(/\s+/, 2)
+    if (!/^[0-9a-f]{40,64}$/.test(candidate)) continue
+    if (reference.endsWith('^{}')) return candidate
+    if (reference) commit = candidate
+  }
+  return commit
 }
 
 export async function inspectGitRemote(source: string, current: ReleaseManifest): Promise<RemoteRelease | undefined> {
@@ -115,17 +161,27 @@ export async function inspectGitRemote(source: string, current: ReleaseManifest)
   const latest = releases.at(-1)
   if (!latest || compareReleaseVersions(latest.version, current.releaseVersion) <= 0) return undefined
 
-  const temporary = mkdtempSync(join(tmpdir(), 'hermes-yaoyao-update-check-'))
-  try {
-    await run('git', ['clone', '--quiet', '--depth', '1', '--single-branch', '--branch', `v${latest.version}`, source, temporary], 60_000)
-    const commit = (await run('git', ['-C', temporary, 'rev-parse', 'HEAD'])).trim()
-    if (commit !== latest.commit) throw new Error('远端发布标签在检查期间发生变化')
-    const manifest = readReleaseManifest(join(temporary, 'release.json'))
-    if (manifest.releaseVersion !== latest.version) throw new Error('远端标签与 release.json 版本不一致')
-    return { manifest, commit }
-  } finally {
-    rmSync(temporary, { recursive: true, force: true })
+  const tag = `v${latest.version}`
+  let manifest = await fetchReleaseManifest(source, tag)
+  if (!manifest) {
+    const temporary = mkdtempSync(join(tmpdir(), 'hermes-yaoyao-update-check-'))
+    try {
+      await run('git', [
+        'clone', '--quiet', '--filter=blob:none', '--no-checkout', '--depth', '1',
+        '--single-branch', '--branch', tag, source, temporary,
+      ], 180_000)
+      const commit = (await run('git', ['-C', temporary, 'rev-parse', 'HEAD'])).trim()
+      if (commit !== latest.commit) throw new Error('远端发布标签在检查期间发生变化')
+      manifest = parseReleaseManifest(JSON.parse(await run('git', ['-C', temporary, 'show', 'HEAD:release.json'])))
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  } else {
+    const verification = await run('git', ['ls-remote', '--tags', source, `refs/tags/${tag}*`])
+    if (exactTagCommit(verification) !== latest.commit) throw new Error('远端发布标签在检查期间发生变化')
   }
+  if (manifest.releaseVersion !== latest.version) throw new Error('远端标签与 release.json 版本不一致')
+  return { manifest, commit: latest.commit }
 }
 
 function publicJob(job: StoredUpdateJob | undefined): UpdateJob | undefined {

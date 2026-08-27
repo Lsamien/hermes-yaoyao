@@ -247,7 +247,7 @@ function stageRelease(job, jobPath) {
   const staging = join(releasesRoot, `.staging-${id}`)
   removeInside(staging, releasesRoot)
   updateJob(jobPath, { state: 'downloading', message: `正在下载 ${target.gitTag}` })
-  run('git', ['clone', '--quiet', '--depth', '1', '--single-branch', '--branch', target.gitTag, plan.source, staging], { timeout: 180_000 })
+  run('git', ['clone', '--quiet', '--depth', '1', '--single-branch', '--branch', target.gitTag, plan.source, staging], { timeout: 600_000 })
   const manifest = validateManifest(readJSON(join(staging, 'release.json')))
   for (const field of ['schemaVersion', 'releaseVersion', 'webVersion', 'pluginVersion', 'gitTag']) {
     if (manifest[field] !== target[field]) fail('下载的发布清单与检查结果不一致')

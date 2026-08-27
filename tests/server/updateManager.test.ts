@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ServerConfig } from '../../src/server/config.js'
 import { compareReleaseVersions, parseReleaseManifest } from '../../src/server/releases.js'
-import { inspectGitRemote, SystemUpdateManager } from '../../src/server/updateManager.js'
+import { inspectGitRemote, releaseManifestURL, SystemUpdateManager } from '../../src/server/updateManager.js'
 
 const roots: string[] = []
 const current = {
@@ -50,6 +50,14 @@ function fixture() {
 }
 
 describe('system release contract', () => {
+  it('maps an HTTPS Git source to the lightweight tagged release manifest', () => {
+    expect(releaseManifestURL(
+      'https://git.samien.cn/samien/hermes-yaoyao.git',
+      'v0.2.1',
+    )?.href).toBe('https://git.samien.cn/samien/hermes-yaoyao/raw/v0.2.1/release.json')
+    expect(releaseManifestURL('/srv/git/hermes-yaoyao.git', 'v0.2.1')).toBeUndefined()
+  })
+
   it('validates paired versions and semantic ordering', () => {
     expect(parseReleaseManifest(current)).toEqual(current)
     expect(compareReleaseVersions('0.3.0', '0.2.9')).toBeGreaterThan(0)
