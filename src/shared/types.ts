@@ -400,9 +400,6 @@ export interface GroupTopicSummary {
   roomId: string
   title: string
   preview: string
-  lastSenderKind?: 'human' | 'agent' | 'system' | 'unknown'
-  lastSenderId?: string
-  lastSenderName?: string
   messageCount: number
   unreadCount?: number
   latestMessageSeq?: number

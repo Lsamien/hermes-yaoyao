@@ -159,55 +159,6 @@ class GroupTopicsContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "cursor is malformed"):
                 store.list_global_topics(limit=2, cursor="not-a-valid-cursor")
 
-    def test_topic_summaries_expose_the_latest_agent_sender(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            store = GroupStore(Path(directory) / "group.db")
-            store.initialize()
-            room = store.create_room({
-                "requestId": new_id(),
-                "name": "研究团队",
-                "cwd": "",
-                "agents": [{
-                    "profile": "researcher",
-                    "displayName": "研究 Agent",
-                }],
-            })
-            [agent] = room["agents"]
-            created = store.create_human_message(
-                room["id"],
-                request_id=new_id(),
-                client_message_id=new_id(),
-                topic_id=new_id(),
-                content="请整理结论",
-                mention_agent_ids=[agent["id"]],
-            )
-            [run] = created["runs"]
-            self.assertEqual(store.claim_next_runnable_run()["id"], run["id"])
-            reply = store.upsert_agent_message(
-                run["id"],
-                content="已经整理完成",
-                reasoning="",
-                tool_state=[],
-                status="completed",
-            )
-
-            [room_topic] = store.list_topics(
-                room["id"], limit=10, cursor=None
-            ).items
-            global_topic = next(
-                item for item in store.list_global_topics(
-                    limit=10, cursor=None
-                ).items
-                if item["id"] == room_topic["id"]
-            )
-            for summary in (room_topic, global_topic):
-                self.assertEqual(summary["preview"], "已经整理完成")
-                self.assertEqual(summary["lastSenderKind"], "agent")
-                self.assertEqual(summary["lastSenderId"], agent["id"])
-                self.assertEqual(
-                    summary["lastSenderName"], reply["senderName"]
-                )
-
     def test_group_upload_persists_server_readable_attachment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = GroupStore(Path(directory) / "group.db")
@@ -586,9 +537,6 @@ class GroupTopicsContractTests(unittest.TestCase):
                     "roomId",
                     "title",
                     "preview",
-                    "lastSenderKind",
-                    "lastSenderId",
-                    "lastSenderName",
                     "messageCount",
                     "unreadCount",
                     "latestMessageSeq",
@@ -669,8 +617,6 @@ class GroupTopicsContractTests(unittest.TestCase):
             summary_a = next(item for item in summaries if item["id"] == topic_a)
             self.assertEqual(summary_a["title"], "第一个话题")
             self.assertEqual(summary_a["preview"], "第一个话题的后续")
-            self.assertEqual(summary_a["lastSenderKind"], "human")
-            self.assertEqual(summary_a["lastSenderName"], "你")
             self.assertEqual(summary_a["messageCount"], 4)
 
             other_room = store.create_room({
