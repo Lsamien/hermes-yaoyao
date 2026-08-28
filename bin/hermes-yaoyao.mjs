@@ -48,6 +48,10 @@ function environment(env = process.env) {
     'HERMES_YAOYAO_RELEASE_SOURCE',
     'HERMES_YAOYAO_RELEASE_ROOT',
     'HERMES_YAOYAO_ALLOW_REMOTE_UPDATE',
+    'HERMES_YAOYAO_APNS_KEY_FILE',
+    'HERMES_YAOYAO_APNS_KEY_ID',
+    'HERMES_YAOYAO_APNS_TEAM_ID',
+    'HERMES_YAOYAO_APNS_TOPIC',
     'HERMES_YAOYAO_SERVICE_ROOT',
   ]
   return Object.fromEntries(allowed.flatMap(key => env[key] ? [[key, env[key]]] : []))

@@ -27,6 +27,7 @@ import { loadComposerFile } from '@/components/workspace/pendingComposer'
 import { readAgentShowThinking, writeAgentShowThinking } from '@/utils/sessionPreferences'
 import { agentToUi, groupInteraction, groupMessageToUi, roomSidebarItem, roomToUi } from '@/components/workspace/viewModels'
 import { getModels } from '@/api/profiles'
+import { getGroupPushSubscriptions, getPushCapabilities, setGroupPushSubscription } from '@/api/push'
 import { useAuthStore } from '@/stores/auth'
 import { useGroupsStore } from '@/stores/groups'
 
@@ -56,6 +57,11 @@ const topicListRoomId = ref<string | null>(null)
 const archivedOverlayOpen = ref(false)
 const archivedRoomList = ref<GroupRoomSummary[]>([])
 const archivedTopicList = ref<GroupTopicSummary[]>([])
+const pushProtocolSupported = ref(false)
+const pushConfigured = ref(false)
+const subscribedPushRooms = ref<Set<string>>(new Set())
+const pushSubscriptionBusy = ref(false)
+const pushSubscriptionError = ref('')
 
 const activeRooms = computed(() => groups.rooms.filter(room => !room.archived))
 const roomSidebarItems = computed(() => activeRooms.value.map(room => {
@@ -152,6 +158,9 @@ const displayAgents = computed(() => groups.agents.map(agent => {
   return identity ? { ...agent, displayName: identity.name } : agent
 }))
 const messages = computed(() => groups.messages.map(message => groupMessageToUi(message, displayAgents.value)))
+const selectedRoomPushEnabled = computed(() => Boolean(
+  groups.selectedRoomId && subscribedPushRooms.value.has(groups.selectedRoomId),
+))
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
 const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
 const agents = computed(() => displayAgents.value.map(agentToUi))
@@ -434,9 +443,48 @@ async function send(payload: ComposerSubmit) {
   const prefix = quoted.value ? `> ${quoted.value.content.replace(/\n/g, '\n> ')}\n\n` : ''
   try {
     await groups.sendMessage(`${prefix}${payload.text}`, payload.mentionIds, payload.files)
+    if (pushProtocolSupported.value && groups.selectedRoomId) {
+      void loadPushSubscriptions()
+    }
     quoted.value = null
     composer.value?.clearAfterSend()
   } catch { /* store publishes the error */ }
+}
+
+async function loadPushSubscriptions() {
+  pushSubscriptionError.value = ''
+  try {
+    const capabilities = await getPushCapabilities()
+    pushProtocolSupported.value = capabilities.protocolVersion === 1
+    pushConfigured.value = capabilities.enabled
+    subscribedPushRooms.value = pushProtocolSupported.value
+      ? await getGroupPushSubscriptions()
+      : new Set()
+  } catch {
+    // Older 8800 installations do not expose push capability. Keep group chat
+    // fully functional and simply omit the subscription control.
+    pushProtocolSupported.value = false
+    pushConfigured.value = false
+    subscribedPushRooms.value = new Set()
+  }
+}
+
+async function toggleSelectedRoomPush() {
+  const roomId = groups.selectedRoomId
+  if (!roomId || !pushProtocolSupported.value || !pushConfigured.value || pushSubscriptionBusy.value) return
+  pushSubscriptionBusy.value = true
+  pushSubscriptionError.value = ''
+  try {
+    const enabled = await setGroupPushSubscription(roomId, !selectedRoomPushEnabled.value)
+    const next = new Set(subscribedPushRooms.value)
+    if (enabled) next.add(roomId)
+    else next.delete(roomId)
+    subscribedPushRooms.value = next
+  } catch (cause) {
+    pushSubscriptionError.value = cause instanceof Error ? cause.message : '无法更新团队推送设置'
+  } finally {
+    pushSubscriptionBusy.value = false
+  }
 }
 
 async function updateRoom(patch: { name?: string; instructions?: string; avatar?: string; replyRounds?: number; orchestrationMode?: 'free' | 'host' }) {
@@ -605,6 +653,7 @@ onMounted(async () => {
   document.addEventListener('pointerdown', handleRoomActionPointer)
   document.addEventListener('keydown', handleRoomActionKey)
   restoreShowThinking()
+  void loadPushSubscriptions()
   try {
     await groups.start()
     const requested = typeof route.params.roomId === 'string' ? route.params.roomId : ''
@@ -720,11 +769,12 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
           <div class="group-header-actions">
             <span v-if="hostAgent" class="group-host-chip" :title="`用户未明确 @ 时由管理员 ${hostAgent.displayName || hostAgent.profile} 负责回应`">管理员 {{ hostAgent.displayName || hostAgent.profile }}</span>
             <div class="group-avatars" aria-label="团队成员"><AgentAvatar v-for="agent in agents.slice(0, 4)" :key="agent.id" :name="agent.name" :avatar="agentAvatars[agent.nodeId === 'local' ? agent.profile || '' : `node:${agent.nodeId}:${agent.profile}`] || ''" :size="24" :title="agent.isHost ? `${agent.name} · 管理员` : agent.name" /><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
+            <button v-if="pushProtocolSupported" class="icon-button group-push-button" :class="{ active: selectedRoomPushEnabled }" type="button" :title="!pushConfigured ? '服务器尚未配置 iOS 推送' : selectedRoomPushEnabled ? '关闭该团队的 iOS 推送' : '开启该团队的 iOS 推送'" :aria-label="selectedRoomPushEnabled ? '关闭团队推送' : '开启团队推送'" :disabled="!groups.selectedRoom || !pushConfigured || pushSubscriptionBusy" @click="toggleSelectedRoomPush"><AppIcon name="bell" /></button>
             <button class="icon-button" type="button" title="管理团队" aria-label="管理团队" :disabled="!groups.selectedRoom" @click="openSelectedRoomManager"><AppIcon name="dots" /></button>
           </div>
         </template>
       </MessageTimeline>
-      <p v-if="groups.error" class="group-error" role="alert"><AppIcon name="alert" :size="13" />{{ groups.error }}</p>
+      <p v-if="groups.error || pushSubscriptionError" class="group-error" role="alert"><AppIcon name="alert" :size="13" />{{ groups.error || pushSubscriptionError }}</p>
       <ComposerShell
         ref="composer"
         mode="group"
@@ -836,7 +886,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 .group-topic-focus-sidebar :deep([data-sidebar-id="group-list"]) { position: sticky; z-index: 3; top: 0; min-height: 58px; padding-inline: 17px; border-bottom: 1px solid var(--line); border-radius: 0; background: var(--surface); }
 .group-topic-focus-sidebar :deep([data-sidebar-id="group-list"]:hover), .group-topic-focus-sidebar :deep([data-sidebar-id="group-list"]:focus-visible) { background: var(--surface-hover); }
 .archived-overlay-backdrop { position: fixed; z-index: 220; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(0,0,0,.36); }.archived-overlay { width: min(460px, 100%); max-height: min(620px, calc(100vh - 40px)); overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); box-shadow: 0 24px 70px rgba(0,0,0,.28); }.archived-overlay header { display: flex; align-items: center; justify-content: space-between; padding: 18px 18px 14px; border-bottom: 1px solid var(--line); }.archived-overlay header small { display: block; color: var(--text-secondary); font-size: 10px; }.archived-overlay header strong { font-size: 15px; }.archived-overlay header button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); cursor: pointer; }.archived-section { display: grid; gap: 8px; padding: 16px 18px; }.archived-section + .archived-section { border-top: 1px solid var(--line); }.archived-section h3 { margin: 0; font-size: 12px; }.archived-section p { margin: 0; color: var(--text-secondary); font-size: 12px; }.archived-section article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; }.archived-section article span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.archived-section article button { border: 0; border-radius: 7px; background: var(--surface-hover); color: var(--text-primary); cursor: pointer; padding: 5px 9px; }
-.group-header-actions { display: flex; align-items: center; gap: 8px; }.group-host-chip { max-width: 150px; overflow: hidden; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line)); border-radius: 999px; background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); font-size: 9px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.group-avatars { display: flex; align-items: center; }.group-avatars span, .group-avatars em { display: grid; width: 24px; height: 24px; margin-left: -5px; place-items: center; border: 2px solid var(--canvas); border-radius: 8px; font-size: 8px; font-style: normal; font-weight: 650; }.group-avatars span { background: transparent; color: var(--text-secondary); }.group-avatars span:first-child { margin-left: 0; }.group-avatars em { background: var(--surface-hover); color: var(--text-secondary); }
+.group-header-actions { display: flex; align-items: center; gap: 8px; }.group-host-chip { max-width: 150px; overflow: hidden; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line)); border-radius: 999px; background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); font-size: 9px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.group-push-button.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }.group-avatars { display: flex; align-items: center; }.group-avatars span, .group-avatars em { display: grid; width: 24px; height: 24px; margin-left: -5px; place-items: center; border: 2px solid var(--canvas); border-radius: 8px; font-size: 8px; font-style: normal; font-weight: 650; }.group-avatars span { background: transparent; color: var(--text-secondary); }.group-avatars span:first-child { margin-left: 0; }.group-avatars em { background: var(--surface-hover); color: var(--text-secondary); }
 .group-error { display: flex; width: min(760px, calc(100% - 32px)); margin: 0 auto 4px; align-items: center; gap: 6px; color: var(--danger); font-size: 9px; }
 @media (max-width: 480px) { .group-avatars, .group-host-chip { display: none; } }
 @media (prefers-reduced-motion: reduce) { .sidebar-primary-action, .group-menu-enter-active, .group-menu-leave-active { transition: none; } }

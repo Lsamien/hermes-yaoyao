@@ -5,7 +5,20 @@ import type { ServerConfig } from './config.js'
 import { HttpError } from './errors.js'
 import type { RealtimeChannel, RealtimeLeaseStore } from './leases.js'
 import type { NodePairingStore } from './pairing.js'
+import {
+  ChatPushRelayObserver,
+  type ChatNotificationResolver,
+  type PushEventCoordinator,
+} from './pushEvents.js'
 import { isAllowedHostHeader, isExactOrigin, requestAccountKey } from './security.js'
+
+type UpgradeRequest = Parameters<NonNullable<HttpServer['on']>>[1] extends never ? never : any
+
+export interface WebSocketPushDependencies {
+  coordinator: PushEventCoordinator
+  resolveGatewayUser?(request: UpgradeRequest): string | undefined
+  notificationResolver?: ChatNotificationResolver
+}
 
 const CHAT_MAX_PAYLOAD = 36 * 1_024 * 1_024
 const GROUP_MAX_PAYLOAD = 2 * 1_024 * 1_024
@@ -421,6 +434,7 @@ function relaySocket(
   onFinished: () => void,
   groupAnchor?: { epoch: string; cursor: number },
   paired = false,
+  chatObserver?: ChatPushRelayObserver,
 ): void {
   const groupValidator = groupAnchor
     ? new GroupFrameValidator(groupAnchor.epoch, groupAnchor.cursor)
@@ -428,10 +442,12 @@ function relaySocket(
   let clientAlive = true
   let upstreamAlive = true
   let finished = false
+  let clientFrames = Promise.resolve()
   const finish = () => {
     if (finished) return
     finished = true
     clearInterval(heartbeat)
+    chatObserver?.disconnected()
     onFinished()
   }
   const heartbeat = setInterval(() => {
@@ -451,15 +467,18 @@ function relaySocket(
   upstream.on('pong', () => { upstreamAlive = true })
 
   client.on('message', (data, isBinary) => {
-    try {
+    clientFrames = clientFrames.then(() => {
       if (channel === 'groups') throw new HttpError(403, 'Group event stream is read-only')
       if (upstream.readyState !== WebSocket.OPEN) throw new HttpError(409, 'Hermes socket is not ready')
       if (upstream.bufferedAmount > MAX_BUFFERED_BYTES) throw new HttpError(429, 'Hermes socket is congested')
-      upstream.send(checkedChatFrame(data, isBinary, paired))
-    } catch (error) {
+      const frame = checkedChatFrame(data, isBinary, paired)
+      chatObserver?.observeClientFrame(frame)
+      if (upstream.readyState !== WebSocket.OPEN) throw new HttpError(409, 'Hermes socket is not ready')
+      upstream.send(frame)
+    }).catch(error => {
       const reason = error instanceof Error ? error.message : 'Invalid frame'
       closePair(client, upstream, 1008, reason)
-    }
+    })
   })
   upstream.on('message', (data, isBinary) => {
     const length = typeof data === 'string' ? Buffer.byteLength(data) : Buffer.byteLength(data as Uint8Array)
@@ -477,6 +496,7 @@ function relaySocket(
         return
       }
     }
+    if (channel === 'chat') chatObserver?.observeUpstreamFrame(data, isBinary)
     if (client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary })
   })
   client.on('close', (code, reason) => {
@@ -506,10 +526,11 @@ export function installWebSocketRelay(
   config: ServerConfig,
   leases: RealtimeLeaseStore,
   pairings: NodePairingStore,
+  push?: WebSocketPushDependencies,
 ): () => void {
   const socketServer = new WebSocketServer({ noServer: true, maxPayload: CHAT_MAX_PAYLOAD })
   const active = new Map<string, number>()
-  const onUpgrade = (request: Parameters<NonNullable<HttpServer['on']>>[1] extends never ? never : any, socket: Duplex, head: Buffer) => {
+  const onUpgrade = (request: UpgradeRequest, socket: Duplex, head: Buffer) => {
     let url: URL
     try {
       url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'invalid'}`)
@@ -549,6 +570,10 @@ export function installWebSocketRelay(
         return
       }
       active.set(connectionKey, (active.get(connectionKey) ?? 0) + 1)
+      let gatewayUserID: string | undefined
+      if (gatewayChannel === 'chat' && push?.resolveGatewayUser) {
+        try { gatewayUserID = push.resolveGatewayUser(request) } catch { /* unowned relays are not push-tracked */ }
+      }
       socketServer.handleUpgrade(request, socket, head, (client) => {
         const upstream = new WebSocket(pairedUpstreamWebSocketURL(
           config, gatewayChannel, ticket, epoch ?? undefined, cursor,
@@ -568,6 +593,15 @@ export function installWebSocketRelay(
         upstream.once('open', () => relaySocket(
           client, upstream, gatewayChannel, release,
           gatewayChannel === 'groups' ? { epoch: epoch!, cursor } : undefined,
+          false,
+          gatewayUserID && push
+            ? new ChatPushRelayObserver(
+                push.coordinator,
+                { localUserID: gatewayUserID, source: 'gateway' },
+                Date.now,
+                push.notificationResolver,
+              )
+            : undefined,
         ))
         upstream.once('unexpected-response', release)
         upstream.once('error', () => {
@@ -737,6 +771,15 @@ export function installWebSocketRelay(
         channel,
         release,
         channel === 'groups' ? { epoch: lease.epoch!, cursor: lease.cursor ?? 0 } : undefined,
+        false,
+        channel === 'chat' && lease.localUserID && push
+          ? new ChatPushRelayObserver(
+              push.coordinator,
+              { localUserID: lease.localUserID, accountKey, source: 'web' },
+              Date.now,
+              push.notificationResolver,
+            )
+          : undefined,
       ))
       upstream.once('unexpected-response', () => {
         if (client.readyState === WebSocket.OPEN) client.close(1011, 'Hermes rejected WebSocket')

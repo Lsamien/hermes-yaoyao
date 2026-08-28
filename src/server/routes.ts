@@ -31,6 +31,7 @@ import { SystemUpdateManager, type SystemUpdateStatus } from './updateManager.js
 import { LocalAuthStore, type LocalUser, UpstreamServiceSession } from './localAuth.js'
 import { AccountLoginPairingStore } from './accountPairing.js'
 import { UpstreamProfileIdentityService } from './profileIdentities.js'
+import { PushCoordinator } from './pushCoordinator.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -46,6 +47,7 @@ export interface RouteDependencies {
   upstreamSession: UpstreamServiceSession
   accountPairings: AccountLoginPairingStore
   profileIdentities: UpstreamProfileIdentityService
+  push: PushCoordinator
 }
 
 function body(ctx: Koa.Context): JsonObject {
@@ -354,6 +356,83 @@ function json(ctx: Koa.Context, status: number, value: unknown): void {
   ctx.status = status
   ctx.type = 'application/json; charset=utf-8'
   ctx.body = value
+}
+
+function pushRequest<T>(operation: () => T): T {
+  try {
+    return operation()
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : '推送请求无效'
+    throw new HttpError(400, message, 'invalid_push_request')
+  }
+}
+
+function bestEffortAutoSubscribe(
+  ctx: Koa.Context,
+  dependencies: RouteDependencies,
+  userID: string,
+  roomID: string,
+  baselineMessageSeq?: number,
+): void {
+  try {
+    dependencies.push.setGroupSubscription(userID, roomID, true, baselineMessageSeq)
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause)
+    ctx.app.emit('error', new Error(`团队消息已发送，但自动订阅推送失败：${detail}`), ctx)
+  }
+}
+
+function bestEffortRemoveUserPush(
+  ctx: Koa.Context,
+  dependencies: RouteDependencies,
+  userID: string,
+): void {
+  try {
+    dependencies.push.removeUser(userID)
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause)
+    ctx.app.emit('error', new Error(`用户权限已更新，但推送状态清理失败：${detail}`), ctx)
+  }
+}
+
+function groupMessageSequence(response: UpstreamResponse): number | undefined {
+  try {
+    const payload = parseJson(response)
+    const data = payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)
+      ? payload.data as JsonObject : {}
+    const message = payload.message && typeof payload.message === 'object' && !Array.isArray(payload.message)
+      ? payload.message as JsonObject
+      : data.message && typeof data.message === 'object' && !Array.isArray(data.message)
+        ? data.message as JsonObject : {}
+    const value = Number(message.seq ?? message.sequence)
+    return Number.isSafeInteger(value) && value >= 0 ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function latestGroupMessageSequence(
+  dependencies: RouteDependencies,
+  roomID: string,
+): Promise<number> {
+  const response = await dependencies.upstreamSession.request(
+    `/api/plugins/yaoyao/v1/rooms/${encodeURIComponent(roomID)}/messages`,
+    { search: new URLSearchParams({ limit: '1' }) },
+  )
+  if (response.status === 404) throw new HttpError(404, '团队不存在', 'group_not_found')
+  const payload = requireSuccess(response)
+  const data = payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)
+    ? payload.data as JsonObject : {}
+  const rows = Array.isArray(payload.items) ? payload.items
+    : Array.isArray(payload.messages) ? payload.messages
+      : Array.isArray(data.items) ? data.items
+        : Array.isArray(data.messages) ? data.messages : []
+  const latest = rows.reduce((maximum, raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return maximum
+    const value = Number((raw as JsonObject).seq ?? (raw as JsonObject).sequence)
+    return Number.isSafeInteger(value) && value >= 0 ? Math.max(maximum, value) : maximum
+  }, 0)
+  return latest
 }
 
 function requestOrigin(ctx: Koa.Context, config: ServerConfig): string {
@@ -759,6 +838,7 @@ async function issueLease(
     credential,
     origin,
     accountKeys,
+    localUserID: (ctx.state.localUser as LocalUser | undefined)?.id,
     epoch: channel === 'groups' ? canonicalEpoch(request.epoch) : undefined,
     cursor: channel === 'groups' ? groupCursor(request.cursor) : undefined,
   })
@@ -932,6 +1012,112 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
           ? parseJson(pluginProfilesResponse) : undefined,
       ),
     })
+  })
+  router.get('/api/push/v1/capabilities', (ctx) => {
+    dependencies.auth.require(ctx)
+    const capabilities = dependencies.push.capabilities()
+    json(ctx, 200, {
+      ...capabilities,
+      maximumSummaryCharacters: capabilities.maxSummaryCharacters,
+    })
+  })
+  router.put('/api/push/v1/installations/:installationID/accounts/:clientAccountID', (ctx) => {
+    const user = dependencies.auth.require(ctx)
+    const request = body(ctx)
+    if (request.environment !== 'development' && request.environment !== 'production') {
+      throw new HttpError(400, 'environment must be development or production', 'invalid_push_request')
+    }
+    const environment = request.environment
+    const installation = pushRequest(() => dependencies.push.registerInstallation({
+      userId: user.id,
+      installationId: canonicalUUID(ctx.params.installationID, 'installation ID'),
+      clientAccountId: canonicalUUID(ctx.params.clientAccountID, 'client account ID'),
+      deviceToken: typeof request.token === 'string'
+        ? request.token
+        : typeof request.deviceToken === 'string' ? request.deviceToken : '',
+      environment,
+      appVersion: typeof request.appVersion === 'string' ? request.appVersion : undefined,
+      authorizationVersion: dependencies.auth.pushAuthorizationVersion(user.id),
+    }))
+    json(ctx, 200, { installation })
+  })
+  router.delete('/api/push/v1/installations/:installationID/accounts/:clientAccountID', (ctx) => {
+    const user = dependencies.auth.require(ctx)
+    const removed = pushRequest(() => dependencies.push.unregisterInstallation(
+      user.id,
+      canonicalUUID(ctx.params.installationID, 'installation ID'),
+      canonicalUUID(ctx.params.clientAccountID, 'client account ID'),
+    ))
+    json(ctx, 200, { ok: true, removed })
+  })
+  router.post('/api/push/v1/installations/:installationID/accounts/:clientAccountID/badge-reset', (ctx) => {
+    const user = dependencies.auth.require(ctx)
+    const badge = pushRequest(() => dependencies.push.resetBadge(
+      user.id,
+      canonicalUUID(ctx.params.installationID, 'installation ID'),
+      canonicalUUID(ctx.params.clientAccountID, 'client account ID'),
+    ))
+    json(ctx, 200, { badge })
+  })
+  router.get('/api/push/v1/group-subscriptions', (ctx) => {
+    const user = dependencies.auth.require(ctx)
+    const subscriptions = dependencies.push.listGroupSubscriptions(user.id)
+    json(ctx, 200, {
+      subscriptions,
+      roomIds: subscriptions.filter(item => item.enabled).map(item => item.roomId),
+    })
+  })
+  router.put('/api/push/v1/group-subscriptions/:roomID', async (ctx) => {
+    const user = dependencies.auth.require(ctx)
+    const request = body(ctx)
+    if (typeof request.enabled !== 'boolean') {
+      throw new HttpError(400, 'enabled must be a boolean', 'invalid_push_request')
+    }
+    const enabled = request.enabled
+    const roomID = canonicalUUID(ctx.params.roomID, 'room ID')
+    const baseline = enabled ? await latestGroupMessageSequence(dependencies, roomID) : undefined
+    const subscription = pushRequest(() => dependencies.push.setGroupSubscription(
+      user.id,
+      roomID,
+      enabled,
+      baseline,
+    ))
+    json(ctx, 200, { subscription, enabled: subscription.enabled })
+  })
+  // Browser aliases stay inside the /api/app CSRF boundary. Native iOS uses
+  // the Gateway-compatible /api/push/v1 surface with the same account state.
+  router.get('/api/app/push/v1/capabilities', (ctx) => {
+    dependencies.auth.require(ctx)
+    const capabilities = dependencies.push.capabilities()
+    json(ctx, 200, {
+      ...capabilities,
+      maximumSummaryCharacters: capabilities.maxSummaryCharacters,
+    })
+  })
+  router.get('/api/app/push/v1/group-subscriptions', (ctx) => {
+    const user = dependencies.auth.require(ctx)
+    const subscriptions = dependencies.push.listGroupSubscriptions(user.id)
+    json(ctx, 200, {
+      subscriptions,
+      roomIds: subscriptions.filter(item => item.enabled).map(item => item.roomId),
+    })
+  })
+  router.put('/api/app/push/v1/group-subscriptions/:roomID', async (ctx) => {
+    const user = dependencies.auth.require(ctx)
+    const request = body(ctx)
+    if (typeof request.enabled !== 'boolean') {
+      throw new HttpError(400, 'enabled must be a boolean', 'invalid_push_request')
+    }
+    const enabled = request.enabled
+    const roomID = canonicalUUID(ctx.params.roomID, 'room ID')
+    const baseline = enabled ? await latestGroupMessageSequence(dependencies, roomID) : undefined
+    const subscription = pushRequest(() => dependencies.push.setGroupSubscription(
+      user.id,
+      roomID,
+      enabled,
+      baseline,
+    ))
+    json(ctx, 200, { subscription, enabled: subscription.enabled })
   })
   router.put('/api/account/credentials', (ctx) => {
     const request = body(ctx)
@@ -1285,14 +1471,21 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   router.patch('/api/app/admin/users/:userID', (ctx) => {
     const admin = dependencies.auth.requireAdmin(ctx)
     const request = body(ctx)
-    json(ctx, 200, dependencies.auth.updateUser(admin, canonicalUUID(ctx.params.userID, 'user ID'), {
+    const userID = canonicalUUID(ctx.params.userID, 'user ID')
+    const updated = dependencies.auth.updateUser(admin, userID, {
       enabled: typeof request.enabled === 'boolean' ? request.enabled : undefined,
       password: typeof request.password === 'string' ? request.password : undefined,
-    }))
+    })
+    if (request.enabled === false || typeof request.password === 'string') {
+      bestEffortRemoveUserPush(ctx, dependencies, userID)
+    }
+    json(ctx, 200, updated)
   })
   router.delete('/api/app/admin/users/:userID', (ctx) => {
     const admin = dependencies.auth.requireAdmin(ctx)
-    dependencies.auth.deleteUser(admin, canonicalUUID(ctx.params.userID, 'user ID'))
+    const userID = canonicalUUID(ctx.params.userID, 'user ID')
+    dependencies.auth.deleteUser(admin, userID)
+    bestEffortRemoveUserPush(ctx, dependencies, userID)
     json(ctx, 200, { ok: true })
   })
   router.put('/api/app/admin/upstream-credentials', async (ctx) => {
@@ -1313,6 +1506,13 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
         dependencies,
         dependencies.updates.status(installedPluginVersion),
       ))
+    })
+  })
+  router.get('/api/app/system/push-status', (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
+    json(ctx, 200, {
+      ...dependencies.push.status(),
+      topic: dependencies.push.capabilities().topic,
     })
   })
   router.post('/api/app/system/update/check', async (ctx) => {
@@ -1680,6 +1880,8 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     })
   })
   router.post('/api/app/groups/rooms/:roomID/messages', async (ctx) => {
+    const localUser = dependencies.auth.require(ctx)
+    const subscribedRoomID = canonicalUUID(ctx.params.roomID, 'room ID')
     const request = body(ctx)
     const uploadIds = Array.isArray(request.uploadIds)
       ? request.uploadIds.map((value) => String(value))
@@ -1701,12 +1903,31 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
         sendUpstreamResponse(ctx, response, jar)
         if (response.status >= 200 && response.status < 300) {
           dependencies.uploads.markReferenced(uploadIds, accountKey)
+          bestEffortAutoSubscribe(
+            ctx,
+            dependencies,
+            localUser.id,
+            subscribedRoomID,
+            groupMessageSequence(response),
+          )
         }
       })
       return
     }
-    await proxy(ctx, dependencies.upstream, groupPath(ctx, '/messages'), {
-      method: 'POST', requestBody: upstreamBody,
+    await withJar(ctx, async (jar) => {
+      const response = await dependencies.upstream.request(groupPath(ctx, '/messages'), jar, {
+        method: 'POST', body: upstreamBody,
+      })
+      sendUpstreamResponse(ctx, response, jar)
+      if (response.status >= 200 && response.status < 300) {
+        bestEffortAutoSubscribe(
+          ctx,
+          dependencies,
+          localUser.id,
+          subscribedRoomID,
+          groupMessageSequence(response),
+        )
+      }
     })
   })
   for (const action of ['approval', 'clarification'] as const) {
@@ -1783,6 +2004,19 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       maxResponseBytes: /\/plugins\/yaoyao\/v1\/nodes\/[0-9a-f-]{36}\/files$/.test(upstreamPath)
         ? 256 * 1_024 * 1_024 : undefined,
     })
+    const nativeGroupMessage = ctx.method === 'POST'
+      ? /^\/api\/plugins\/yaoyao\/v1\/rooms\/([0-9a-f-]{36})\/messages$/.exec(upstreamPath)
+      : null
+    if (nativeGroupMessage && response.status >= 200 && response.status < 300) {
+      const localUser = dependencies.auth.require(ctx)
+      bestEffortAutoSubscribe(
+        ctx,
+        dependencies,
+        localUser.id,
+        canonicalUUID(nativeGroupMessage[1]!, 'room ID'),
+        groupMessageSequence(response),
+      )
+    }
     sendUpstreamResponse(ctx, response, dependencies.upstreamSession.jar)
   })
 

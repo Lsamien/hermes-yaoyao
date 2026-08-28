@@ -10,6 +10,7 @@ export interface RealtimeLease {
   credential: UpstreamCredential
   origin: string
   accountKeys: ReadonlySet<string>
+  localUserID?: string
   epoch?: string
   cursor?: number
   expiresAt: number
@@ -20,6 +21,7 @@ export interface IssueLeaseInput {
   credential: UpstreamCredential
   origin: string
   accountKeys: Iterable<string>
+  localUserID?: string
   epoch?: string
   cursor?: number
 }
@@ -49,6 +51,7 @@ export class RealtimeLeaseStore {
       credential: input.credential,
       origin: input.origin,
       accountKeys,
+      localUserID: input.localUserID,
       epoch: input.epoch,
       cursor: input.cursor,
       expiresAt: this.now() + this.ttlMs,

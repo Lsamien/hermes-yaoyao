@@ -24,6 +24,14 @@ import { UpstreamHttpError, UpstreamClient } from './upstream.js'
 import { UploadStore } from './uploads.js'
 import { SystemUpdateManager } from './updateManager.js'
 import { installWebSocketRelay } from './websocket.js'
+import { PushCoordinator } from './pushCoordinator.js'
+import { PushCoordinatorEventAdapter } from './pushEventAdapter.js'
+import {
+  ChatPushJobManager,
+  GroupPushEventWatcher,
+  HermesChatNotificationResolver,
+  HermesGroupEventSource,
+} from './pushEvents.js'
 
 export interface ApplicationOptions {
   config?: ServerConfig
@@ -37,6 +45,7 @@ export interface ApplicationOptions {
   upstreamSession?: UpstreamServiceSession
   accountPairings?: AccountLoginPairingStore
   profileIdentities?: UpstreamProfileIdentityService
+  push?: PushCoordinator
 }
 
 export interface ApplicationRuntime {
@@ -52,6 +61,10 @@ export interface ApplicationRuntime {
   upstreamSession: UpstreamServiceSession
   accountPairings: AccountLoginPairingStore
   profileIdentities: UpstreamProfileIdentityService
+  push: PushCoordinator
+  pushEventCoordinator: PushCoordinatorEventAdapter
+  chatPushJobs: ChatPushJobManager
+  groupPushEvents: GroupPushEventWatcher
   close(): void
 }
 
@@ -106,6 +119,24 @@ export function createApplication(options: ApplicationOptions = {}): Application
   const accountPairings = options.accountPairings ?? new AccountLoginPairingStore()
   const profileIdentities = options.profileIdentities
     ?? new UpstreamProfileIdentityService(config, upstreamSession)
+  const push = options.push ?? new PushCoordinator({
+    home: config.home,
+    apns: config.apns,
+    apnsConfigurationError: config.apnsConfigurationError,
+    isUserActive: userID => auth.isUserActive(userID),
+    userAuthorizationVersion: userID => auth.pushAuthorizationVersion(userID),
+  })
+  const pushEventCoordinator = new PushCoordinatorEventAdapter(push, upstreamSession)
+  const chatPushJobs = new ChatPushJobManager(config, upstreamSession, pushEventCoordinator, {
+    resolver: new HermesChatNotificationResolver(
+      upstreamSession,
+      (localUserID, prompt) => push.promptDigest(localUserID, prompt),
+    ),
+  })
+  const groupPushEvents = new GroupPushEventWatcher(
+    new HermesGroupEventSource(config, upstreamSession),
+    pushEventCoordinator,
+  )
   try {
     uploads.cleanupUncommitted()
   } catch {
@@ -219,6 +250,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     upstreamSession,
     accountPairings,
     profileIdentities,
+    push,
   })
   app.use(router.routes())
   app.use(router.allowedMethods({ throw: false }))
@@ -245,7 +277,16 @@ export function createApplication(options: ApplicationOptions = {}): Application
     upstreamSession,
     accountPairings,
     profileIdentities,
-    close: () => uploads.close(),
+    push,
+    pushEventCoordinator,
+    chatPushJobs,
+    groupPushEvents,
+    close: () => {
+      chatPushJobs.stop()
+      groupPushEvents.stop()
+      push.close()
+      uploads.close()
+    },
   }
 }
 
@@ -262,11 +303,26 @@ export function createNodeServer(runtime: ApplicationRuntime): NodeServerRuntime
         key: readFileSync(config.tlsKey),
       }, runtime.app.callback())
     : createHttpServer(runtime.app.callback())
+  const pushEnabled = runtime.push.capabilities().enabled
+  if (pushEnabled) {
+    runtime.chatPushJobs.start()
+    runtime.groupPushEvents.start()
+  }
   const removeWebSockets = installWebSocketRelay(
     server,
     config,
     runtime.leases,
     runtime.pairings,
+    pushEnabled ? {
+      coordinator: runtime.pushEventCoordinator,
+      resolveGatewayUser: request => runtime.auth.currentFromCookieHeader(
+        typeof request.headers.cookie === 'string' ? request.headers.cookie : undefined,
+      )?.id,
+      notificationResolver: new HermesChatNotificationResolver(
+        runtime.upstreamSession,
+        (localUserID, prompt) => runtime.push.promptDigest(localUserID, prompt),
+      ),
+    } : undefined,
   )
   return {
     server,

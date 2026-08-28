@@ -163,7 +163,12 @@ export class LocalAuthStore {
   current(ctx: Koa.Context): LocalUser | undefined {
     const injected = ctx.state.localUser as LocalUser | undefined
     if (injected) return injected
-    const token = this.#token(ctx)
+    return this.currentFromCookieHeader(ctx.get('cookie'))
+  }
+
+  /** Resolve the same authenticated user for non-Koa transports such as WS Upgrade. */
+  currentFromCookieHeader(cookieHeader: string | undefined): LocalUser | undefined {
+    const token = parse(cookieHeader ?? '')[SESSION_COOKIE]
     if (!token) return undefined
     const key = this.#sessionKey(token)
     const session = this.#sessions.get(key)
@@ -194,6 +199,15 @@ export class LocalAuthStore {
     const user = this.require(ctx)
     if (user.role !== 'admin') throw new HttpError(403, '需要管理员权限', 'admin_required')
     return user
+  }
+
+  isUserActive(userID: string): boolean {
+    return this.#users.some(user => user.id === userID && user.enabled)
+  }
+
+  pushAuthorizationVersion(userID: string): number | undefined {
+    const user = this.#users.find(candidate => candidate.id === userID && candidate.enabled)
+    return user?.authVersion
   }
 
   list(admin: LocalUser): LocalUser[] {

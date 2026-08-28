@@ -19,6 +19,28 @@ iOS 默认连接 `http://主机:8800` 并使用 8800 用户登录；已有 9119 
 保存；外部或 Docker 9119 可在“系统管理”中配置，或设置
 `HERMES_YAOYAO_UPSTREAM_USERNAME` 和 `HERMES_YAOYAO_UPSTREAM_PASSWORD_FILE`。
 
+### iOS 后台消息推送
+
+iOS 在线时继续使用 8800 的 WebSocket 实时接收消息；App 被挂起或未运行时，8800
+可作为 APNs Provider 发送系统通知。推送设备与当前 8800 用户绑定，普通聊天只提醒
+该用户经 8800 发起的任务；团队在用户首次发言后自动订阅，也可在团队页关闭。
+
+在 Apple Developer 中为 `cn.samien.yaoyao.hermes` 开启 Push Notifications 并创建
+Token Key，把下载的 `.p8` 保存在仓库外、权限设为 `0600`，然后为 8800 配置：
+
+```bash
+export HERMES_YAOYAO_APNS_KEY_FILE=/absolute/path/to/AuthKey_XXXXXXXXXX.p8
+export HERMES_YAOYAO_APNS_KEY_ID=XXXXXXXXXX
+export HERMES_YAOYAO_APNS_TEAM_ID=GMU6W5FKQ6
+export HERMES_YAOYAO_APNS_TOPIC=cn.samien.yaoyao.hermes
+```
+
+前三项必须同时存在；缺失或无效时聊天服务仍会启动，iOS 自动保留原有本地通知降级。
+管理员可在“系统管理 → iOS 消息推送”查看配置、注册设备和待发送数量，页面与日志均
+不会显示 `.p8` 内容或 device token。Docker 部署需要把 `.p8` 只读挂载到容器，并让
+`HERMES_YAOYAO_APNS_KEY_FILE` 指向容器内绝对路径。APNs 只要求 8800 能主动访问
+Apple，不需要把 8800 暴露到公网；手机访问 8800 仍应优先使用 HTTPS/WSS 或 Tailscale。
+
 仓库同时归档了夭夭的 Hermes Dashboard 插件，位于
 [`hermes-plugins/yaoyao/dashboard`](hermes-plugins/yaoyao/dashboard)。Web 工作台和该插件是两个独立部署单元：前者运行在 `8800`，后者由已运行的 Hermes Dashboard 在 `9119` 加载。
 

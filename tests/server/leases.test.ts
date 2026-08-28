@@ -10,6 +10,7 @@ describe('RealtimeLeaseStore', () => {
       credential: { name: 'ticket', value: 'upstream-secret' },
       origin: 'http://127.0.0.1:8800',
       accountKeys: ['account-a'],
+      localUserID: 'local-user-a',
     })
     expect(() => store.consume(
       lease.id,
@@ -17,12 +18,14 @@ describe('RealtimeLeaseStore', () => {
       'http://127.0.0.1:8800',
       'account-a',
     )).toThrow(/invalid or expired/)
-    expect(store.consume(
+    const consumed = store.consume(
       lease.id,
       'chat',
       'http://127.0.0.1:8800',
       'account-a',
-    ).credential.value).toBe('upstream-secret')
+    )
+    expect(consumed.credential.value).toBe('upstream-secret')
+    expect(consumed.localUserID).toBe('local-user-a')
     expect(() => store.consume(
       lease.id,
       'chat',

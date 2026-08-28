@@ -35,6 +35,23 @@ describe('hermes-yaoyao LaunchAgent plist', () => {
     expect(plist).toContain('<key>HERMES_YAOYAO_ALLOW_INSECURE_LAN</key>\n      <string>1</string>')
   })
 
+  it('preserves APNs provider settings in the LaunchAgent', () => {
+    const plist = launchAgentPlist({
+      environment: {
+        HERMES_YAOYAO_APNS_KEY_FILE: '/Users/test/AuthKey_ABC123.p8',
+        HERMES_YAOYAO_APNS_KEY_ID: 'ABC123',
+        HERMES_YAOYAO_APNS_TEAM_ID: 'TEAM123',
+        HERMES_YAOYAO_APNS_TOPIC: 'cn.samien.yaoyao.hermes',
+      },
+    })
+
+    expect(plist).toContain('<key>HERMES_YAOYAO_APNS_KEY_FILE</key>')
+    expect(plist).toContain('/Users/test/AuthKey_ABC123.p8')
+    expect(plist).toContain('<key>HERMES_YAOYAO_APNS_KEY_ID</key>')
+    expect(plist).toContain('<key>HERMES_YAOYAO_APNS_TEAM_ID</key>')
+    expect(plist).toContain('<key>HERMES_YAOYAO_APNS_TOPIC</key>')
+  })
+
   it('can point the managed service at the stable current release link', () => {
     const root = join(homedir(), '.local', 'share', 'hermes-yaoyao', 'current')
     const plist = launchAgentPlist({ serviceRoot: root })

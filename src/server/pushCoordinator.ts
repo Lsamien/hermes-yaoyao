@@ -1,0 +1,1207 @@
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { dirname, join } from 'node:path'
+import {
+  APNsProvider,
+  type APNsEnvironment,
+  type APNsRequest,
+  type APNsSendResult,
+} from './apns.js'
+import { DEFAULT_APNS_TOPIC, type APNsProviderConfig } from './config.js'
+
+export const PUSH_EVENT_KINDS = [
+  'chat.completed',
+  'chat.failed',
+  'chat.approval.requested',
+  'chat.clarification.requested',
+  'group.message.completed',
+  'group.message.failed',
+  'group.interaction.requested',
+] as const
+
+export type PushEventKind = typeof PUSH_EVENT_KINDS[number]
+
+export interface PushCapabilities {
+  protocolVersion: 1
+  enabled: boolean
+  topic: string
+  previewMode: 'title-and-summary'
+  events: readonly PushEventKind[]
+  maxSummaryCharacters: 180
+  maximumSummaryCharacters: 180
+  configurationError?: string
+}
+
+export interface PushStatus {
+  configured: boolean
+  healthy: boolean
+  topic: string
+  registrationCount: number
+  pendingCount: number
+  subscriptionCount: number
+  lastSuccessAt?: string
+  lastError?: string
+  lastErrorAt?: string
+}
+
+export interface InstallationRegistration {
+  userId: string
+  installationId: string
+  clientAccountId: string
+  deviceToken: string
+  environment: APNsEnvironment
+  appVersion?: string
+  authorizationVersion?: number
+}
+
+export interface PushInstallation {
+  installationId: string
+  clientAccountId: string
+  environment: APNsEnvironment
+  appVersion?: string
+  updatedAt: string
+}
+
+export interface PushGroupSubscription {
+  roomId: string
+  enabled: boolean
+  updatedAt: string
+  lastMessageSeq?: number
+}
+
+export interface PushNotification {
+  eventId: string
+  userId: string
+  kind: PushEventKind
+  title: string
+  body: string
+  clientAccountId?: string
+  data?: Record<string, unknown>
+  collapseId?: string
+  threadId?: string
+  roomId?: string
+  expiresAt?: number
+}
+
+export interface PushGroupWatchAnchor {
+  epoch: string
+  cursor: number
+  updatedAt?: string
+  reason?: string
+}
+
+export interface PushChatJob {
+  id: string
+  localUserID: string
+  profile?: string
+  runtimeSessionID: string
+  storedSessionID?: string
+  requestID: string
+  queued: boolean
+  phase: 'submitted' | 'accepted' | 'watching'
+  submittedAt: number
+  expiresAt: number
+  metadata?: Record<string, unknown>
+}
+
+export interface PushNotificationCandidate {
+  eventID: string
+  localUserID: string
+  kind: PushEventKind
+  title: string
+  body: string
+  collapseID: string
+  data: Record<string, unknown>
+  roomID?: string
+  topicID?: string
+}
+
+export interface PushFlushResult {
+  delivered: number
+  retried: number
+  removedRegistrations: number
+  failed: number
+}
+
+export interface PushSender {
+  send(request: APNsRequest): Promise<APNsSendResult>
+  close?(): void
+}
+
+export interface PushCoordinatorOptions {
+  home: string
+  apns?: APNsProviderConfig
+  apnsConfigurationError?: string
+  provider?: PushSender
+  now?: () => number
+  autoFlush?: boolean
+  baseRetryMilliseconds?: number
+  maxRetryMilliseconds?: number
+  maxAttempts?: number
+  isUserActive?: (userId: string) => boolean
+  userAuthorizationVersion?: (userId: string) => number | undefined
+}
+
+interface InstallationRecord extends PushInstallation {
+  userId: string
+  deviceToken: string
+  badge: number
+  authorizationVersion?: number
+}
+
+interface GroupSubscriptionRecord extends PushGroupSubscription {
+  userId: string
+}
+
+interface OutboxRecord {
+  id: string
+  eventId: string
+  userId: string
+  installationId: string
+  clientAccountId: string
+  kind: PushEventKind
+  title: string
+  body: string
+  data: Record<string, unknown>
+  collapseId?: string
+  threadId?: string
+  roomId?: string
+  createdAt: number
+  expiresAt: number
+  attempts: number
+  nextAttemptAt: number
+}
+
+interface StoredStatus {
+  lastSuccessAt?: string
+  lastError?: string
+  lastErrorAt?: string
+}
+
+interface PushState {
+  schemaVersion: 1
+  installations: InstallationRecord[]
+  groupSubscriptions: GroupSubscriptionRecord[]
+  outbox: OutboxRecord[]
+  processedEvents: Record<string, number>
+  groupWatch?: PushGroupWatchAnchor
+  chatJobs: PushChatJob[]
+  ambiguousChatSessions: Record<string, number>
+  chatRecoveryDisabledUntil?: number
+  status: StoredStatus
+}
+
+const MAX_SUMMARY_CHARACTERS = 180
+const MAX_OUTBOX_ITEMS = 10_000
+const MAX_GROUP_SUBSCRIPTIONS_PER_USER = 512
+const MAX_INSTALLATIONS_PER_USER = 32
+const MAX_CHAT_JOBS_PER_USER = 256
+const MAX_PROCESSED_EVENTS = 50_000
+const MAX_AMBIGUOUS_CHAT_SESSIONS = 50_000
+const AMBIGUOUS_CHAT_SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1_000
+const DEFAULT_EVENT_LIFETIME_MS = 24 * 60 * 60 * 1_000
+const DEDUPE_LIFETIME_MS = 90 * 24 * 60 * 60 * 1_000
+
+function emptyState(): PushState {
+  return {
+    schemaVersion: 1,
+    installations: [],
+    groupSubscriptions: [],
+    outbox: [],
+    processedEvents: {},
+    chatJobs: [],
+    ambiguousChatSessions: {},
+    status: {},
+  }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function parseState(raw: string): PushState {
+  const value = JSON.parse(raw) as unknown
+  if (!isObject(value)
+    || value.schemaVersion !== 1
+    || !Array.isArray(value.installations)
+    || !Array.isArray(value.groupSubscriptions)
+    || !Array.isArray(value.outbox)
+    || !isObject(value.processedEvents)
+    || !isObject(value.status)) {
+    throw new Error('Unsupported or malformed push state')
+  }
+  if (value.chatJobs !== undefined && !Array.isArray(value.chatJobs)) {
+    throw new Error('Malformed push chat jobs')
+  }
+  if (value.ambiguousChatSessions !== undefined && !isObject(value.ambiguousChatSessions)) {
+    throw new Error('Malformed ambiguous push chat sessions')
+  }
+  const legacyOwners = isObject(value.chatSessionOwners)
+    ? value.chatSessionOwners as Record<string, unknown> : {}
+  const migratedAmbiguous = Object.fromEntries(Object.entries(legacyOwners).flatMap(([sessionID, owners]) => (
+    Array.isArray(owners) && new Set(owners.map(String)).size > 1 ? [[sessionID, Date.now()]] : []
+  )))
+  return {
+    schemaVersion: 1,
+    installations: value.installations as InstallationRecord[],
+    groupSubscriptions: value.groupSubscriptions as GroupSubscriptionRecord[],
+    outbox: value.outbox as OutboxRecord[],
+    processedEvents: value.processedEvents as Record<string, number>,
+    ...(isObject(value.groupWatch) ? { groupWatch: value.groupWatch as unknown as PushGroupWatchAnchor } : {}),
+    chatJobs: (value.chatJobs ?? []) as PushChatJob[],
+    ambiguousChatSessions: {
+      ...migratedAmbiguous,
+      ...(value.ambiguousChatSessions ?? {}) as Record<string, number>,
+    },
+    ...(typeof value.chatRecoveryDisabledUntil === 'number'
+      ? { chatRecoveryDisabledUntil: value.chatRecoveryDisabledUntil }
+      : {}),
+    status: value.status as StoredStatus,
+  }
+}
+
+function cloneState(state: PushState): PushState {
+  return JSON.parse(JSON.stringify(state)) as PushState
+}
+
+class PushStateStore {
+  private state = emptyState()
+  readonly path: string
+  readonly loadError?: string
+
+  constructor(home: string) {
+    this.path = join(home, 'push', 'state.json')
+    if (!existsSync(this.path)) return
+    try {
+      chmodSync(this.path, 0o600)
+      this.state = parseState(readFileSync(this.path, 'utf8'))
+    } catch {
+      this.loadError = '推送状态文件无法读取；为避免覆盖现有数据，推送已停用'
+    }
+  }
+
+  snapshot(): PushState {
+    return cloneState(this.state)
+  }
+
+  mutate<T>(operation: (state: PushState) => T): T {
+    if (this.loadError) throw new Error(this.loadError)
+    const next = cloneState(this.state)
+    const result = operation(next)
+    this.write(next)
+    this.state = next
+    return result
+  }
+
+  private write(state: PushState): void {
+    const directory = dirname(this.path)
+    mkdirSync(directory, { recursive: true, mode: 0o700 })
+    const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`
+    let descriptor: number | undefined
+    try {
+      descriptor = openSync(temporary, 'wx', 0o600)
+      writeFileSync(descriptor, `${JSON.stringify(state)}\n`, 'utf8')
+      fsyncSync(descriptor)
+      closeSync(descriptor)
+      descriptor = undefined
+      renameSync(temporary, this.path)
+      chmodSync(this.path, 0o600)
+    } catch (cause) {
+      if (descriptor !== undefined) closeSync(descriptor)
+      try { unlinkSync(temporary) } catch { /* Nothing to clean up. */ }
+      throw cause
+    }
+  }
+}
+
+function requiredIdentifier(value: string, name: string, maximum = 256): string {
+  const normalized = value.trim()
+  if (!normalized || normalized.length > maximum || /[\u0000-\u001f\u007f]/.test(normalized)) {
+    throw new Error(`${name} is invalid`)
+  }
+  return normalized
+}
+
+function normalizedToken(value: string): string {
+  const normalized = value.trim().toLowerCase()
+  if (!/^(?:[a-f0-9]{2}){16,256}$/.test(normalized)) throw new Error('deviceToken is invalid')
+  return normalized
+}
+
+function limitedText(value: string, maximum: number, name: string): string {
+  const normalized = value.trim()
+  if (!normalized) throw new Error(`${name} is required`)
+  return Array.from(normalized).slice(0, maximum).join('')
+}
+
+function publicInstallation(record: InstallationRecord): PushInstallation {
+  return {
+    installationId: record.installationId,
+    clientAccountId: record.clientAccountId,
+    environment: record.environment,
+    ...(record.appVersion ? { appVersion: record.appVersion } : {}),
+    updatedAt: record.updatedAt,
+  }
+}
+
+function dedupePrefix(userId: string): string {
+  return `${Buffer.from(userId, 'utf8').toString('base64url')}.`
+}
+
+function dedupeKey(userId: string, eventId: string): string {
+  const digest = createHash('sha256').update(eventId, 'utf8').digest('base64url')
+  return `${dedupePrefix(userId)}${digest}`
+}
+
+function safeError(result: APNsSendResult): string {
+  const reason = result.reason || `APNs HTTP ${result.status}`
+  return reason.replace(/(?:[a-fA-F0-9]{2}){16,256}/g, '[device-token]').replace(/[\r\n]+/g, ' ').slice(0, 500)
+}
+
+function canonicalGroupWatchAnchor(input: PushGroupWatchAnchor, now: number): PushGroupWatchAnchor {
+  const epoch = requiredIdentifier(input.epoch, 'epoch', 128)
+  if (!Number.isSafeInteger(input.cursor) || input.cursor < 0) throw new Error('cursor is invalid')
+  return {
+    epoch,
+    cursor: input.cursor,
+    updatedAt: new Date(now).toISOString(),
+    ...(input.reason ? { reason: limitedText(input.reason, 200, 'reason') } : {}),
+  }
+}
+
+function canonicalChatJob(input: PushChatJob): PushChatJob {
+  const id = requiredIdentifier(input.id, 'job.id', 512)
+  const localUserID = requiredIdentifier(input.localUserID, 'job.localUserID')
+  const runtimeSessionID = requiredIdentifier(input.runtimeSessionID, 'job.runtimeSessionID', 512)
+  const requestID = requiredIdentifier(input.requestID, 'job.requestID', 512)
+  if (!['submitted', 'accepted', 'watching'].includes(input.phase)) throw new Error('job.phase is invalid')
+  if (!Number.isFinite(input.submittedAt) || !Number.isFinite(input.expiresAt) || input.expiresAt <= input.submittedAt) {
+    throw new Error('job timestamps are invalid')
+  }
+  let metadata: Record<string, unknown> | undefined
+  if (input.metadata) metadata = JSON.parse(JSON.stringify(input.metadata)) as Record<string, unknown>
+  return {
+    id,
+    localUserID,
+    ...(input.profile ? { profile: requiredIdentifier(input.profile, 'job.profile') } : {}),
+    runtimeSessionID,
+    ...(input.storedSessionID
+      ? { storedSessionID: requiredIdentifier(input.storedSessionID, 'job.storedSessionID', 512) }
+      : {}),
+    requestID,
+    queued: Boolean(input.queued),
+    phase: input.phase,
+    submittedAt: input.submittedAt,
+    expiresAt: input.expiresAt,
+    ...(metadata ? { metadata } : {}),
+  }
+}
+
+export class PushCoordinator {
+  private readonly store: PushStateStore
+  private readonly provider?: PushSender
+  private readonly now: () => number
+  private readonly autoFlush: boolean
+  private readonly baseRetryMilliseconds: number
+  private readonly maxRetryMilliseconds: number
+  private readonly maxAttempts: number
+  private readonly isUserActive: (userId: string) => boolean
+  private readonly userAuthorizationVersion?: (userId: string) => number | undefined
+  private timer?: NodeJS.Timeout
+  private activeFlush?: Promise<PushFlushResult>
+  private closed = false
+  private runtimeError?: { message: string; at: string }
+  private flushFailureCount = 0
+  private flushBlockedUntil = 0
+  private correlationSecret?: Buffer
+  private correlationError?: string
+
+  constructor(readonly options: PushCoordinatorOptions) {
+    this.store = new PushStateStore(options.home)
+    this.provider = options.provider ?? (options.apns ? new APNsProvider(options.apns) : undefined)
+    this.now = options.now ?? Date.now
+    this.autoFlush = options.autoFlush ?? true
+    this.baseRetryMilliseconds = options.baseRetryMilliseconds ?? 1_000
+    this.maxRetryMilliseconds = options.maxRetryMilliseconds ?? 60 * 60 * 1_000
+    this.maxAttempts = options.maxAttempts ?? 36
+    this.isUserActive = options.isUserActive ?? (() => true)
+    this.userAuthorizationVersion = options.userAuthorizationVersion
+    if (options.apns && this.provider && !options.apnsConfigurationError) {
+      try { this.loadCorrelationSecret() } catch (cause) {
+        this.correlationError = cause instanceof Error ? cause.message : 'Push correlation key is unavailable'
+      }
+    }
+    this.markPersistedJobsDisconnected()
+    this.scheduleNextFlush()
+  }
+
+  capabilities(): PushCapabilities {
+    const configurationError = this.options.apnsConfigurationError ?? this.store.loadError
+    return {
+      protocolVersion: 1,
+      enabled: Boolean(this.options.apns && this.provider && !configurationError),
+      topic: this.options.apns?.topic ?? DEFAULT_APNS_TOPIC,
+      previewMode: 'title-and-summary',
+      events: PUSH_EVENT_KINDS,
+      maxSummaryCharacters: MAX_SUMMARY_CHARACTERS,
+      maximumSummaryCharacters: MAX_SUMMARY_CHARACTERS,
+      ...(configurationError ? { configurationError } : {}),
+    }
+  }
+
+  status(): PushStatus {
+    const state = this.store.snapshot()
+    const configurationError = this.options.apnsConfigurationError ?? this.store.loadError
+    const latestSuccess = state.status.lastSuccessAt ? Date.parse(state.status.lastSuccessAt) : 0
+    const latestError = state.status.lastErrorAt ? Date.parse(state.status.lastErrorAt) : 0
+    const configured = Boolean(this.options.apns && this.provider && !configurationError)
+    return {
+      configured,
+      healthy: configured && !this.correlationError && !this.runtimeError && latestSuccess >= latestError,
+      topic: this.options.apns?.topic ?? DEFAULT_APNS_TOPIC,
+      registrationCount: state.installations.length,
+      pendingCount: state.outbox.length,
+      subscriptionCount: state.groupSubscriptions.filter(item => item.enabled).length,
+      ...(state.status.lastSuccessAt ? { lastSuccessAt: state.status.lastSuccessAt } : {}),
+      ...(configurationError || this.correlationError || this.runtimeError?.message || state.status.lastError
+        ? { lastError: configurationError ?? this.correlationError ?? this.runtimeError?.message ?? state.status.lastError }
+        : {}),
+      ...(this.runtimeError?.at || state.status.lastErrorAt
+        ? { lastErrorAt: this.runtimeError?.at ?? state.status.lastErrorAt }
+        : {}),
+    }
+  }
+
+  registerInstallation(input: InstallationRegistration): PushInstallation {
+    const userId = requiredIdentifier(input.userId, 'userId')
+    const installationId = requiredIdentifier(input.installationId, 'installationId')
+    const clientAccountId = requiredIdentifier(input.clientAccountId, 'clientAccountId')
+    const deviceToken = normalizedToken(input.deviceToken)
+    if (input.environment !== 'development' && input.environment !== 'production') {
+      throw new Error('environment is invalid')
+    }
+    const appVersion = input.appVersion
+      ? requiredIdentifier(input.appVersion, 'appVersion', 64)
+      : undefined
+    const authorizationVersion = input.authorizationVersion
+      ?? this.userAuthorizationVersion?.(userId)
+    if (authorizationVersion !== undefined
+      && (!Number.isSafeInteger(authorizationVersion) || authorizationVersion < 1)) {
+      throw new Error('authorizationVersion is invalid')
+    }
+    const updatedAt = new Date(this.now()).toISOString()
+    const installation = this.store.mutate(state => {
+      const existing = state.installations.find(item => item.userId === userId
+        && item.installationId === installationId
+        && item.clientAccountId === clientAccountId)
+      if (existing) {
+        existing.deviceToken = deviceToken
+        existing.environment = input.environment
+        existing.updatedAt = updatedAt
+        if (authorizationVersion !== undefined) existing.authorizationVersion = authorizationVersion
+        else delete existing.authorizationVersion
+        if (appVersion) existing.appVersion = appVersion
+        else delete existing.appVersion
+        return publicInstallation(existing)
+      }
+      if (state.installations.filter(item => item.userId === userId).length >= MAX_INSTALLATIONS_PER_USER) {
+        throw new Error('Push installation limit reached')
+      }
+      const record: InstallationRecord = {
+        userId,
+        installationId,
+        clientAccountId,
+        deviceToken,
+        environment: input.environment,
+        ...(authorizationVersion !== undefined ? { authorizationVersion } : {}),
+        ...(appVersion ? { appVersion } : {}),
+        badge: 0,
+        updatedAt,
+      }
+      state.installations.push(record)
+      return publicInstallation(record)
+    })
+    this.scheduleNextFlush()
+    return installation
+  }
+
+  unregisterInstallation(userIdValue: string, installationIdValue: string, clientAccountIdValue: string): boolean {
+    const userId = requiredIdentifier(userIdValue, 'userId')
+    const installationId = requiredIdentifier(installationIdValue, 'installationId')
+    const clientAccountId = requiredIdentifier(clientAccountIdValue, 'clientAccountId')
+    return this.store.mutate(state => {
+      const before = state.installations.length
+      state.installations = state.installations.filter(item => !(item.userId === userId
+        && item.installationId === installationId
+        && item.clientAccountId === clientAccountId))
+      state.outbox = state.outbox.filter(item => !(item.userId === userId
+        && item.installationId === installationId
+        && item.clientAccountId === clientAccountId))
+      return state.installations.length !== before
+    })
+  }
+
+  resetBadge(userIdValue: string, installationIdValue: string, clientAccountIdValue: string): number {
+    const userId = requiredIdentifier(userIdValue, 'userId')
+    const installationId = requiredIdentifier(installationIdValue, 'installationId')
+    const clientAccountId = requiredIdentifier(clientAccountIdValue, 'clientAccountId')
+    return this.store.mutate(state => {
+      const installation = state.installations.find(item => item.userId === userId
+        && item.installationId === installationId
+        && item.clientAccountId === clientAccountId)
+      if (installation) installation.badge = 0
+      return 0
+    })
+  }
+
+  listGroupSubscriptions(userIdValue: string): PushGroupSubscription[] {
+    const userId = requiredIdentifier(userIdValue, 'userId')
+    return this.store.snapshot().groupSubscriptions
+      .filter(item => item.userId === userId)
+      .map(({ roomId, enabled, updatedAt, lastMessageSeq }) => ({
+        roomId, enabled, updatedAt, ...(lastMessageSeq !== undefined ? { lastMessageSeq } : {}),
+      }))
+      .sort((left, right) => left.roomId.localeCompare(right.roomId))
+  }
+
+  setGroupSubscription(
+    userIdValue: string,
+    roomIdValue: string,
+    enabled: boolean,
+    baselineMessageSeq?: number,
+  ): PushGroupSubscription {
+    const userId = requiredIdentifier(userIdValue, 'userId')
+    const roomId = requiredIdentifier(roomIdValue, 'roomId')
+    if (typeof enabled !== 'boolean') throw new Error('enabled must be a boolean')
+    if (baselineMessageSeq !== undefined && (!Number.isSafeInteger(baselineMessageSeq) || baselineMessageSeq < 0)) {
+      throw new Error('baselineMessageSeq is invalid')
+    }
+    const updatedAt = new Date(this.now()).toISOString()
+    return this.store.mutate(state => {
+      const existing = state.groupSubscriptions.find(item => item.userId === userId && item.roomId === roomId)
+      if (existing) {
+        if (!enabled) {
+          state.groupSubscriptions = state.groupSubscriptions.filter(item => !(item.userId === userId && item.roomId === roomId))
+          state.outbox = state.outbox.filter(item => !(item.userId === userId && item.roomId === roomId))
+          return { roomId, enabled: false, updatedAt }
+        }
+        if (existing.enabled === enabled) {
+          return {
+            roomId, enabled: existing.enabled, updatedAt: existing.updatedAt,
+            ...(existing.lastMessageSeq !== undefined ? { lastMessageSeq: existing.lastMessageSeq } : {}),
+          }
+        }
+        existing.enabled = enabled
+        existing.updatedAt = updatedAt
+        if (enabled && baselineMessageSeq !== undefined) existing.lastMessageSeq = baselineMessageSeq
+      } else {
+        if (!enabled) return { roomId, enabled: false, updatedAt }
+        const count = state.groupSubscriptions.filter(item => item.userId === userId && item.enabled).length
+        if (count >= MAX_GROUP_SUBSCRIPTIONS_PER_USER) throw new Error('Group push subscription limit reached')
+        state.groupSubscriptions.push({
+          userId, roomId, enabled, updatedAt,
+          ...(enabled && baselineMessageSeq !== undefined ? { lastMessageSeq: baselineMessageSeq } : {}),
+        })
+      }
+      const saved = state.groupSubscriptions.find(item => item.userId === userId && item.roomId === roomId)!
+      return {
+        roomId, enabled, updatedAt,
+        ...(saved.lastMessageSeq !== undefined ? { lastMessageSeq: saved.lastMessageSeq } : {}),
+      }
+    })
+  }
+
+  isGroupSubscribed(userIdValue: string, roomIdValue: string): boolean {
+    const userId = requiredIdentifier(userIdValue, 'userId')
+    const roomId = requiredIdentifier(roomIdValue, 'roomId')
+    return this.store.snapshot().groupSubscriptions.some(item => item.userId === userId
+      && item.roomId === roomId
+      && item.enabled)
+  }
+
+  groupSubscriptionStartedAt(userIdValue: string, roomIdValue: string): number | undefined {
+    const userId = requiredIdentifier(userIdValue, 'userId')
+    const roomId = requiredIdentifier(roomIdValue, 'roomId')
+    const subscription = this.store.snapshot().groupSubscriptions.find(item => item.userId === userId
+      && item.roomId === roomId
+      && item.enabled)
+    if (!subscription) return undefined
+    const value = Date.parse(subscription.updatedAt)
+    return Number.isNaN(value) ? undefined : value
+  }
+
+  groupSubscriptionLastMessageSeq(userIdValue: string, roomIdValue: string): number | undefined {
+    const userId = requiredIdentifier(userIdValue, 'userId')
+    const roomId = requiredIdentifier(roomIdValue, 'roomId')
+    return this.store.snapshot().groupSubscriptions.find(item => item.userId === userId
+      && item.roomId === roomId
+      && item.enabled)?.lastMessageSeq
+  }
+
+  advanceGroupSubscriptionMessageSeq(userIdValue: string, roomIdValue: string, sequence: number): void {
+    const userId = requiredIdentifier(userIdValue, 'userId')
+    const roomId = requiredIdentifier(roomIdValue, 'roomId')
+    if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error('message sequence is invalid')
+    const snapshot = this.store.snapshot().groupSubscriptions.find(item => item.userId === userId
+      && item.roomId === roomId
+      && item.enabled)
+    if (!snapshot || (snapshot.lastMessageSeq ?? -1) >= sequence) return
+    this.store.mutate(state => {
+      const subscription = state.groupSubscriptions.find(item => item.userId === userId
+        && item.roomId === roomId
+        && item.enabled)
+      if (subscription && (subscription.lastMessageSeq ?? -1) < sequence) subscription.lastMessageSeq = sequence
+    })
+  }
+
+  subscribedUserIds(roomIdValue: string): string[] {
+    const roomId = requiredIdentifier(roomIdValue, 'roomId')
+    return [...new Set(this.store.snapshot().groupSubscriptions
+      .filter(item => item.roomId === roomId && item.enabled)
+      .map(item => item.userId))]
+  }
+
+  activeGroupSubscriptions(): Array<PushGroupSubscription & { userId: string }> {
+    return this.store.snapshot().groupSubscriptions
+      .filter(item => item.enabled)
+      .map(({ userId, roomId, enabled, updatedAt, lastMessageSeq }) => ({
+        userId, roomId, enabled, updatedAt,
+        ...(lastMessageSeq !== undefined ? { lastMessageSeq } : {}),
+      }))
+      .sort((left, right) => left.roomId.localeCompare(right.roomId) || left.userId.localeCompare(right.userId))
+  }
+
+  groupSubscribers(roomIdValue: string): readonly string[] {
+    return this.subscribedUserIds(roomIdValue)
+  }
+
+  groupWatchAnchor(): PushGroupWatchAnchor | undefined {
+    const anchor = this.store.snapshot().groupWatch
+    return anchor ? { ...anchor } : undefined
+  }
+
+  resetGroupWatch(anchor: PushGroupWatchAnchor): PushGroupWatchAnchor {
+    const next = canonicalGroupWatchAnchor(anchor, this.now())
+    return this.store.mutate(state => {
+      state.groupWatch = next
+      return { ...next }
+    })
+  }
+
+  resetGroupCursor(anchor: PushGroupWatchAnchor): PushGroupWatchAnchor {
+    return this.resetGroupWatch(anchor)
+  }
+
+  advanceGroupWatch(anchor: PushGroupWatchAnchor): PushGroupWatchAnchor {
+    const next = canonicalGroupWatchAnchor(anchor, this.now())
+    return this.store.mutate(state => {
+      if (state.groupWatch && state.groupWatch.epoch !== next.epoch) {
+        throw new Error('group watch epoch changed without reset')
+      }
+      if (state.groupWatch && next.cursor < state.groupWatch.cursor) {
+        throw new Error('group watch cursor cannot move backwards')
+      }
+      state.groupWatch = next
+      return { ...next }
+    })
+  }
+
+  advanceGroupCursor(anchor: PushGroupWatchAnchor): void {
+    this.advanceGroupWatch(anchor)
+  }
+
+  upsertChatJob(input: PushChatJob): PushChatJob {
+    const job = canonicalChatJob(input)
+    return this.store.mutate(state => {
+      const existingIndex = state.chatJobs.findIndex(item => item.id === job.id)
+      if (existingIndex >= 0 && state.chatJobs[existingIndex]!.localUserID !== job.localUserID) {
+        throw new Error('job.id is already owned by another user')
+      }
+      if (existingIndex >= 0) state.chatJobs[existingIndex] = job
+      else {
+        if (state.chatJobs.filter(item => item.localUserID === job.localUserID).length >= MAX_CHAT_JOBS_PER_USER) {
+          throw new Error('Chat push job limit reached')
+        }
+        state.chatJobs.push(job)
+      }
+      if (job.storedSessionID) {
+        for (const [sessionID, observedAt] of Object.entries(state.ambiguousChatSessions)) {
+          if (!Number.isFinite(observedAt) || observedAt < this.now() - AMBIGUOUS_CHAT_SESSION_TTL_MS) {
+            delete state.ambiguousChatSessions[sessionID]
+          }
+        }
+        const owners = new Set(state.chatJobs
+          .filter(item => item.storedSessionID === job.storedSessionID)
+          .map(item => item.localUserID))
+        if (owners.size > 1) {
+          const entries = Object.entries(state.ambiguousChatSessions)
+          if (entries.length >= MAX_AMBIGUOUS_CHAT_SESSIONS
+            && state.ambiguousChatSessions[job.storedSessionID] === undefined) {
+            state.chatRecoveryDisabledUntil = this.now() + AMBIGUOUS_CHAT_SESSION_TTL_MS
+          } else {
+            state.ambiguousChatSessions[job.storedSessionID] = this.now()
+          }
+        }
+      }
+      return { ...job }
+    })
+  }
+
+  saveChatJob(input: PushChatJob): void {
+    this.upsertChatJob(input)
+  }
+
+  listChatJobs(userIdValue?: string): PushChatJob[] {
+    const userId = userIdValue ? requiredIdentifier(userIdValue, 'userId') : undefined
+    const now = this.now()
+    return this.store.snapshot().chatJobs
+      .filter(item => item.expiresAt > now && (!userId || item.localUserID === userId))
+      .sort((left, right) => left.submittedAt - right.submittedAt)
+      .map(item => ({ ...item, ...(item.metadata ? { metadata: { ...item.metadata } } : {}) }))
+  }
+
+  pendingChatJobs(): readonly PushChatJob[] {
+    const now = this.now()
+    const snapshot = this.store.snapshot()
+    if (snapshot.chatJobs.some(item => item.expiresAt <= now)) {
+      this.store.mutate(state => {
+        state.chatJobs = state.chatJobs.filter(item => item.expiresAt > now)
+      })
+    }
+    return this.listChatJobs()
+  }
+
+  chatJobRecoveryAllowed(job: PushChatJob): boolean {
+    if (!job.storedSessionID) return false
+    const state = this.store.snapshot()
+    if ((state.chatRecoveryDisabledUntil ?? 0) > this.now()) return false
+    if (state.ambiguousChatSessions[job.storedSessionID] !== undefined) return false
+    const owners = new Set(state.chatJobs
+      .filter(item => item.storedSessionID === job.storedSessionID)
+      .map(item => item.localUserID))
+    return owners.size === 1 && owners.has(job.localUserID)
+  }
+
+  promptDigest(userIdValue: string, prompt: string): string {
+    const userId = requiredIdentifier(userIdValue, 'userId')
+    const normalized = prompt.trim().replace(/\r\n/g, '\n')
+    if (!normalized || normalized.length > 200_000) throw new Error('prompt is invalid')
+    if (this.correlationError) throw new Error(this.correlationError)
+    return createHmac('sha256', this.loadCorrelationSecret())
+      .update(userId, 'utf8')
+      .update('\0', 'utf8')
+      .update(normalized, 'utf8')
+      .digest('base64url')
+  }
+
+  completeChatJob(jobId: string): void
+  completeChatJob(userId: string, jobId: string): void
+  completeChatJob(userOrJobId: string, optionalJobId?: string): void {
+    const jobId = requiredIdentifier(optionalJobId ?? userOrJobId, 'jobId', 512)
+    const userId = optionalJobId ? requiredIdentifier(userOrJobId, 'userId') : undefined
+    this.store.mutate(state => {
+      state.chatJobs = state.chatJobs.filter(item => !(item.id === jobId && (!userId || item.localUserID === userId)))
+    })
+  }
+
+  removeUser(userIdValue: string): { registrations: number; subscriptions: number; pending: number } {
+    const userId = requiredIdentifier(userIdValue, 'userId')
+    const prefix = dedupePrefix(userId)
+    return this.store.mutate(state => {
+      const registrations = state.installations.filter(item => item.userId === userId).length
+      const subscriptions = state.groupSubscriptions.filter(item => item.userId === userId).length
+      const pending = state.outbox.filter(item => item.userId === userId).length
+      state.installations = state.installations.filter(item => item.userId !== userId)
+      state.groupSubscriptions = state.groupSubscriptions.filter(item => item.userId !== userId)
+      state.outbox = state.outbox.filter(item => item.userId !== userId)
+      state.chatJobs = state.chatJobs.filter(item => item.localUserID !== userId)
+      for (const key of Object.keys(state.processedEvents)) {
+        if (key.startsWith(prefix)) delete state.processedEvents[key]
+      }
+      return { registrations, subscriptions, pending }
+    })
+  }
+
+  enqueueNotification(input: PushNotificationCandidate): 'enqueued' | 'duplicate' | 'ignored' {
+    const userId = requiredIdentifier(input.localUserID, 'localUserID')
+    const eventId = requiredIdentifier(input.eventID, 'eventID', 512)
+    if (this.store.snapshot().processedEvents[dedupeKey(userId, eventId)] !== undefined) return 'duplicate'
+    const count = this.enqueue({
+      eventId,
+      userId,
+      kind: input.kind,
+      title: input.title,
+      body: input.body,
+      data: input.data,
+      collapseId: input.collapseID,
+      ...(input.roomID ? { roomId: input.roomID } : {}),
+      ...((input.topicID || input.roomID) ? { threadId: input.topicID ?? input.roomID } : {}),
+    })
+    return count > 0 ? 'enqueued' : 'ignored'
+  }
+
+  enqueueGroupEvent(input: PushNotificationCandidate & { roomID: string }): 'enqueued' | 'duplicate' | 'ignored' {
+    if (!this.isGroupSubscribed(input.localUserID, input.roomID)) return 'ignored'
+    return this.enqueueNotification(input)
+  }
+
+  enqueueChatCandidate(input: PushNotificationCandidate): 'enqueued' | 'duplicate' | 'ignored' {
+    return this.enqueueNotification(input)
+  }
+
+  enqueue(input: PushNotification): number {
+    if (!this.capabilities().enabled) return 0
+    const eventId = requiredIdentifier(input.eventId, 'eventId', 512)
+    const userId = requiredIdentifier(input.userId, 'userId')
+    try {
+      if (!this.isUserActive(userId)) return 0
+    } catch {
+      return 0
+    }
+    if (!PUSH_EVENT_KINDS.includes(input.kind)) throw new Error('kind is invalid')
+    const title = limitedText(input.title, 120, 'title')
+    const body = limitedText(input.body, MAX_SUMMARY_CHARACTERS, 'body')
+    const clientAccountId = input.clientAccountId
+      ? requiredIdentifier(input.clientAccountId, 'clientAccountId')
+      : undefined
+    const roomId = input.roomId ? requiredIdentifier(input.roomId, 'roomId') : undefined
+    const collapseId = input.collapseId ? requiredIdentifier(input.collapseId, 'collapseId', 64) : undefined
+    if (collapseId && Buffer.byteLength(collapseId, 'utf8') > 64) throw new Error('collapseId is too long')
+    const threadId = input.threadId ? requiredIdentifier(input.threadId, 'threadId', 512) : undefined
+    let data: Record<string, unknown> = {}
+    if (input.data) {
+      const encoded = JSON.stringify(input.data)
+      if (encoded === undefined) throw new Error('data must be JSON serializable')
+      data = JSON.parse(encoded) as Record<string, unknown>
+    }
+    const now = this.now()
+    const expiresAt = input.expiresAt ?? now + DEFAULT_EVENT_LIFETIME_MS
+    if (!Number.isFinite(expiresAt) || expiresAt <= now) throw new Error('expiresAt must be in the future')
+    const queued = this.store.mutate(state => {
+      for (const [key, processedAt] of Object.entries(state.processedEvents)) {
+        if (!Number.isFinite(processedAt) || processedAt < now - DEDUPE_LIFETIME_MS) delete state.processedEvents[key]
+      }
+      const processed = Object.entries(state.processedEvents)
+      if (processed.length >= MAX_PROCESSED_EVENTS) {
+        processed.sort((left, right) => left[1] - right[1])
+        for (const [expiredKey] of processed.slice(0, processed.length - MAX_PROCESSED_EVENTS + 1)) {
+          delete state.processedEvents[expiredKey]
+        }
+      }
+      const key = dedupeKey(userId, eventId)
+      if (state.processedEvents[key] !== undefined) return 0
+      const targets = state.installations.filter(item => item.userId === userId
+        && this.registrationIsAuthorized(item)
+        && (!clientAccountId || item.clientAccountId === clientAccountId))
+      if (state.outbox.length + targets.length > MAX_OUTBOX_ITEMS) throw new Error('Push outbox limit reached')
+      state.processedEvents[key] = now
+      for (const target of targets) {
+        target.badge += 1
+        state.outbox.push({
+          id: randomUUID(),
+          eventId,
+          userId,
+          installationId: target.installationId,
+          clientAccountId: target.clientAccountId,
+          kind: input.kind,
+          title,
+          body,
+          data,
+          ...(collapseId ? { collapseId } : {}),
+          ...(threadId ? { threadId } : {}),
+          ...(roomId ? { roomId } : {}),
+          createdAt: now,
+          expiresAt,
+          attempts: 0,
+          nextAttemptAt: now,
+        })
+      }
+      return targets.length
+    })
+    this.scheduleNextFlush()
+    return queued
+  }
+
+  flushDue(): Promise<PushFlushResult> {
+    if (this.activeFlush) return this.activeFlush
+    if (this.closed || !this.provider || !this.capabilities().enabled) {
+      return Promise.resolve({ delivered: 0, retried: 0, removedRegistrations: 0, failed: 0 })
+    }
+    this.activeFlush = this.flushInternal()
+      .then(result => {
+        this.flushFailureCount = 0
+        this.flushBlockedUntil = 0
+        this.runtimeError = undefined
+        return result
+      })
+      .catch(cause => {
+        this.flushFailureCount += 1
+        const delay = Math.min(60_000, 1_000 * (2 ** Math.min(this.flushFailureCount - 1, 6)))
+        this.flushBlockedUntil = this.now() + delay
+        this.recordRuntimeError(cause)
+        throw cause
+      })
+      .finally(() => {
+        this.activeFlush = undefined
+        this.scheduleNextFlush()
+      })
+    return this.activeFlush
+  }
+
+  private async flushInternal(): Promise<PushFlushResult> {
+    const summary: PushFlushResult = { delivered: 0, retried: 0, removedRegistrations: 0, failed: 0 }
+    const provider = this.provider
+    if (!provider) return summary
+    const due = this.store.snapshot().outbox
+      .filter(item => item.nextAttemptAt <= this.now())
+      .sort((left, right) => left.nextAttemptAt - right.nextAttemptAt)
+      .slice(0, 100)
+    for (const candidate of due) {
+      if (this.closed) break
+      const state = this.store.snapshot()
+      const item = state.outbox.find(current => current.id === candidate.id)
+      if (!item) continue
+      let userActive = false
+      try { userActive = this.isUserActive(item.userId) } catch { userActive = false }
+      if (!userActive) {
+        this.store.mutate(current => {
+          current.installations = current.installations.filter(entry => entry.userId !== item.userId)
+          current.groupSubscriptions = current.groupSubscriptions.filter(entry => entry.userId !== item.userId)
+          current.outbox = current.outbox.filter(entry => entry.userId !== item.userId)
+          current.chatJobs = current.chatJobs.filter(entry => entry.localUserID !== item.userId)
+        })
+        summary.failed += 1
+        continue
+      }
+      const installation = state.installations.find(current => current.userId === item.userId
+        && current.installationId === item.installationId
+        && current.clientAccountId === item.clientAccountId)
+      if (installation && !this.registrationIsAuthorized(installation)) {
+        this.store.mutate(current => {
+          current.installations = current.installations.filter(entry => !(entry.userId === item.userId
+            && entry.installationId === item.installationId
+            && entry.clientAccountId === item.clientAccountId))
+          current.outbox = current.outbox.filter(entry => !(entry.userId === item.userId
+            && entry.installationId === item.installationId
+            && entry.clientAccountId === item.clientAccountId))
+        })
+        summary.failed += 1
+        continue
+      }
+      const subscribed = !item.roomId || state.groupSubscriptions.some(subscription => subscription.userId === item.userId
+        && subscription.roomId === item.roomId
+        && subscription.enabled)
+      if (!installation || !subscribed || item.expiresAt <= this.now()) {
+        this.store.mutate(current => { current.outbox = current.outbox.filter(entry => entry.id !== item.id) })
+        summary.failed += 1
+        continue
+      }
+      const payload: Record<string, unknown> = {
+        ...item.data,
+        aps: {
+          alert: { title: item.title, body: item.body },
+          sound: 'default',
+          badge: installation.badge,
+          ...(item.threadId ? { 'thread-id': item.threadId } : {}),
+        },
+        version: 1,
+        eventId: item.eventId,
+        kind: item.kind,
+        clientAccountId: item.clientAccountId,
+      }
+      const result = await provider.send({
+        deviceToken: installation.deviceToken,
+        environment: installation.environment,
+        payload,
+        apnsId: item.id,
+        ...(item.collapseId ? { collapseId: item.collapseId } : {}),
+        expiration: Math.floor(item.expiresAt / 1_000),
+      })
+      const at = new Date(this.now()).toISOString()
+      if (result.disposition === 'success') {
+        this.store.mutate(current => {
+          current.outbox = current.outbox.filter(entry => entry.id !== item.id)
+          current.status.lastSuccessAt = at
+        })
+        summary.delivered += 1
+      } else if (result.disposition === 'unregister') {
+        let registrationRotated = false
+        this.store.mutate(current => {
+          const latest = current.installations.find(entry => entry.userId === item.userId
+            && entry.installationId === item.installationId
+            && entry.clientAccountId === item.clientAccountId)
+          registrationRotated = Boolean(latest && (
+            latest.deviceToken !== installation.deviceToken
+              || latest.environment !== installation.environment
+          ))
+          if (registrationRotated) {
+            const pending = current.outbox.find(entry => entry.id === item.id)
+            if (pending) {
+              pending.attempts = 0
+              pending.nextAttemptAt = this.now()
+            }
+            return
+          }
+          current.installations = current.installations.filter(entry => !(entry.userId === item.userId
+            && entry.installationId === item.installationId
+            && entry.clientAccountId === item.clientAccountId))
+          current.outbox = current.outbox.filter(entry => !(entry.userId === item.userId
+            && entry.installationId === item.installationId
+            && entry.clientAccountId === item.clientAccountId))
+        })
+        if (registrationRotated) summary.retried += 1
+        else summary.removedRegistrations += 1
+      } else if (result.disposition === 'retry' || result.disposition === 'configuration') {
+        const attempts = item.attempts + 1
+        const exhausted = attempts >= this.maxAttempts || item.expiresAt <= this.now()
+        const delay = Math.min(
+          this.maxRetryMilliseconds,
+          Math.max(result.retryAfterMs ?? 0, this.baseRetryMilliseconds * (2 ** Math.max(0, attempts - 1))),
+        )
+        this.store.mutate(current => {
+          const pending = current.outbox.find(entry => entry.id === item.id)
+          if (pending) {
+            if (exhausted) current.outbox = current.outbox.filter(entry => entry.id !== item.id)
+            else {
+              pending.attempts = attempts
+              pending.nextAttemptAt = this.now() + delay
+            }
+          }
+          current.status.lastError = safeError(result)
+          current.status.lastErrorAt = at
+        })
+        if (exhausted) summary.failed += 1
+        else summary.retried += 1
+      } else {
+        this.store.mutate(current => {
+          current.outbox = current.outbox.filter(entry => entry.id !== item.id)
+          current.status.lastError = safeError(result)
+          current.status.lastErrorAt = at
+        })
+        summary.failed += 1
+      }
+    }
+    return summary
+  }
+
+  private scheduleNextFlush(): void {
+    if (!this.autoFlush || this.closed || !this.provider || !this.capabilities().enabled || this.activeFlush) return
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = undefined
+    const next = this.store.snapshot().outbox.reduce<number | undefined>((earliest, item) => (
+      earliest === undefined || item.nextAttemptAt < earliest ? item.nextAttemptAt : earliest
+    ), undefined)
+    if (next === undefined) return
+    const scheduledAt = Math.max(next, this.flushBlockedUntil)
+    const delay = Math.max(0, Math.min(2_147_483_647, scheduledAt - this.now()))
+    this.timer = setTimeout(() => {
+      this.timer = undefined
+      void this.flushDue().catch(() => undefined)
+    }, delay)
+    this.timer.unref()
+  }
+
+  close(): void {
+    this.closed = true
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = undefined
+    this.provider?.close?.()
+  }
+
+  private recordRuntimeError(cause: unknown): void {
+    const raw = cause instanceof Error ? cause.message : String(cause)
+    const message = raw
+      .replace(/[a-fA-F0-9]{32,}/g, '[redacted]')
+      .replace(/[\r\n]+/g, ' ')
+      .slice(0, 500) || '推送后台任务失败'
+    const at = new Date(this.now()).toISOString()
+    this.runtimeError = { message, at }
+    try {
+      this.store.mutate(state => {
+        state.status.lastError = message
+        state.status.lastErrorAt = at
+      })
+    } catch {
+      // The in-memory status remains available when the push state volume is
+      // the reason persistence failed. Never let optional push stop 8800.
+    }
+  }
+
+  private registrationIsAuthorized(installation: InstallationRecord): boolean {
+    if (!this.userAuthorizationVersion) return true
+    try {
+      const current = this.userAuthorizationVersion(installation.userId)
+      return current !== undefined && installation.authorizationVersion === current
+    } catch {
+      return false
+    }
+  }
+
+  private markPersistedJobsDisconnected(): void {
+    try {
+      const jobs = this.store.snapshot().chatJobs
+      if (!jobs.some(job => !Number.isFinite(Number(job.metadata?.disconnectedAt)))) return
+      const disconnectedAt = this.now()
+      this.store.mutate(state => {
+        state.chatJobs = state.chatJobs.map(job => ({
+          ...job,
+          metadata: {
+            ...job.metadata,
+            disconnectedAt: Number.isFinite(Number(job.metadata?.disconnectedAt))
+              ? job.metadata!.disconnectedAt
+              : disconnectedAt,
+            recoveredAfterRestart: true,
+          },
+        }))
+      })
+    } catch {
+      // A corrupt/unwritable optional push state already disables recovery.
+    }
+  }
+
+  private loadCorrelationSecret(): Buffer {
+    if (this.correlationSecret) return this.correlationSecret
+    const path = join(this.options.home, 'push', 'correlation.key')
+    try {
+      const existing = readFileSync(path)
+      if (existing.byteLength !== 32) throw new Error('Push correlation key has an invalid length')
+      chmodSync(path, 0o600)
+      this.correlationSecret = existing
+      return existing
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause
+    }
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
+    const generated = randomBytes(32)
+    let descriptor: number | undefined
+    try {
+      descriptor = openSync(path, 'wx', 0o600)
+      writeFileSync(descriptor, generated)
+      fsyncSync(descriptor)
+      closeSync(descriptor)
+      descriptor = undefined
+      this.correlationSecret = generated
+      return generated
+    } catch (cause) {
+      if (descriptor !== undefined) closeSync(descriptor)
+      if ((cause as NodeJS.ErrnoException).code === 'EEXIST') {
+        const existing = readFileSync(path)
+        if (existing.byteLength !== 32) throw new Error('Push correlation key has an invalid length')
+        this.correlationSecret = existing
+        return existing
+      }
+      throw cause
+    }
+  }
+}
