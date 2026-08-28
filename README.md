@@ -41,6 +41,14 @@ export HERMES_YAOYAO_APNS_TOPIC=cn.samien.yaoyao.hermes
 `HERMES_YAOYAO_APNS_KEY_FILE` 指向容器内绝对路径。APNs 只要求 8800 能主动访问
 Apple，不需要把 8800 暴露到公网；手机访问 8800 仍应优先使用 HTTPS/WSS 或 Tailscale。
 
+未设置任何 `HERMES_YAOYAO_APNS_*` 环境变量时，管理员也可以在“系统管理 → iOS
+消息推送”填写 **8800 所在机器上的 `.p8` 绝对路径**、Key ID、Team ID、Topic 及启用
+环境，然后点击“验证并启用”。私钥内容不会经过浏览器；8800 会本地读取 P-256 密钥、
+探测所选 APNs 环境，再把路径和元数据原子保存到
+`$HERMES_YAOYAO_HOME/push/apns-config.json`（权限 `0600`）并立即热加载。密钥文件权限
+宽于 `0600` 只显示安全建议，不会阻止启用。任一 APNs 环境变量存在时仍以环境变量为准，
+Web 界面只读，避免两个配置源互相覆盖。
+
 仓库同时归档了夭夭的 Hermes Dashboard 插件，位于
 [`hermes-plugins/yaoyao/dashboard`](hermes-plugins/yaoyao/dashboard)。Web 工作台和该插件是两个独立部署单元：前者运行在 `8800`，后者由已运行的 Hermes Dashboard 在 `9119` 加载。
 

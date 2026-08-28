@@ -1612,10 +1612,15 @@ export class GroupPushEventWatcher {
       }
       if (!this.#running || generation !== this.#generation) return
       this.#processor = new GroupPushEventProcessor(anchor, this.coordinator)
-      this.#connection = await this.source.connect(anchor, {
+      const connection = await this.source.connect(anchor, {
         onEnvelope: envelope => this.#queueEnvelope(generation, envelope),
         onClose: () => this.#scheduleReconnect(generation),
       })
+      if (!this.#running || generation !== this.#generation || this.#connection) {
+        connection.close()
+        return
+      }
+      this.#connection = connection
       this.#retryAttempt = 0
     } catch {
       this.#scheduleReconnect(generation)

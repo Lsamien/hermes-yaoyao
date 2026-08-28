@@ -129,6 +129,24 @@ describe('APNsProvider', () => {
     })).resolves.toMatchObject({ disposition: 'retry', reason: 'network unavailable' })
     expect(calls).toBe(1)
   })
+
+  it('never sends to an APNs environment excluded by the active configuration', async () => {
+    const { config } = keyFixture()
+    let calls = 0
+    const provider = new APNsProvider({ ...config, environments: ['development'] }, {
+      transport: {
+        async send() {
+          calls += 1
+          return { status: 200 }
+        },
+      },
+    })
+
+    await expect(provider.send({
+      deviceToken: 'ef'.repeat(32), environment: 'production', payload: { aps: {} },
+    })).resolves.toMatchObject({ disposition: 'configuration', reason: 'EnvironmentNotConfigured' })
+    expect(calls).toBe(0)
+  })
 })
 
 describe('Node HTTP/2 APNs transport', () => {

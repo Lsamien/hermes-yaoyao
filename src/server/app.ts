@@ -25,6 +25,10 @@ import { UploadStore } from './uploads.js'
 import { SystemUpdateManager } from './updateManager.js'
 import { installWebSocketRelay } from './websocket.js'
 import { PushCoordinator } from './pushCoordinator.js'
+import {
+  APNsConfigurationManager,
+  type APNsConfigurationSnapshot,
+} from './apnsConfiguration.js'
 import { PushCoordinatorEventAdapter } from './pushEventAdapter.js'
 import {
   ChatPushJobManager,
@@ -46,6 +50,7 @@ export interface ApplicationOptions {
   accountPairings?: AccountLoginPairingStore
   profileIdentities?: UpstreamProfileIdentityService
   push?: PushCoordinator
+  apnsConfiguration?: APNsConfigurationManager
 }
 
 export interface ApplicationRuntime {
@@ -62,6 +67,7 @@ export interface ApplicationRuntime {
   accountPairings: AccountLoginPairingStore
   profileIdentities: UpstreamProfileIdentityService
   push: PushCoordinator
+  apnsConfiguration: APNsConfigurationManager
   pushEventCoordinator: PushCoordinatorEventAdapter
   chatPushJobs: ChatPushJobManager
   groupPushEvents: GroupPushEventWatcher
@@ -119,6 +125,21 @@ export function createApplication(options: ApplicationOptions = {}): Application
   const accountPairings = options.accountPairings ?? new AccountLoginPairingStore()
   const profileIdentities = options.profileIdentities
     ?? new UpstreamProfileIdentityService(config, upstreamSession)
+  const initialAPNsSettings: APNsConfigurationSnapshot = config.apnsSettings ?? {
+    source: config.apns || config.apnsConfigurationError ? 'environment' : 'none',
+    editable: !(config.apns || config.apnsConfigurationError),
+    ...(config.apns ? {
+      input: {
+        ...config.apns,
+        environments: [...(config.apns.environments ?? ['development', 'production'])],
+      },
+      config: config.apns,
+    } : {}),
+    warnings: [],
+    ...(config.apnsConfigurationError ? { configurationError: config.apnsConfigurationError } : {}),
+  }
+  const apnsConfiguration = options.apnsConfiguration
+    ?? new APNsConfigurationManager(config.home, initialAPNsSettings)
   const push = options.push ?? new PushCoordinator({
     home: config.home,
     apns: config.apns,
@@ -251,6 +272,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     accountPairings,
     profileIdentities,
     push,
+    apnsConfiguration,
   })
   app.use(router.routes())
   app.use(router.allowedMethods({ throw: false }))
@@ -278,6 +300,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     accountPairings,
     profileIdentities,
     push,
+    apnsConfiguration,
     pushEventCoordinator,
     chatPushJobs,
     groupPushEvents,
@@ -303,17 +326,23 @@ export function createNodeServer(runtime: ApplicationRuntime): NodeServerRuntime
         key: readFileSync(config.tlsKey),
       }, runtime.app.callback())
     : createHttpServer(runtime.app.callback())
-  const pushEnabled = runtime.push.capabilities().enabled
-  if (pushEnabled) {
-    runtime.chatPushJobs.start()
-    runtime.groupPushEvents.start()
+  const synchronizePushObservers = (enabled = runtime.push.capabilities().enabled) => {
+    if (enabled) {
+      runtime.chatPushJobs.start()
+      runtime.groupPushEvents.start()
+    } else {
+      runtime.chatPushJobs.stop()
+      runtime.groupPushEvents.stop()
+    }
   }
+  synchronizePushObservers()
+  const removePushConfigurationListener = runtime.push.onEnabledChange(synchronizePushObservers)
   const removeWebSockets = installWebSocketRelay(
     server,
     config,
     runtime.leases,
     runtime.pairings,
-    pushEnabled ? {
+    {
       coordinator: runtime.pushEventCoordinator,
       resolveGatewayUser: request => runtime.auth.currentFromCookieHeader(
         typeof request.headers.cookie === 'string' ? request.headers.cookie : undefined,
@@ -322,11 +351,12 @@ export function createNodeServer(runtime: ApplicationRuntime): NodeServerRuntime
         runtime.upstreamSession,
         (localUserID, prompt) => runtime.push.promptDigest(localUserID, prompt),
       ),
-    } : undefined,
+    },
   )
   return {
     server,
     close: async () => {
+      removePushConfigurationListener()
       removeWebSockets()
       await new Promise<void>((resolve, reject) => {
         if (!server.listening) {

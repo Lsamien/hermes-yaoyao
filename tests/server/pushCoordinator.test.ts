@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { APNsRequest, APNsSendResult } from '../../src/server/apns.js'
 import { loadServerConfig, type APNsProviderConfig } from '../../src/server/config.js'
@@ -55,10 +55,11 @@ function register(coordinator: PushCoordinator, suffix = '1') {
 
 describe('push configuration', () => {
   it('keeps APNs optional and reports partial configuration without preventing startup', () => {
-    expect(loadServerConfig({}).apns).toBeUndefined()
-    const partial = loadServerConfig({ HERMES_YAOYAO_APNS_KEY_ID: 'KEY1234567' })
+    const home = root()
+    expect(loadServerConfig({ HERMES_YAOYAO_HOME: home }).apns).toBeUndefined()
+    const partial = loadServerConfig({ HERMES_YAOYAO_HOME: home, HERMES_YAOYAO_APNS_KEY_ID: 'KEY1234567' })
     expect(partial.apns).toBeUndefined()
-    expect(partial.apnsConfigurationError).toMatch(/must be set together/)
+    expect(partial.apnsConfigurationError).toMatch(/absolute local path/)
   })
 
   it('loads a complete provider configuration and the default topic', () => {
@@ -67,15 +68,17 @@ describe('push configuration', () => {
     const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
     writeFileSync(keyFile, privateKey.export({ format: 'pem', type: 'pkcs8' }))
     const config = loadServerConfig({
+      HERMES_YAOYAO_HOME: directory,
       HERMES_YAOYAO_APNS_KEY_FILE: keyFile,
       HERMES_YAOYAO_APNS_KEY_ID: 'KEY1234567',
       HERMES_YAOYAO_APNS_TEAM_ID: 'TEAM123456',
     })
     expect(config.apns).toEqual({
-      keyFile,
+      keyFile: realpathSync(keyFile),
       keyId: 'KEY1234567',
       teamId: 'TEAM123456',
       topic: 'cn.samien.yaoyao.hermes',
+      environments: ['development', 'production'],
     })
   })
 
@@ -83,6 +86,7 @@ describe('push configuration', () => {
     const keyFile = join(root(), 'AuthKey.p8')
     writeFileSync(keyFile, 'not a private key')
     const config = loadServerConfig({
+      HERMES_YAOYAO_HOME: dirname(keyFile),
       HERMES_YAOYAO_APNS_KEY_FILE: keyFile,
       HERMES_YAOYAO_APNS_KEY_ID: 'KEY1234567',
       HERMES_YAOYAO_APNS_TEAM_ID: 'TEAM123456',
@@ -93,6 +97,77 @@ describe('push configuration', () => {
 })
 
 describe('PushCoordinator durable state and delivery', () => {
+  it('hot-swaps during an active flush without closing the in-flight provider early', async () => {
+    const home = root()
+    let releaseSend!: (value: APNsSendResult) => void
+    const oldSender: PushSender & { closed: boolean } = {
+      closed: false,
+      send: () => new Promise(resolve => { releaseSend = resolve }),
+      close() { this.closed = true },
+    }
+    const replacement = new FakeSender()
+    const coordinator = new PushCoordinator({
+      home, apns, provider: oldSender, autoFlush: false,
+      providerFactory: () => replacement,
+    })
+    register(coordinator)
+    coordinator.enqueue({
+      eventId: 'active-flush', userId: 'user-a', kind: 'chat.completed', title: '完成', body: '已完成',
+    })
+    const flush = coordinator.flushDue()
+    const replacementOperation = coordinator.configureAPNs({ ...apns, keyId: 'NEWKEY1234' })
+    await replacementOperation
+    expect(oldSender.closed).toBe(false)
+    expect(coordinator.capabilities().enabled).toBe(true)
+
+    releaseSend({ disposition: 'unregister', status: 400, reason: 'BadDeviceToken' })
+    await flush
+    await Promise.resolve()
+    expect(oldSender.closed).toBe(true)
+    expect(coordinator.status()).toMatchObject({ registrationCount: 1, pendingCount: 1 })
+    await coordinator.flushDue()
+    expect(replacement.requests).toHaveLength(1)
+    expect(coordinator.status().pendingCount).toBe(0)
+  })
+
+  it('hot-enables providers and only queues installations from selected environments', async () => {
+    const home = root()
+    const senders: FakeSender[] = []
+    const coordinator = new PushCoordinator({
+      home,
+      autoFlush: false,
+      providerFactory: () => {
+        const sender = new FakeSender()
+        senders.push(sender)
+        return sender
+      },
+    })
+    const changes: boolean[] = []
+    coordinator.onEnabledChange(enabled => { changes.push(enabled) })
+    coordinator.registerInstallation({
+      userId: 'user-a', installationId: 'phone-development', clientAccountId: 'account-a',
+      deviceToken: 'ab'.repeat(32), environment: 'development',
+    })
+    coordinator.registerInstallation({
+      userId: 'user-a', installationId: 'phone-production', clientAccountId: 'account-a',
+      deviceToken: 'cd'.repeat(32), environment: 'production',
+    })
+
+    await coordinator.configureAPNs({ ...apns, environments: ['production'] })
+    expect(coordinator.capabilities()).toMatchObject({ enabled: true, environments: ['production'] })
+    expect(coordinator.enqueue({
+      eventId: 'environment-event', userId: 'user-a', kind: 'chat.completed', title: '完成', body: '已完成',
+    })).toBe(1)
+    await coordinator.flushDue()
+    expect(senders[0]!.requests).toHaveLength(1)
+    expect(senders[0]!.requests[0]!.environment).toBe('production')
+
+    await coordinator.configureAPNs()
+    expect(senders[0]!.closed).toBe(true)
+    expect(coordinator.capabilities().enabled).toBe(false)
+    expect(changes).toEqual([true, false])
+  })
+
   it('persists private registrations, subscriptions, outbox delivery, and badge state', async () => {
     const home = root()
     const sender = new FakeSender()

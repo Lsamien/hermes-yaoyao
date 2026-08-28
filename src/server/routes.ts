@@ -32,6 +32,10 @@ import { LocalAuthStore, type LocalUser, UpstreamServiceSession } from './localA
 import { AccountLoginPairingStore } from './accountPairing.js'
 import { UpstreamProfileIdentityService } from './profileIdentities.js'
 import { PushCoordinator } from './pushCoordinator.js'
+import {
+  APNsConfigurationManager,
+  type APNsConfigurationInput,
+} from './apnsConfiguration.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -48,6 +52,7 @@ export interface RouteDependencies {
   accountPairings: AccountLoginPairingStore
   profileIdentities: UpstreamProfileIdentityService
   push: PushCoordinator
+  apnsConfiguration: APNsConfigurationManager
 }
 
 function body(ctx: Koa.Context): JsonObject {
@@ -356,6 +361,24 @@ function json(ctx: Koa.Context, status: number, value: unknown): void {
   ctx.status = status
   ctx.type = 'application/json; charset=utf-8'
   ctx.body = value
+}
+
+function pushSystemStatus(dependencies: RouteDependencies): Record<string, unknown> {
+  const runtime = dependencies.push.status()
+  const settings = dependencies.apnsConfiguration.snapshot()
+  const input = settings.input
+  return {
+    ...runtime,
+    source: settings.source,
+    editable: settings.editable,
+    keyFile: input?.keyFile,
+    keyId: input?.keyId,
+    teamId: input?.teamId,
+    topic: input?.topic ?? runtime.topic,
+    environments: input?.environments ?? runtime.environments,
+    warnings: settings.warnings,
+    ...(settings.configurationError ? { configurationError: settings.configurationError } : {}),
+  }
 }
 
 function pushRequest<T>(operation: () => T): T {
@@ -1693,10 +1716,22 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   })
   router.get('/api/app/system/push-status', (ctx) => {
     dependencies.auth.requireAdmin(ctx)
-    json(ctx, 200, {
-      ...dependencies.push.status(),
-      topic: dependencies.push.capabilities().topic,
+    json(ctx, 200, pushSystemStatus(dependencies))
+  })
+  router.put('/api/app/system/push-config', async (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
+    const request = body(ctx)
+    const input: Partial<APNsConfigurationInput> = {
+      keyFile: typeof request.keyFile === 'string' ? request.keyFile : '',
+      keyId: typeof request.keyId === 'string' ? request.keyId : '',
+      teamId: typeof request.teamId === 'string' ? request.teamId : '',
+      topic: typeof request.topic === 'string' ? request.topic : '',
+      environments: Array.isArray(request.environments) ? request.environments as APNsConfigurationInput['environments'] : [],
+    }
+    await dependencies.apnsConfiguration.update(input, async config => {
+      await dependencies.push.configureAPNs(config)
     })
+    json(ctx, 200, pushSystemStatus(dependencies))
   })
   router.post('/api/app/system/update/check', async (ctx) => {
     await withJar(ctx, async (jar) => {

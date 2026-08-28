@@ -70,14 +70,19 @@ export class PushCoordinatorEventAdapter implements PushEventCoordinator {
   ) {}
 
   observeChat(_observation: ChatPushObservation): void {}
-  saveChatJob(job: ChatPushJob): void { this.push.saveChatJob(job) }
+  saveChatJob(job: ChatPushJob): void {
+    if (this.push.capabilities().enabled) this.push.saveChatJob(job)
+  }
   completeChatJob(jobID: string): void { this.push.completeChatJob(jobID) }
-  pendingChatJobs(): readonly ChatPushJob[] { return this.push.pendingChatJobs() }
+  pendingChatJobs(): readonly ChatPushJob[] {
+    return this.push.capabilities().enabled ? this.push.pendingChatJobs() : []
+  }
   promptDigest(localUserID: string, prompt: string): string {
     return this.push.promptDigest(localUserID, prompt)
   }
   canRecoverChatJob(job: ChatPushJob): boolean { return this.push.chatJobRecoveryAllowed(job) }
   enqueueNotification(candidate: PushNotificationCandidate): 'enqueued' | 'duplicate' | 'ignored' {
+    if (!this.push.capabilities().enabled) return 'ignored'
     if ('roomID' in candidate) {
       if (candidate.messageSequence !== undefined) {
         const lastSequence = this.push.groupSubscriptionLastMessageSeq(candidate.localUserID, candidate.roomID)

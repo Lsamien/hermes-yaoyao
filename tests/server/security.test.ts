@@ -1,6 +1,9 @@
 import { randomBytes } from 'node:crypto'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type Koa from 'koa'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { loadServerConfig, type ServerConfig } from '../../src/server/config.js'
 import {
   CsrfProtection,
@@ -8,6 +11,18 @@ import {
   isExactOrigin,
   applySecurityHeaders,
 } from '../../src/server/security.js'
+
+const configHomes: string[] = []
+
+afterEach(() => {
+  for (const home of configHomes.splice(0)) rmSync(home, { recursive: true, force: true })
+})
+
+function isolatedEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const home = mkdtempSync(join(tmpdir(), 'hermes-yaoyao-security-config-'))
+  configHomes.push(home)
+  return { HERMES_YAOYAO_HOME: home, ...overrides }
+}
 
 function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
   return {
@@ -92,19 +107,19 @@ describe('server security boundary', () => {
   })
 
   it('refuses production LAN HTTP unless explicitly enabled', () => {
-    expect(() => loadServerConfig({
+    expect(() => loadServerConfig(isolatedEnv({
       NODE_ENV: 'production',
       HERMES_YAOYAO_HOST: '0.0.0.0',
-    })).toThrow(/ALLOW_INSECURE_LAN/)
-    expect(loadServerConfig({
+    }))).toThrow(/ALLOW_INSECURE_LAN/)
+    expect(loadServerConfig(isolatedEnv({
       NODE_ENV: 'production',
       HERMES_YAOYAO_HOST: '0.0.0.0',
       HERMES_YAOYAO_ALLOW_INSECURE_LAN: '1',
-    }).insecureLan).toBe(true)
+    })).insecureLan).toBe(true)
   })
 
   it('defaults the YaoYao Web listener to loopback', () => {
-    const value = loadServerConfig({})
+    const value = loadServerConfig(isolatedEnv())
     expect(value.host).toBe('127.0.0.1')
     expect(value.insecureLan).toBe(false)
     expect(value.yaoyaoPluginSource).toBe(
@@ -115,17 +130,17 @@ describe('server security boundary', () => {
   })
 
   it('rejects credentials embedded in the configured Yaoyao plugin source', () => {
-    expect(() => loadServerConfig({
+    expect(() => loadServerConfig(isolatedEnv({
       HERMES_YAOYAO_PLUGIN_SOURCE: 'https://user:secret@git.example/yaoyao.git#hermes-plugins/yaoyao',
-    })).toThrow(/must not contain credentials/)
+    }))).toThrow(/must not contain credentials/)
   })
 
   it('requires a credential-free HTTPS or SSH system release source', () => {
-    expect(() => loadServerConfig({
+    expect(() => loadServerConfig(isolatedEnv({
       HERMES_YAOYAO_RELEASE_SOURCE: 'http://git.example/hermes-yaoyao.git',
-    })).toThrow(/HTTPS or SSH/)
-    expect(() => loadServerConfig({
+    }))).toThrow(/HTTPS or SSH/)
+    expect(() => loadServerConfig(isolatedEnv({
       HERMES_YAOYAO_RELEASE_SOURCE: 'https://user:secret@git.example/hermes-yaoyao.git',
-    })).toThrow(/must not contain credentials/)
+    }))).toThrow(/must not contain credentials/)
   })
 })

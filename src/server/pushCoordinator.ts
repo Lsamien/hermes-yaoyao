@@ -36,6 +36,7 @@ export interface PushCapabilities {
   protocolVersion: 1
   enabled: boolean
   topic: string
+  environments: readonly APNsEnvironment[]
   previewMode: 'title-and-summary'
   events: readonly PushEventKind[]
   maxSummaryCharacters: 180
@@ -47,6 +48,7 @@ export interface PushStatus {
   configured: boolean
   healthy: boolean
   topic: string
+  environments: readonly APNsEnvironment[]
   registrationCount: number
   pendingCount: number
   subscriptionCount: number
@@ -144,6 +146,7 @@ export interface PushCoordinatorOptions {
   apns?: APNsProviderConfig
   apnsConfigurationError?: string
   provider?: PushSender
+  providerFactory?: (config: APNsProviderConfig) => PushSender
   now?: () => number
   autoFlush?: boolean
   baseRetryMilliseconds?: number
@@ -410,7 +413,10 @@ function canonicalChatJob(input: PushChatJob): PushChatJob {
 
 export class PushCoordinator {
   private readonly store: PushStateStore
-  private readonly provider?: PushSender
+  private provider?: PushSender
+  private apns?: APNsProviderConfig
+  private apnsConfigurationError?: string
+  private readonly providerFactory: (config: APNsProviderConfig) => PushSender
   private readonly now: () => number
   private readonly autoFlush: boolean
   private readonly baseRetryMilliseconds: number
@@ -426,10 +432,16 @@ export class PushCoordinator {
   private flushBlockedUntil = 0
   private correlationSecret?: Buffer
   private correlationError?: string
+  private readonly enabledListeners = new Set<(enabled: boolean) => void>()
+  private configurationOperation: Promise<void> = Promise.resolve()
+  private providerGeneration = 0
 
   constructor(readonly options: PushCoordinatorOptions) {
     this.store = new PushStateStore(options.home)
-    this.provider = options.provider ?? (options.apns ? new APNsProvider(options.apns) : undefined)
+    this.apns = options.apns
+    this.apnsConfigurationError = options.apnsConfigurationError
+    this.providerFactory = options.providerFactory ?? (config => new APNsProvider(config))
+    this.provider = options.provider ?? (options.apns ? this.providerFactory(options.apns) : undefined)
     this.now = options.now ?? Date.now
     this.autoFlush = options.autoFlush ?? true
     this.baseRetryMilliseconds = options.baseRetryMilliseconds ?? 1_000
@@ -446,12 +458,69 @@ export class PushCoordinator {
     this.scheduleNextFlush()
   }
 
+  configureAPNs(apns?: APNsProviderConfig, configurationError?: string): Promise<void> {
+    const operation = this.configurationOperation.then(() => this.applyAPNsConfiguration(apns, configurationError))
+    this.configurationOperation = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
+  private async applyAPNsConfiguration(apns?: APNsProviderConfig, configurationError?: string): Promise<void> {
+    const wasEnabled = this.capabilities().enabled
+    const previous = this.provider
+    const next = apns && !configurationError ? this.providerFactory(apns) : undefined
+    if (this.closed) {
+      next?.close?.()
+      return
+    }
+    this.providerGeneration += 1
+    this.apns = apns
+    this.apnsConfigurationError = configurationError
+    this.provider = next
+    this.runtimeError = undefined
+    this.flushFailureCount = 0
+    this.flushBlockedUntil = 0
+    this.correlationError = undefined
+    if (apns && next && !configurationError) {
+      try { this.loadCorrelationSecret() } catch (cause) {
+        this.correlationError = cause instanceof Error ? cause.message : 'Push correlation key is unavailable'
+      }
+    }
+    try {
+      this.store.mutate(state => {
+        delete state.status.lastError
+        delete state.status.lastErrorAt
+      })
+    } catch { /* Existing push state errors remain authoritative. */ }
+    if (previous && previous !== next) {
+      const closePrevious = () => { try { previous.close?.() } catch { /* provider is already detached */ } }
+      if (this.activeFlush) void this.activeFlush.then(closePrevious, closePrevious)
+      else closePrevious()
+    }
+    if (!next && this.timer) {
+      clearTimeout(this.timer)
+      this.timer = undefined
+    }
+    this.scheduleNextFlush()
+    const enabled = this.capabilities().enabled
+    if (enabled !== wasEnabled) {
+      for (const listener of this.enabledListeners) {
+        try { listener(enabled) } catch { /* Runtime listeners cannot undo a committed configuration. */ }
+      }
+    }
+  }
+
+  onEnabledChange(listener: (enabled: boolean) => void): () => void {
+    this.enabledListeners.add(listener)
+    return () => { this.enabledListeners.delete(listener) }
+  }
+
   capabilities(): PushCapabilities {
-    const configurationError = this.options.apnsConfigurationError ?? this.store.loadError
+    const configurationError = this.apnsConfigurationError ?? this.store.loadError
     return {
       protocolVersion: 1,
-      enabled: Boolean(this.options.apns && this.provider && !configurationError),
-      topic: this.options.apns?.topic ?? DEFAULT_APNS_TOPIC,
+      enabled: Boolean(this.apns && this.provider && !configurationError),
+      topic: this.apns?.topic ?? DEFAULT_APNS_TOPIC,
+      environments: this.apns?.environments ?? ['development', 'production'],
       previewMode: 'title-and-summary',
       events: PUSH_EVENT_KINDS,
       maxSummaryCharacters: MAX_SUMMARY_CHARACTERS,
@@ -462,14 +531,15 @@ export class PushCoordinator {
 
   status(): PushStatus {
     const state = this.store.snapshot()
-    const configurationError = this.options.apnsConfigurationError ?? this.store.loadError
+    const configurationError = this.apnsConfigurationError ?? this.store.loadError
     const latestSuccess = state.status.lastSuccessAt ? Date.parse(state.status.lastSuccessAt) : 0
     const latestError = state.status.lastErrorAt ? Date.parse(state.status.lastErrorAt) : 0
-    const configured = Boolean(this.options.apns && this.provider && !configurationError)
+    const configured = Boolean(this.apns && this.provider && !configurationError)
     return {
       configured,
       healthy: configured && !this.correlationError && !this.runtimeError && latestSuccess >= latestError,
-      topic: this.options.apns?.topic ?? DEFAULT_APNS_TOPIC,
+      topic: this.apns?.topic ?? DEFAULT_APNS_TOPIC,
+      environments: this.apns?.environments ?? ['development', 'production'],
       registrationCount: state.installations.length,
       pendingCount: state.outbox.length,
       subscriptionCount: state.groupSubscriptions.filter(item => item.enabled).length,
@@ -888,6 +958,7 @@ export class PushCoordinator {
     const now = this.now()
     const expiresAt = input.expiresAt ?? now + DEFAULT_EVENT_LIFETIME_MS
     if (!Number.isFinite(expiresAt) || expiresAt <= now) throw new Error('expiresAt must be in the future')
+    const allowedEnvironments = new Set(this.capabilities().environments)
     const queued = this.store.mutate(state => {
       for (const [key, processedAt] of Object.entries(state.processedEvents)) {
         if (!Number.isFinite(processedAt) || processedAt < now - DEDUPE_LIFETIME_MS) delete state.processedEvents[key]
@@ -903,6 +974,7 @@ export class PushCoordinator {
       if (state.processedEvents[key] !== undefined) return 0
       const targets = state.installations.filter(item => item.userId === userId
         && this.registrationIsAuthorized(item)
+        && allowedEnvironments.has(item.environment)
         && (!clientAccountId || item.clientAccountId === clientAccountId))
       if (state.outbox.length + targets.length > MAX_OUTBOX_ITEMS) throw new Error('Push outbox limit reached')
       state.processedEvents[key] = now
@@ -938,18 +1010,24 @@ export class PushCoordinator {
     if (this.closed || !this.provider || !this.capabilities().enabled) {
       return Promise.resolve({ delivered: 0, retried: 0, removedRegistrations: 0, failed: 0 })
     }
-    this.activeFlush = this.flushInternal()
+    const provider = this.provider
+    const generation = this.providerGeneration
+    this.activeFlush = this.flushInternal(provider, generation)
       .then(result => {
-        this.flushFailureCount = 0
-        this.flushBlockedUntil = 0
-        this.runtimeError = undefined
+        if (generation === this.providerGeneration) {
+          this.flushFailureCount = 0
+          this.flushBlockedUntil = 0
+          this.runtimeError = undefined
+        }
         return result
       })
       .catch(cause => {
-        this.flushFailureCount += 1
-        const delay = Math.min(60_000, 1_000 * (2 ** Math.min(this.flushFailureCount - 1, 6)))
-        this.flushBlockedUntil = this.now() + delay
-        this.recordRuntimeError(cause)
+        if (generation === this.providerGeneration) {
+          this.flushFailureCount += 1
+          const delay = Math.min(60_000, 1_000 * (2 ** Math.min(this.flushFailureCount - 1, 6)))
+          this.flushBlockedUntil = this.now() + delay
+          this.recordRuntimeError(cause)
+        }
         throw cause
       })
       .finally(() => {
@@ -959,10 +1037,8 @@ export class PushCoordinator {
     return this.activeFlush
   }
 
-  private async flushInternal(): Promise<PushFlushResult> {
+  private async flushInternal(provider: PushSender, generation: number): Promise<PushFlushResult> {
     const summary: PushFlushResult = { delivered: 0, retried: 0, removedRegistrations: 0, failed: 0 }
-    const provider = this.provider
-    if (!provider) return summary
     const due = this.store.snapshot().outbox
       .filter(item => item.nextAttemptAt <= this.now())
       .sort((left, right) => left.nextAttemptAt - right.nextAttemptAt)
@@ -999,6 +1075,11 @@ export class PushCoordinator {
         summary.failed += 1
         continue
       }
+      if (installation && !this.capabilities().environments.includes(installation.environment)) {
+        this.store.mutate(current => { current.outbox = current.outbox.filter(entry => entry.id !== item.id) })
+        summary.failed += 1
+        continue
+      }
       const subscribed = !item.roomId || state.groupSubscriptions.some(subscription => subscription.userId === item.userId
         && subscription.roomId === item.roomId
         && subscription.enabled)
@@ -1029,6 +1110,22 @@ export class PushCoordinator {
         expiration: Math.floor(item.expiresAt / 1_000),
       })
       const at = new Date(this.now()).toISOString()
+      if (generation !== this.providerGeneration) {
+        if (result.disposition === 'success') {
+          this.store.mutate(current => {
+            current.outbox = current.outbox.filter(entry => entry.id !== item.id)
+            current.status.lastSuccessAt = at
+          })
+          summary.delivered += 1
+        } else {
+          this.store.mutate(current => {
+            const pending = current.outbox.find(entry => entry.id === item.id)
+            if (pending) pending.nextAttemptAt = this.now()
+          })
+          summary.retried += 1
+        }
+        break
+      }
       if (result.disposition === 'success') {
         this.store.mutate(current => {
           current.outbox = current.outbox.filter(entry => entry.id !== item.id)
@@ -1117,6 +1214,7 @@ export class PushCoordinator {
     if (this.timer) clearTimeout(this.timer)
     this.timer = undefined
     this.provider?.close?.()
+    this.enabledListeners.clear()
   }
 
   private recordRuntimeError(cause: unknown): void {

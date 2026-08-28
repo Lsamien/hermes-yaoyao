@@ -1,14 +1,17 @@
 import { isIP } from 'node:net'
 import { homedir } from 'node:os'
 import { basename, resolve } from 'node:path'
-import { createPrivateKey } from 'node:crypto'
-import { accessSync, constants as fsConstants, existsSync, readFileSync, statSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
+import type { APNsEnvironment } from './apns.js'
+import { loadAPNsConfiguration, type APNsConfigurationSnapshot } from './apnsConfiguration.js'
+export { DEFAULT_APNS_TOPIC } from './apnsConfiguration.js'
 
 export interface APNsProviderConfig {
   keyFile: string
   keyId: string
   teamId: string
   topic: string
+  environments?: APNsEnvironment[]
 }
 
 export interface ServerConfig {
@@ -35,11 +38,11 @@ export interface ServerConfig {
   upstreamPassword?: string
   apns?: APNsProviderConfig
   apnsConfigurationError?: string
+  apnsSettings?: APNsConfigurationSnapshot
 }
 
 export const DEFAULT_YAOYAO_PLUGIN_SOURCE = 'https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao'
 export const DEFAULT_YAOYAO_RELEASE_SOURCE = 'https://git.samien.cn/samien/hermes-yaoyao.git'
-export const DEFAULT_APNS_TOPIC = 'cn.samien.yaoyao.hermes'
 
 function flag(value: string | undefined): boolean {
   return value === '1' || value?.toLowerCase() === 'true'
@@ -95,43 +98,6 @@ function parseReleaseSource(value: string | undefined): string {
     throw new Error('HERMES_YAOYAO_RELEASE_SOURCE must be an HTTPS or SSH Git source')
   }
   return source
-}
-
-function parseAPNsConfiguration(env: NodeJS.ProcessEnv): {
-  apns?: APNsProviderConfig
-  apnsConfigurationError?: string
-} {
-  const rawKeyFile = env.HERMES_YAOYAO_APNS_KEY_FILE?.trim()
-  const keyId = env.HERMES_YAOYAO_APNS_KEY_ID?.trim()
-  const teamId = env.HERMES_YAOYAO_APNS_TEAM_ID?.trim()
-  const topic = env.HERMES_YAOYAO_APNS_TOPIC?.trim() || DEFAULT_APNS_TOPIC
-  if (!rawKeyFile && !keyId && !teamId && !env.HERMES_YAOYAO_APNS_TOPIC?.trim()) return {}
-  if (!rawKeyFile || !keyId || !teamId) {
-    return { apnsConfigurationError: 'HERMES_YAOYAO_APNS_KEY_FILE, HERMES_YAOYAO_APNS_KEY_ID, and HERMES_YAOYAO_APNS_TEAM_ID must be set together' }
-  }
-  if (!/^[A-Za-z0-9]{1,128}$/.test(keyId)) {
-    return { apnsConfigurationError: 'HERMES_YAOYAO_APNS_KEY_ID is invalid' }
-  }
-  if (!/^[A-Za-z0-9]{1,128}$/.test(teamId)) {
-    return { apnsConfigurationError: 'HERMES_YAOYAO_APNS_TEAM_ID is invalid' }
-  }
-  if (topic.length > 255 || !/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(topic)) {
-    return { apnsConfigurationError: 'HERMES_YAOYAO_APNS_TOPIC is invalid' }
-  }
-  const keyFile = resolve(rawKeyFile)
-  try {
-    if (!existsSync(keyFile) || !statSync(keyFile).isFile()) {
-      return { apnsConfigurationError: 'HERMES_YAOYAO_APNS_KEY_FILE must point to a readable file' }
-    }
-    accessSync(keyFile, fsConstants.R_OK)
-    const key = createPrivateKey(readFileSync(keyFile))
-    if (key.asymmetricKeyType !== 'ec' || key.asymmetricKeyDetails?.namedCurve !== 'prime256v1') {
-      return { apnsConfigurationError: 'HERMES_YAOYAO_APNS_KEY_FILE must contain an ES256 private key' }
-    }
-  } catch {
-    return { apnsConfigurationError: 'HERMES_YAOYAO_APNS_KEY_FILE must contain a readable ES256 private key' }
-  }
-  return { apns: { keyFile, keyId, teamId, topic } }
 }
 
 function normalizeConfiguredHost(raw: string): string {
@@ -200,7 +166,7 @@ export function loadServerConfig(
   }
   const upstreamPassword = env.HERMES_YAOYAO_UPSTREAM_PASSWORD
     || (upstreamPasswordFile ? readFileSync(resolve(upstreamPasswordFile), 'utf8').replace(/[\r\n]+$/, '') : undefined)
-  const apnsConfiguration = parseAPNsConfiguration(env)
+  const apnsSettings = loadAPNsConfiguration(home, env)
   const insecureLan = !tlsCert && !isLoopbackHost(host)
   if (production && insecureLan && !allowInsecureLan) {
     throw new Error(
@@ -235,6 +201,8 @@ export function loadServerConfig(
     allowRemoteUpdate,
     upstreamUsername,
     upstreamPassword,
-    ...apnsConfiguration,
+    ...(apnsSettings.config ? { apns: apnsSettings.config } : {}),
+    ...(apnsSettings.configurationError ? { apnsConfigurationError: apnsSettings.configurationError } : {}),
+    apnsSettings,
   }
 }

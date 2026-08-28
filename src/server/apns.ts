@@ -236,6 +236,10 @@ export class APNsProvider {
   }
 
   async send(request: APNsRequest): Promise<APNsSendResult> {
+    const environments = this.config.environments ?? ['development', 'production']
+    if (!environments.includes(request.environment)) {
+      return { disposition: 'configuration', status: 0, reason: 'EnvironmentNotConfigured' }
+    }
     if (!TOKEN_RE.test(request.deviceToken)) {
       return { disposition: 'unregister', status: 0, reason: 'BadDeviceToken' }
     }

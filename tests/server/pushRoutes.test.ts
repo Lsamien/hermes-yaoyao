@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { generateKeyPairSync } from 'node:crypto'
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import request from 'supertest'
@@ -6,6 +7,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ApplicationRuntime } from '../../src/server/app.js'
 import type { ServerConfig } from '../../src/server/config.js'
 import { PushCoordinator } from '../../src/server/pushCoordinator.js'
+import {
+  APNsConfigurationManager,
+  apnsConfigurationPath,
+  validateAPNsConfiguration,
+} from '../../src/server/apnsConfiguration.js'
 import { createAuthenticatedApplication } from './authenticatedApplication.js'
 
 const roots: string[] = []
@@ -17,6 +23,109 @@ afterEach(() => {
 })
 
 describe('iOS push routes', () => {
+  it('validates and enables a server-local APNs key path without blocking broad permissions', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'yaoyao-push-web-config-'))
+    roots.push(home)
+    const keyFile = join(home, 'AuthKey_TEST.p8')
+    const { privateKey } = generateKeyPairSync('ec', {
+      namedCurve: 'prime256v1',
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    })
+    writeFileSync(keyFile, privateKey, { mode: 0o644 })
+    chmodSync(keyFile, 0o644)
+    const config: ServerConfig = {
+      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
+      mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
+    }
+    const push = new PushCoordinator({
+      home,
+      autoFlush: false,
+      providerFactory: () => ({ send: async () => ({ disposition: 'success', status: 200 }) }),
+    })
+    const apnsConfiguration = new APNsConfigurationManager(
+      home,
+      { source: 'none', editable: true, warnings: [] },
+      { probe: async () => undefined },
+    )
+    const runtime = createAuthenticatedApplication({ config, push, apnsConfiguration })
+    runtimes.push(runtime)
+    const agent = request.agent(runtime.app.callback())
+    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const mutation = () => agent.put('/api/app/system/push-config')
+      .set('Host', '127.0.0.1:8800')
+      .set('Origin', 'http://127.0.0.1:8800')
+      .send({
+        keyFile,
+        keyId: 'KEY1234567',
+        teamId: 'TEAM123456',
+        topic: 'cn.samien.yaoyao.hermes',
+        environments: ['development', 'production'],
+      })
+
+    await mutation().expect(403)
+    const saved = await mutation().set('X-CSRF-Token', bootstrap.body.csrfToken).expect(200)
+    expect(saved.body).toMatchObject({
+      configured: true,
+      healthy: true,
+      source: 'file',
+      editable: true,
+      keyFile: realpathSync(keyFile),
+      environments: ['development', 'production'],
+      warnings: [{ code: 'apns_key_permissions', actualMode: '0644', recommendedMode: '0600' }],
+    })
+    expect(statSync(apnsConfigurationPath(home)).mode & 0o777).toBe(0o600)
+    await agent.get('/api/app/system/push-status')
+      .set('Host', '127.0.0.1:8800')
+      .expect(200, /"source":"file"/)
+  })
+
+  it('keeps environment-managed APNs configuration read-only through the admin API', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'yaoyao-push-env-managed-'))
+    roots.push(home)
+    const keyFile = join(home, 'AuthKey_TEST.p8')
+    const { privateKey } = generateKeyPairSync('ec', {
+      namedCurve: 'prime256v1',
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    })
+    writeFileSync(keyFile, privateKey, { mode: 0o600 })
+    const validated = validateAPNsConfiguration({
+      keyFile, keyId: 'KEY1234567', teamId: 'TEAM123456', topic: 'cn.samien.yaoyao.hermes',
+      environments: ['development'],
+    })
+    const initial = { ...validated, source: 'environment' as const, editable: false }
+    const config: ServerConfig = {
+      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
+      mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
+      apns: validated.config,
+      apnsSettings: initial,
+    }
+    const push = new PushCoordinator({
+      home, apns: validated.config,
+      provider: { send: async () => ({ disposition: 'success', status: 200 }) },
+      autoFlush: false,
+    })
+    const apnsConfiguration = new APNsConfigurationManager(home, initial, { probe: async () => undefined })
+    const runtime = createAuthenticatedApplication({ config, push, apnsConfiguration })
+    runtimes.push(runtime)
+    const agent = request.agent(runtime.app.callback())
+    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+
+    const response = await agent.put('/api/app/system/push-config')
+      .set('Host', '127.0.0.1:8800')
+      .set('Origin', 'http://127.0.0.1:8800')
+      .set('X-CSRF-Token', bootstrap.body.csrfToken)
+      .send({
+        keyFile, keyId: 'KEY1234567', teamId: 'TEAM123456', topic: 'cn.samien.yaoyao.hermes',
+        environments: ['development'],
+      })
+      .expect(409)
+    expect(response.body).toMatchObject({ code: 'apns_environment_managed' })
+  })
+
   it('registers an installation, manages team subscriptions, badge, and admin status', async () => {
     const home = mkdtempSync(join(tmpdir(), 'yaoyao-push-routes-'))
     roots.push(home)

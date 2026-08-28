@@ -10,6 +10,24 @@ export interface PushCapabilities {
   maxSummaryCharacters: number
 }
 
+export type APNsEnvironment = 'development' | 'production'
+export type PushConfigSource = 'none' | 'file' | 'environment'
+
+export interface PushConfigWarning {
+  code: string
+  message: string
+  actualMode?: string
+  recommendedMode?: string
+}
+
+export interface PushSystemConfigInput {
+  keyFile: string
+  keyId: string
+  teamId: string
+  topic: string
+  environments: APNsEnvironment[]
+}
+
 export interface PushSystemStatus {
   configured: boolean
   healthy: boolean
@@ -18,6 +36,61 @@ export interface PushSystemStatus {
   pendingCount: number
   lastSuccessAt?: number
   lastError?: string
+  source: PushConfigSource
+  editable: boolean
+  managementAvailable: boolean
+  keyFile?: string
+  keyId?: string
+  teamId?: string
+  environments: APNsEnvironment[]
+  warnings: PushConfigWarning[]
+}
+
+function normalizeEnvironment(value: unknown): APNsEnvironment | undefined {
+  return value === 'development' || value === 'production' ? value : undefined
+}
+
+function normalizePushSystemStatus(value: unknown): PushSystemStatus {
+  const payload = record(value)
+  const rawSource = string(payload.source ?? payload.configurationSource ?? payload.configuration_source)
+  const source: PushConfigSource = rawSource === 'file' || rawSource === 'environment' ? rawSource : 'none'
+  const managementAvailable = rawSource === 'none' || rawSource === 'file' || rawSource === 'environment'
+    ? true
+    : bool(payload.managementAvailable ?? payload.management_available, false)
+  const environments = values(payload.environments ?? payload.environment)
+    .map(normalizeEnvironment)
+    .filter((environment): environment is APNsEnvironment => Boolean(environment))
+  const warnings = values(payload.warnings).flatMap((value): PushConfigWarning[] => {
+    if (typeof value === 'string' && value.trim()) return [{ code: 'warning', message: value.trim() }]
+    const warning = record(value)
+    const message = string(warning.message).trim()
+    if (!message) return []
+    return [{
+      code: string(warning.code, 'warning'),
+      message,
+      actualMode: string(warning.actualMode ?? warning.actual_mode) || undefined,
+      recommendedMode: string(warning.recommendedMode ?? warning.recommended_mode) || undefined,
+    }]
+  })
+  return {
+    configured: bool(payload.configured),
+    healthy: bool(payload.healthy),
+    topic: string(payload.topic) || undefined,
+    registrationCount: number(payload.registrationCount ?? payload.registration_count),
+    pendingCount: number(payload.pendingCount ?? payload.pending_count),
+    lastSuccessAt: number(payload.lastSuccessAt ?? payload.last_success_at) || undefined,
+    lastError: string(
+      payload.lastError ?? payload.last_error ?? payload.configurationError ?? payload.configuration_error,
+    ) || undefined,
+    source,
+    editable: managementAvailable && bool(payload.editable),
+    managementAvailable,
+    keyFile: string(payload.keyFile ?? payload.key_file) || undefined,
+    keyId: string(payload.keyId ?? payload.key_id) || undefined,
+    teamId: string(payload.teamId ?? payload.team_id) || undefined,
+    environments,
+    warnings,
+  }
 }
 
 export async function getPushCapabilities(): Promise<PushCapabilities> {
@@ -54,14 +127,19 @@ export async function setGroupPushSubscription(roomId: string, enabled: boolean)
 }
 
 export async function getPushSystemStatus(): Promise<PushSystemStatus> {
-  const payload = record(await apiRequest<unknown>('/api/app/system/push-status'))
-  return {
-    configured: bool(payload.configured),
-    healthy: bool(payload.healthy),
-    topic: string(payload.topic) || undefined,
-    registrationCount: number(payload.registrationCount ?? payload.registration_count),
-    pendingCount: number(payload.pendingCount ?? payload.pending_count),
-    lastSuccessAt: number(payload.lastSuccessAt ?? payload.last_success_at) || undefined,
-    lastError: string(payload.lastError ?? payload.last_error) || undefined,
-  }
+  return normalizePushSystemStatus(await apiRequest<unknown>('/api/app/system/push-status'))
+}
+
+export async function savePushSystemConfig(input: PushSystemConfigInput): Promise<PushSystemStatus> {
+  return normalizePushSystemStatus(await apiRequest<unknown>('/api/app/system/push-config', {
+    method: 'PUT',
+    body: {
+      keyFile: input.keyFile,
+      keyId: input.keyId,
+      teamId: input.teamId,
+      topic: input.topic,
+      environments: input.environments,
+    },
+    timeoutMs: 45_000,
+  }))
 }
