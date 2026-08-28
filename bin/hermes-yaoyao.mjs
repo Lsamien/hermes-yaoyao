@@ -5,6 +5,7 @@ import { existsSync, realpathSync } from 'node:fs'
 import { chmod, mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 
 const label = 'com.samien.hermes-yaoyao'
@@ -103,6 +104,30 @@ function loaded() {
   }
 }
 
+function launchctlBootstrapRetryable(error) {
+  const detail = [error?.message, error?.stdout, error?.stderr]
+    .filter(Boolean)
+    .map(String)
+    .join('\n')
+  return /Bootstrap failed:\s*5:\s*Input\/output error/i.test(detail)
+}
+
+export async function bootstrapLaunchAgent(
+  runCommand = run,
+  wait = delay,
+  retryDelays = [250, 500, 1_000, 1_500],
+) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return runCommand('launchctl', ['bootstrap', domain, plistPath])
+    } catch (error) {
+      const waitMs = retryDelays[attempt]
+      if (waitMs === undefined || !launchctlBootstrapRetryable(error)) throw error
+      await wait(waitMs)
+    }
+  }
+}
+
 async function install() {
   if (!existsSync(serverEntry)) {
     throw new Error('未找到生产构建，请先运行 npm run build')
@@ -114,13 +139,13 @@ async function install() {
   await writeFile(plistPath, launchAgentPlist(), { mode: 0o600 })
   await chmod(plistPath, 0o600)
   run('plutil', ['-lint', plistPath], { inherit: true })
-  run('launchctl', ['bootstrap', domain, plistPath])
+  await bootstrapLaunchAgent()
   process.stdout.write(`已安装并启动 ${label}\n`)
 }
 
-function start() {
+async function start() {
   if (!existsSync(plistPath)) throw new Error('服务尚未安装')
-  if (!loaded()) run('launchctl', ['bootstrap', domain, plistPath])
+  if (!loaded()) await bootstrapLaunchAgent()
   else run('launchctl', ['kickstart', '-k', `${domain}/${label}`])
   process.stdout.write(`已启动 ${label}\n`)
 }
