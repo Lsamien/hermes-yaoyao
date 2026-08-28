@@ -25,6 +25,7 @@ import type { SidebarItem } from '@/components/app/types'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
 import { loadComposerFile } from '@/components/workspace/pendingComposer'
 import { readAgentShowThinking, writeAgentShowThinking } from '@/utils/sessionPreferences'
+import { MODEL_CATALOG_CHANGED_EVENT, modelCatalogChangedProfile } from '@/utils/modelCatalogEvents'
 import { agentToUi, groupInteraction, groupMessageToUi, roomSidebarItem, roomToUi } from '@/components/workspace/viewModels'
 import { getModels } from '@/api/profiles'
 import { getGroupPushSubscriptions, getPushCapabilities, setGroupPushSubscription } from '@/api/push'
@@ -62,6 +63,14 @@ const pushConfigured = ref(false)
 const subscribedPushRooms = ref<Set<string>>(new Set())
 const pushSubscriptionBusy = ref(false)
 const pushSubscriptionError = ref('')
+
+function handleModelCatalogChanged(event: Event) {
+  const profile = modelCatalogChangedProfile(event)
+  if (!profile) return
+  const { [profile]: _removed, ...remaining } = modelOptionsByProfile.value
+  modelOptionsByProfile.value = remaining
+  if (groups.agents.some(agent => agent.profile === profile)) void loadAgentModels(profile)
+}
 
 const activeRooms = computed(() => groups.rooms.filter(room => !room.archived))
 const roomSidebarItems = computed(() => activeRooms.value.map(room => {
@@ -652,6 +661,7 @@ async function addMediaToComposer(media: PreviewMedia) {
 onMounted(async () => {
   document.addEventListener('pointerdown', handleRoomActionPointer)
   document.addEventListener('keydown', handleRoomActionKey)
+  window.addEventListener(MODEL_CATALOG_CHANGED_EVENT, handleModelCatalogChanged)
   restoreShowThinking()
   void loadPushSubscriptions()
   try {
@@ -677,6 +687,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleRoomActionPointer)
   document.removeEventListener('keydown', handleRoomActionKey)
+  window.removeEventListener(MODEL_CATALOG_CHANGED_EVENT, handleModelCatalogChanged)
   groups.stop()
 })
 

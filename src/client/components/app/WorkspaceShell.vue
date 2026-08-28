@@ -298,7 +298,7 @@ onBeforeUnmount(() => {
                 <strong>{{ profileTitle(profile) }}</strong>
                 <AppIcon v-if="profile.name === activeProfile?.name" name="check" :size="15" />
               </button>
-              <button class="profile-menu__edit" type="button" :disabled="!activeProfile" @click="profileMenuOpen = false; emit('editProfile')"><AppIcon name="settings" :size="15" /><strong>编辑当前 Agent</strong></button>
+              <button class="profile-menu__edit" type="button" :disabled="!activeProfile" @click="profileMenuOpen = false; emit('editProfile')"><AppIcon name="settings" :size="15" /><strong>Agent 管理</strong></button>
               <button class="profile-menu__edit" type="button" @click="profileMenuOpen = false; accountSecurityOpen = true"><AppIcon name="settings" :size="15" /><strong>账号安全</strong></button>
               <button v-if="isAdmin" class="profile-menu__edit" type="button" @click="profileMenuOpen = false; systemManagementOpen = true"><AppIcon name="settings" :size="15" /><strong>系统管理</strong></button>
               <button v-if="isAdmin" class="profile-menu__update" type="button" @click="profileMenuOpen = false; systemUpdateOpen = true"><AppIcon name="download" :size="15" /><strong>系统更新</strong></button>
@@ -411,7 +411,7 @@ onBeforeUnmount(() => {
                 <strong>{{ profileTitle(profile) }}</strong>
                 <AppIcon v-if="profile.name === activeProfile?.name" name="check" :size="15" />
               </button>
-              <button class="profile-menu__edit" type="button" :disabled="!activeProfile" @click="profileMenuOpen = false; emit('editProfile')"><AppIcon name="settings" :size="15" /><strong>编辑当前 Agent</strong></button>
+              <button class="profile-menu__edit" type="button" :disabled="!activeProfile" @click="profileMenuOpen = false; emit('editProfile')"><AppIcon name="settings" :size="15" /><strong>Agent 管理</strong></button>
               <button class="profile-menu__edit" type="button" @click="profileMenuOpen = false; accountSecurityOpen = true; mobileDrawerOpen = false"><AppIcon name="settings" :size="15" /><strong>账号安全</strong></button>
               <button v-if="isAdmin" class="profile-menu__edit" type="button" @click="profileMenuOpen = false; systemManagementOpen = true; mobileDrawerOpen = false"><AppIcon name="settings" :size="15" /><strong>系统管理</strong></button>
               <button v-if="isAdmin" class="profile-menu__update" type="button" @click="profileMenuOpen = false; systemUpdateOpen = true; mobileDrawerOpen = false"><AppIcon name="download" :size="15" /><strong>系统更新</strong></button>

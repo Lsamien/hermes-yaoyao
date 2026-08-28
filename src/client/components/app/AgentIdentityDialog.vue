@@ -3,18 +3,18 @@ import { ref, watch } from 'vue'
 import type { Profile } from '@shared/types'
 import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import AppIcon from '@/components/common/AppIcon.vue'
+import ModelServicesPanel from './ModelServicesPanel.vue'
+import DuplexVoicePanel from './DuplexVoicePanel.vue'
 
-const props = defineProps<{ open: boolean; profile?: Profile; busy?: boolean; error?: string }>()
-const emit = defineEmits<{
-  close: []
-  save: [input: { title: string; avatarDataURL?: string | null }]
-}>()
+const props = defineProps<{ open: boolean; profile?: Profile; busy?: boolean; error?: string; isAdmin?: boolean }>()
+const emit = defineEmits<{ close: []; save: [input: { title: string; avatarDataURL?: string | null }] }>()
 
 const title = ref('')
 const avatarDataURL = ref<string | null>(null)
 const avatarTouched = ref(false)
 const localError = ref('')
 const fileInput = ref<HTMLInputElement>()
+const activeTab = ref<'identity' | 'models' | 'voice'>('identity')
 
 watch(() => [props.open, props.profile] as const, () => {
   if (!props.open) return
@@ -22,6 +22,7 @@ watch(() => [props.open, props.profile] as const, () => {
   avatarDataURL.value = props.profile?.agentAvatar || null
   avatarTouched.value = false
   localError.value = ''
+  activeTab.value = 'identity'
 }, { immediate: true })
 
 function readImage(file: File): Promise<string> {
@@ -70,10 +71,7 @@ async function chooseAvatar(event: Event) {
 
 function submit() {
   const normalized = title.value.trim().replace(/\s+/g, ' ')
-  if (!normalized) {
-    localError.value = '请输入 Agent 名称'
-    return
-  }
+  if (!normalized) { localError.value = '请输入 Agent 名称'; return }
   emit('save', { title: normalized, ...(avatarTouched.value ? { avatarDataURL: avatarDataURL.value } : {}) })
 }
 </script>
@@ -82,19 +80,24 @@ function submit() {
   <Teleport to="body">
     <Transition name="identity-fade">
       <div v-if="open && profile" class="identity-layer" @mousedown.self="emit('close')">
-        <form class="identity-dialog" @submit.prevent="submit">
-          <header><div><small>AGENT 身份</small><h2>编辑 {{ profile.name }}</h2></div><button class="icon-button" type="button" aria-label="关闭" :disabled="busy" @click="emit('close')"><AppIcon name="close" /></button></header>
-          <div class="identity-avatar"><AgentAvatar :name="title || profile.name" :avatar="avatarDataURL || ''" :size="76" /><div><strong>Bots 头像</strong><small>会压缩为 256 px，并写入原生 Agent 头像；所有设备同步。</small><p><button class="quiet-button" type="button" :disabled="busy" @click="fileInput?.click()"><AppIcon name="image" :size="14" />选择图片</button><button v-if="avatarDataURL" class="quiet-button" type="button" :disabled="busy" @click="avatarDataURL = null; avatarTouched = true">移除</button></p></div><input ref="fileInput" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" @change="chooseAvatar" /></div>
-          <label>名称<input v-model="title" :disabled="busy" maxlength="100" autocomplete="off" /></label>
-          <p v-if="localError || error" class="identity-error" role="alert">{{ localError || error }}</p>
-          <footer><button class="quiet-button" type="button" :disabled="busy" @click="emit('close')">取消</button><button class="primary-button" type="submit" :disabled="busy">{{ busy ? '正在同步…' : '保存并同步' }}</button></footer>
-        </form>
+        <section class="identity-dialog" role="dialog" aria-modal="true" aria-label="Agent 管理">
+          <header><div><small>AGENT 管理</small><h2>{{ profile.agentName || profile.displayName || profile.name }}</h2></div><button class="icon-button" type="button" aria-label="关闭" :disabled="busy" @click="emit('close')"><AppIcon name="close" /></button></header>
+          <nav v-if="isAdmin" class="management-tabs" aria-label="Agent 管理分类"><button type="button" :class="{ active: activeTab === 'identity' }" @click="activeTab = 'identity'">身份</button><button type="button" :class="{ active: activeTab === 'models' }" @click="activeTab = 'models'">模型服务</button><button type="button" :class="{ active: activeTab === 'voice' }" @click="activeTab = 'voice'">双流语音</button></nav>
+          <form v-if="activeTab === 'identity'" class="identity-form" @submit.prevent="submit">
+            <div class="identity-avatar"><AgentAvatar :name="title || profile.name" :avatar="avatarDataURL || ''" :size="76" /><div><strong>Bots 头像</strong><small>会压缩为 256 px，并写入原生 Agent 头像；所有设备同步。</small><p><button class="quiet-button" type="button" :disabled="busy" @click="fileInput?.click()"><AppIcon name="image" :size="14" />选择图片</button><button v-if="avatarDataURL" class="quiet-button" type="button" :disabled="busy" @click="avatarDataURL = null; avatarTouched = true">移除</button></p></div><input ref="fileInput" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" @change="chooseAvatar" /></div>
+            <label>名称<input v-model="title" :disabled="busy" maxlength="100" autocomplete="off" /></label>
+            <p v-if="localError || error" class="identity-error" role="alert">{{ localError || error }}</p>
+            <footer><button class="quiet-button" type="button" :disabled="busy" @click="emit('close')">取消</button><button class="primary-button" type="submit" :disabled="busy">{{ busy ? '正在同步…' : '保存并同步' }}</button></footer>
+          </form>
+          <ModelServicesPanel v-else-if="isAdmin && activeTab === 'models'" :profile="profile.name" />
+          <DuplexVoicePanel v-else-if="isAdmin && activeTab === 'voice'" />
+        </section>
       </div>
     </Transition>
   </Teleport>
 </template>
 
 <style scoped>
-.identity-layer { position: fixed; z-index: 230; inset: 0; display: grid; place-items: center; padding: 18px; background: var(--scrim); backdrop-filter: blur(4px); }.identity-dialog { width: min(430px, 100%); padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); box-shadow: var(--shadow-float); }.identity-dialog header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; }.identity-dialog h2 { margin: 3px 0 0; font-size: 17px; }.identity-dialog header small { color: var(--text-muted); font-size: 9px; letter-spacing: .08em; }.identity-avatar { display: flex; align-items: center; gap: 13px; margin-bottom: 18px; padding: 11px; border-radius: 12px; background: var(--surface-soft); }.identity-avatar > div { display: grid; gap: 4px; }.identity-avatar strong { font-size: 11px; }.identity-avatar small { color: var(--text-muted); font-size: 9px; line-height: 1.45; }.identity-avatar p { display: flex; gap: 5px; margin: 3px 0 0; }.identity-dialog label { display: grid; gap: 6px; color: var(--text-secondary); font-size: 10px; font-weight: 650; }.identity-dialog input:not(.sr-only) { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; outline: 0; background: var(--surface-soft); color: var(--text-primary); font: inherit; font-weight: 400; }.identity-dialog input:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }.quiet-button, .primary-button { display: inline-flex; min-height: 29px; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 0; border-radius: 7px; cursor: pointer; font-size: 10px; }.quiet-button { background: var(--surface-hover); color: var(--text-secondary); }.primary-button { background: var(--accent); color: var(--text-on-solid); }.quiet-button:disabled, .primary-button:disabled { cursor: wait; opacity: .5; }.identity-error { margin: 11px 0 0; color: var(--danger); font-size: 10px; }.identity-dialog footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 20px; }.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }.identity-fade-enter-active, .identity-fade-leave-active { transition: opacity 130ms ease; }.identity-fade-enter-from, .identity-fade-leave-to { opacity: 0; }
-@media (max-width: 600px) { .identity-layer { place-items: end center; padding: 0; }.identity-dialog { width: 100%; border-radius: 17px 17px 0 0; padding-bottom: max(18px, env(safe-area-inset-bottom)); } }
+.identity-layer{position:fixed;z-index:230;inset:0;display:grid;place-items:center;padding:18px;background:var(--scrim);backdrop-filter:blur(4px)}.identity-dialog{width:min(680px,100%);max-height:calc(100dvh - 36px);box-sizing:border-box;padding:18px;overflow:auto;border:1px solid var(--line);border-radius:16px;background:var(--surface-raised);box-shadow:var(--shadow-float)}.identity-dialog>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}.identity-dialog h2{margin:3px 0 0;font-size:17px}.identity-dialog header small{color:var(--text-muted);font-size:9px;letter-spacing:.08em}.management-tabs{display:flex;gap:4px;margin-bottom:18px;padding:3px;border-radius:10px;background:var(--surface-soft)}.management-tabs button{min-height:32px;flex:1;border:0;border-radius:8px;background:transparent;color:var(--text-muted);cursor:pointer;font-size:10px}.management-tabs button.active{background:var(--surface-raised);color:var(--text-primary);box-shadow:0 1px 4px rgba(0,0,0,.08)}.identity-form{display:grid}.identity-avatar{display:flex;align-items:center;gap:13px;margin-bottom:18px;padding:11px;border-radius:12px;background:var(--surface-soft)}.identity-avatar>div{display:grid;gap:4px}.identity-avatar strong{font-size:11px}.identity-avatar small{color:var(--text-muted);font-size:9px;line-height:1.45}.identity-avatar p{display:flex;gap:5px;margin:3px 0 0}.identity-form label{display:grid;gap:6px;color:var(--text-secondary);font-size:10px;font-weight:650}.identity-form input:not(.sr-only){width:100%;min-height:38px;box-sizing:border-box;padding:0 10px;border:1px solid var(--line);border-radius:9px;outline:0;background:var(--surface-soft);color:var(--text-primary);font:inherit;font-weight:400}.identity-form input:focus{border-color:var(--line-strong);box-shadow:0 0 0 3px var(--focus-ring)}.quiet-button,.primary-button{display:inline-flex;min-height:29px;align-items:center;justify-content:center;gap:5px;padding:0 9px;border:0;border-radius:7px;cursor:pointer;font-size:10px}.quiet-button{background:var(--surface-hover);color:var(--text-secondary)}.primary-button{background:var(--accent);color:var(--text-on-solid)}.quiet-button:disabled,.primary-button:disabled{cursor:wait;opacity:.5}.identity-error{margin:11px 0 0;color:var(--danger);font-size:10px}.identity-form footer{display:flex;justify-content:flex-end;gap:7px;margin-top:20px}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.identity-fade-enter-active,.identity-fade-leave-active{transition:opacity 130ms ease}.identity-fade-enter-from,.identity-fade-leave-to{opacity:0}
+@media(max-width:600px){.identity-layer{place-items:end center;padding:0}.identity-dialog{width:100%;max-height:calc(100dvh - 12px);border-radius:17px 17px 0 0;padding-bottom:max(18px,env(safe-area-inset-bottom))}.identity-avatar{align-items:flex-start;flex-direction:column}.management-tabs{position:sticky;top:-18px;z-index:2}}
 </style>

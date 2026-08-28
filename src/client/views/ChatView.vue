@@ -23,6 +23,7 @@ import { chatInteraction, chatMessagesToUi, sessionSidebarItem } from '@/compone
 import { consumeLibraryItemForComposer, loadComposerFile } from '@/components/workspace/pendingComposer'
 import { readAgentShowThinking, writeAgentShowThinking } from '@/utils/sessionPreferences'
 import { modelChoiceId, modelForChoiceId } from '@/utils/sessionModel'
+import { MODEL_CATALOG_CHANGED_EVENT, modelCatalogChangedProfile } from '@/utils/modelCatalogEvents'
 import { estimateConversationTokens } from '@/utils/contextUsage'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
@@ -50,6 +51,11 @@ const timeline = ref<InstanceType<typeof MessageTimeline> | null>(null)
 const headerSessionMenuButton = ref<HTMLButtonElement | null>(null)
 const restoringRouteProfile = ref('')
 let modelSyncTimer: number | undefined
+
+function handleModelCatalogChanged(event: Event) {
+  const profile = modelCatalogChangedProfile(event)
+  if (profile && profile === auth.activeProfile?.name) void chat.loadModels(profile).catch(() => undefined)
+}
 
 const sessions = computed(() => [...chat.sessions]
   .filter(session => !['cron', 'ios_group'].includes(session.source)))
@@ -332,6 +338,7 @@ onMounted(async () => {
   restoreShowThinking()
   document.addEventListener('pointerdown', handleSessionActionPointer)
   document.addEventListener('keydown', handleSessionActionKey)
+  window.addEventListener(MODEL_CATALOG_CHANGED_EVENT, handleModelCatalogChanged)
   await refreshSessions()
   await Promise.allSettled([chat.loadModels(auth.activeProfile?.name), chat.connect()])
   void chat.refreshActiveSessionModel().catch(() => undefined)
@@ -346,6 +353,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleSessionActionPointer)
   document.removeEventListener('keydown', handleSessionActionKey)
+  window.removeEventListener(MODEL_CATALOG_CHANGED_EVENT, handleModelCatalogChanged)
   if (modelSyncTimer !== undefined) window.clearInterval(modelSyncTimer)
 })
 

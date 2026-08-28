@@ -623,6 +623,30 @@ async function proxy(
   })
 }
 
+async function proxyAdminFeature(
+  ctx: Koa.Context,
+  dependencies: RouteDependencies,
+  path: string,
+  options: {
+    search?: URLSearchParams
+    method?: string
+    requestBody?: unknown
+  } = {},
+): Promise<void> {
+  dependencies.auth.requireAdmin(ctx)
+  await withJar(ctx, async (jar) => {
+    const response = await dependencies.upstream.request(path, jar, {
+      method: options.method,
+      search: options.search,
+      body: options.requestBody,
+    })
+    if (response.status === 404 || response.status === 405) {
+      throw new HttpError(501, '当前上游版本不支持此管理功能', 'upstream_feature_unsupported')
+    }
+    sendUpstreamResponse(ctx, response, jar)
+  })
+}
+
 async function proxyOptionalUnread(
   ctx: Koa.Context,
   upstream: UpstreamClient,
@@ -1496,6 +1520,165 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     await dependencies.upstreamSession.verify({ username, password })
     dependencies.auth.setUpstreamCredentials(admin, { username, password })
     json(ctx, 200, { ok: true })
+  })
+  router.get('/api/app/admin/model-services', async (ctx) => {
+    await proxyAdminFeature(ctx, dependencies, '/api/providers/custom-endpoints', {
+      search: searchFrom(ctx, ['profile']),
+    })
+  })
+  router.post('/api/app/admin/model-services', async (ctx) => {
+    await proxyAdminFeature(ctx, dependencies, '/api/providers/custom-endpoints', {
+      method: 'POST', search: searchFrom(ctx, ['profile']), requestBody: body(ctx),
+    })
+  })
+  router.post('/api/app/admin/model-services/validate', async (ctx) => {
+    await proxyAdminFeature(ctx, dependencies, '/api/providers/custom-endpoints/validate', {
+      method: 'POST', requestBody: body(ctx),
+    })
+  })
+  router.post('/api/app/admin/model-services/:serviceID/activate', async (ctx) => {
+    const id = safeIdentifier(ctx.params.serviceID, 'model service ID')
+    await proxyAdminFeature(ctx, dependencies, `/api/providers/custom-endpoints/${encodeURIComponent(id)}/activate`, {
+      method: 'POST', search: searchFrom(ctx, ['profile']), requestBody: optionalBody(ctx) ?? {},
+    })
+  })
+  router.delete('/api/app/admin/model-services/:serviceID', async (ctx) => {
+    const id = safeIdentifier(ctx.params.serviceID, 'model service ID')
+    await proxyAdminFeature(ctx, dependencies, `/api/providers/custom-endpoints/${encodeURIComponent(id)}`, {
+      method: 'DELETE', search: searchFrom(ctx, ['profile']),
+    })
+  })
+  router.get('/api/app/admin/legacy-model-services', async (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
+    await withJar(ctx, async (jar) => {
+      const search = searchFrom(ctx, ['profile'])
+      const [configResponse, optionsResponse] = await Promise.all([
+        dependencies.upstream.request('/api/config', jar, { search }),
+        dependencies.upstream.request('/api/model/options', jar, {
+          search: new URLSearchParams([...search, ['explicit_only', 'true']]),
+        }),
+      ])
+      if ([configResponse.status, optionsResponse.status].some(status => status === 404 || status === 405)) {
+        throw new HttpError(501, '当前上游版本不支持旧版模型服务管理', 'upstream_feature_unsupported')
+      }
+      const config = requireSuccess(configResponse)
+      const options = requireSuccess(optionsResponse)
+      const currentProvider = typeof options.provider === 'string' ? options.provider.toLocaleLowerCase() : ''
+      const entries = Array.isArray(config.custom_providers) ? config.custom_providers : []
+      const items = entries.flatMap(raw => {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
+        const entry = raw as JsonObject
+        const name = typeof entry.name === 'string' ? entry.name.trim() : ''
+        const baseURL = typeof entry.base_url === 'string' ? entry.base_url.trim() : ''
+        const model = typeof entry.model === 'string' ? entry.model.trim() : ''
+        if (!name || !baseURL || !model) return []
+        const rawModels = entry.models
+        const models = Array.isArray(rawModels)
+          ? rawModels.map(String).map(value => value.trim()).filter(Boolean)
+          : rawModels && typeof rawModels === 'object'
+            ? Object.keys(rawModels).filter(value => !value.startsWith('__'))
+            : [model]
+        const modelConfig = rawModels && typeof rawModels === 'object' && !Array.isArray(rawModels)
+          ? (rawModels as JsonObject)[model]
+          : undefined
+        const contextLength = typeof entry.context_length === 'number' ? entry.context_length
+          : modelConfig && typeof modelConfig === 'object' && !Array.isArray(modelConfig)
+            && typeof (modelConfig as JsonObject).context_length === 'number'
+            ? (modelConfig as JsonObject).context_length as number
+            : undefined
+        const id = `custom:${name}`
+        return [{
+          id, name, base_url: baseURL, model, models: [...new Set([...models, model])],
+          ...(contextLength ? { context_length: contextLength } : {}),
+          discover_models: entry.models_discovered === true,
+          has_api_key: Boolean(entry.key_env || entry.api_key),
+          can_edit_api_key: typeof entry.key_env === 'string' && Boolean(entry.key_env.trim()),
+          is_current: currentProvider === id.toLocaleLowerCase(),
+          source: 'legacy',
+        }]
+      })
+      json(ctx, 200, { items })
+    })
+  })
+  router.put('/api/app/admin/legacy-model-services/:serviceID', async (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
+    const serviceID = safeIdentifier(ctx.params.serviceID, 'legacy model service ID')
+    const request = body(ctx)
+    const baseURL = typeof request.base_url === 'string' ? request.base_url.trim().replace(/\/$/, '') : ''
+    const model = typeof request.model === 'string' ? request.model.trim() : ''
+    const models = Array.isArray(request.models)
+      ? [...new Set(request.models.map(String).map(value => value.trim()).filter(Boolean))]
+      : []
+    if (!/^https?:\/\//i.test(baseURL)) throw new HttpError(400, 'Base URL 必须使用 http 或 https', 'invalid_model_service')
+    if (!model) throw new HttpError(400, '默认模型不能为空', 'invalid_model_service')
+    if (!models.includes(model)) models.push(model)
+    const contextLength = typeof request.context_length === 'number' && Number.isInteger(request.context_length) && request.context_length > 0
+      ? request.context_length : undefined
+    await withJar(ctx, async (jar) => {
+      const search = searchFrom(ctx, ['profile'])
+      const [configResponse, optionsResponse] = await Promise.all([
+        dependencies.upstream.request('/api/config', jar, { search }),
+        dependencies.upstream.request('/api/model/options', jar, {
+          search: new URLSearchParams([...search, ['explicit_only', 'true']]),
+        }),
+      ])
+      const config = requireSuccess(configResponse)
+      const options = requireSuccess(optionsResponse)
+      const providers = Array.isArray(config.custom_providers) ? [...config.custom_providers] : []
+      const index = providers.findIndex(raw => {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+        const name = typeof (raw as JsonObject).name === 'string' ? String((raw as JsonObject).name) : ''
+        return `custom:${name}`.toLocaleLowerCase() === serviceID.toLocaleLowerCase()
+      })
+      if (index < 0) throw new HttpError(404, '旧版模型服务不存在', 'model_service_not_found')
+      const current = providers[index] as JsonObject
+      const existingModels = current.models && typeof current.models === 'object' && !Array.isArray(current.models)
+        ? current.models as JsonObject : {}
+      const nextModels = Object.fromEntries(models.map(id => {
+        const previous = existingModels[id]
+        const metadata: JsonObject = previous && typeof previous === 'object' && !Array.isArray(previous)
+          ? { ...previous as JsonObject } : {}
+        if (id === model && contextLength) metadata.context_length = contextLength
+        return [id, metadata]
+      }))
+      providers[index] = {
+        ...current,
+        base_url: baseURL,
+        model,
+        models: nextModels,
+        models_discovered: request.discover_models === true,
+        ...(contextLength ? { context_length: contextLength } : {}),
+      }
+      requireSuccess(await dependencies.upstream.request('/api/config', jar, {
+        method: 'PUT', search, body: { config: { custom_providers: providers }, profile: search.get('profile') || undefined },
+      }))
+      if (Object.prototype.hasOwnProperty.call(request, 'api_key')) {
+        const keyEnvironment = typeof current.key_env === 'string' ? current.key_env.trim() : ''
+        if (!keyEnvironment) throw new HttpError(409, '该旧版服务没有可管理的密钥变量', 'model_service_key_unmanaged')
+        const apiKey = typeof request.api_key === 'string' ? request.api_key.trim() : ''
+        requireSuccess(await dependencies.upstream.request('/api/env', jar, {
+          method: apiKey ? 'PUT' : 'DELETE', search,
+          body: apiKey ? { key: keyEnvironment, value: apiKey, profile: search.get('profile') || undefined }
+            : { key: keyEnvironment, profile: search.get('profile') || undefined },
+        }))
+      }
+      const currentProvider = typeof options.provider === 'string' ? options.provider.toLocaleLowerCase() : ''
+      if (currentProvider === serviceID.toLocaleLowerCase()) {
+        requireSuccess(await dependencies.upstream.request('/api/model/set', jar, {
+          method: 'POST', search,
+          body: { scope: 'main', provider: serviceID, model, base_url: baseURL, confirm_expensive_model: true, profile: search.get('profile') || undefined },
+        }))
+      }
+      json(ctx, 200, { ok: true })
+    })
+  })
+  router.get('/api/app/admin/duplex-voice', async (ctx) => {
+    await proxyAdminFeature(ctx, dependencies, '/api/plugins/yaoyao/voice/settings')
+  })
+  router.put('/api/app/admin/duplex-voice', async (ctx) => {
+    await proxyAdminFeature(ctx, dependencies, '/api/plugins/yaoyao/voice/settings', {
+      method: 'PUT', requestBody: body(ctx),
+    })
   })
   router.get('/api/app/system/update/status', async (ctx) => {
     await withJar(ctx, async (jar) => {

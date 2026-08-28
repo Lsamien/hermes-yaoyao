@@ -87,5 +87,5 @@ onBeforeUnmount(() => window.removeEventListener('focus', refreshOnWindowFocus))
     <template #default><slot /></template>
     <template #inspector><slot name="inspector" /></template>
   </WorkspaceShell>
-  <AgentIdentityDialog :open="identityOpen" :profile="auth.activeProfile" :busy="identityBusy" :error="identityError" @close="identityOpen = false" @save="saveIdentity" />
+  <AgentIdentityDialog :open="identityOpen" :profile="auth.activeProfile" :busy="identityBusy" :error="identityError" :is-admin="auth.user?.role === 'admin'" @close="identityOpen = false" @save="saveIdentity" />
 </template>
