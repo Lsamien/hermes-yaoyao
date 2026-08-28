@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import request from 'supertest'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApplication, type ApplicationRuntime } from '../../src/server/app.js'
+import { createApplication as createUnauthenticatedApplication, type ApplicationRuntime } from '../../src/server/app.js'
 import type { ServerConfig } from '../../src/server/config.js'
+import { createAuthenticatedApplication as createApplication } from './authenticatedApplication.js'
 
 interface RecordedRequest {
   path: string
@@ -355,14 +356,17 @@ describe('8800 BFF', () => {
       .set('Host', '127.0.0.1:8800')
       .expect(200)
     expect(records.map((entry) => entry.path)).toEqual([
-      '/api/status', '/api/auth/me', '/api/profiles', '/api/plugins/yaoyao/profiles',
+      '/api/status', '/api/auth/me', '/api/status',
+      '/api/status', '/api/auth/me', '/api/profiles',
+      '/api/status', '/api/auth/me', '/api/plugins/yaoyao/profiles',
     ])
     expect(response.body).toMatchObject({
       authRequired: true,
       authenticated: true,
-      user: { user_id: 'user-1' },
+      user: { username: 'test-admin', role: 'admin' },
       profiles: [{ name: 'default', agentName: '竹儿' }],
       groupUploadsEnabled: true,
+      upstreamReady: true,
     })
     expect(response.body.csrfToken).toEqual(expect.any(String))
     expect(response.body.status).toEqual({
@@ -382,10 +386,10 @@ describe('8800 BFF', () => {
       .set('Host', '127.0.0.1:8800')
       .expect(200)
     expect(records.map(entry => entry.path)).toEqual([
-      '/api/profiles', '/api/plugins/yaoyao/profiles',
+      '/api/status', '/api/auth/me', '/api/profiles', '/api/plugins/yaoyao/profiles',
     ])
     expect(response.body.profiles).toEqual([
-      { name: 'default', is_default: true, agentName: '竹儿' },
+      { name: 'default', is_default: true, agentName: '竹儿', display_name: '竹儿', description: '竹儿' },
     ])
     expect(JSON.stringify(response.body)).not.toContain('旧插件名称')
   })
@@ -447,9 +451,9 @@ describe('8800 BFF', () => {
     expect(marked.body).toEqual({ ok: true, supported: false })
   })
 
-  it('requires exact Origin and CSRF on login, then sequences the Gateway login', async () => {
+  it('requires exact Origin and CSRF on local login without forwarding credentials upstream', async () => {
     const records: RecordedRequest[] = []
-    const runtime = createApplication({ config: makeConfig(), fetchImpl: fakeGateway(records) })
+    const runtime = createUnauthenticatedApplication({ config: makeConfig(), fetchImpl: fakeGateway(records) })
     runtimes.push(runtime)
     const bootstrap = await request(runtime.app.callback())
       .get('/api/app/bootstrap')
@@ -461,7 +465,7 @@ describe('8800 BFF', () => {
       .set('Host', '127.0.0.1:8800')
       .set('Cookie', cookies)
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ username: 'user', password: 'secret' })
+      .send({ username: 'admin', password: 'admin' })
       .expect(403)
 
     records.length = 0
@@ -471,19 +475,13 @@ describe('8800 BFF', () => {
       .set('Origin', 'http://127.0.0.1:8800')
       .set('Cookie', cookies)
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ username: 'user', password: 'secret' })
+      .send({ username: 'admin', password: 'admin' })
       .expect(200)
-    expect(records.map((entry) => entry.path)).toEqual([
-      '/api/auth/providers',
-      '/auth/password-login',
-      '/api/status',
-      '/api/auth/me',
-      '/api/profiles',
-      '/api/plugins/yaoyao/profiles',
-    ])
-    expect(records[1]?.body).toEqual({ provider: 'basic', username: 'user', password: 'secret', next: '' })
+    expect(records).toEqual([])
     expect(response.body.authenticated).toBe(true)
-    expect(JSON.stringify(response.body)).not.toContain('secret')
+    expect(response.body.user).toMatchObject({ username: 'admin', role: 'admin', mustChangePassword: true })
+    expect(response.body.profiles).toEqual([])
+    expect(JSON.stringify(response.body)).not.toContain('passwordHash')
   })
 
   it('forces visibility and compressed-history query invariants', async () => {
@@ -608,7 +606,7 @@ describe('8800 BFF', () => {
       .get('/api/anything')
       .set('Host', '127.0.0.1:8800')
       .expect(404)
-    expect(response.body.code).toBe('not_found')
+    expect(response.body.code).toBe('node_route_not_found')
   })
 
   it('reuses a valid CSRF token across tabs instead of invalidating the first tab', async () => {
@@ -633,7 +631,7 @@ describe('8800 BFF', () => {
       if (url.pathname === '/api/auth/me') return jsonResponse({ detail: 'Unauthorized' }, { status: 401 })
       return jsonResponse({ profiles: [] })
     }) as typeof fetch
-    const runtime = createApplication({ config: makeConfig(), fetchImpl })
+    const runtime = createUnauthenticatedApplication({ config: makeConfig(), fetchImpl })
     runtimes.push(runtime)
     const bootstrap = await request(runtime.app.callback())
       .get('/api/app/bootstrap')
@@ -650,10 +648,15 @@ describe('8800 BFF', () => {
   })
 
   it('forces active file content to download instead of executing on the 8800 origin', async () => {
-    const fetchImpl = (async () => new Response('<script>window.pwned=true</script>', {
-      status: 200,
-      headers: { 'content-type': 'text/html; charset=utf-8' },
-    })) as typeof fetch
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const path = new URL(input instanceof Request ? input.url : String(input)).pathname
+      if (path === '/api/status') return jsonResponse({ auth_required: true })
+      if (path === '/api/auth/me') return jsonResponse({ user_id: 'service' })
+      return new Response('<script>window.pwned=true</script>', {
+        status: 200,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      })
+    }) as typeof fetch
     const runtime = createApplication({ config: makeConfig(), fetchImpl })
     runtimes.push(runtime)
     const response = await request(runtime.app.callback())

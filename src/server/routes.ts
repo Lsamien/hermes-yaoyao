@@ -1654,7 +1654,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     }
     await withJar(ctx, async (jar) => {
       await requireGatewayAuthentication(ctx, dependencies, jar)
-      const accountKey = accountKeyFromCookieHeader(jar.header, ctx.req.socket.remoteAddress)
+      const accountKey = requestAccountKey(ctx.req)
       const files = await receiveGroupUploads(ctx.req, dependencies.uploads, accountKey)
       json(ctx, 201, { files })
     })

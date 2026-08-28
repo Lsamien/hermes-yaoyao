@@ -116,6 +116,7 @@ const server = createServer(async (request, response) => {
   if (url.pathname === '/api/auth/me') return json(response, 200, { user_id: 'demo-user', display_name: '验收用户', email: 'demo@example.invalid', provider: 'basic' })
   if (url.pathname === '/api/auth/ws-ticket' && request.method === 'POST') return json(response, 200, { ticket: 'fake-ticket' })
   if (url.pathname === '/api/profiles') return json(response, 200, { profiles })
+  if (url.pathname === '/api/dashboard/plugins') return json(response, 200, [{ name: 'yaoyao', version: '1.7.2' }])
   if (url.pathname === '/api/plugins/yaoyao/profiles') return json(response, 200, { profiles: [
     { name: 'yaoyao', label: '夭夭', botName: '夭夭', agentName: '旧夭夭名称', isDefault: true },
     { name: 'yaoer', label: '瑶儿', botName: '瑶儿', agentName: '旧瑶儿名称', isDefault: false },

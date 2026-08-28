@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import request from 'supertest'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApplication, type ApplicationRuntime } from '../../src/server/app.js'
+import type { ApplicationRuntime } from '../../src/server/app.js'
 import type { ServerConfig } from '../../src/server/config.js'
 import { NodePairingStore } from '../../src/server/pairing.js'
+import { createAuthenticatedApplication as createApplication } from './authenticatedApplication.js'
 
 const homes: string[] = []
 const runtimes: ApplicationRuntime[] = []
@@ -153,7 +154,7 @@ describe('Hermes node pairing', () => {
       .set('Origin', 'http://127.0.0.1:8800')
       .set('Cookie', cookie)
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ scopes: ['agents.read'] })
+      .send({ scopes: ['unknown.scope'] })
       .expect(400)
     const pairing = await request(runtime.app.callback())
       .post('/api/app/pairings')
@@ -163,8 +164,6 @@ describe('Hermes node pairing', () => {
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
       .send({
         scopes: ['agents.read', 'history.read', 'sessions.execute', 'groups.execute'],
-        username: 'paired-user',
-        password: 'paired-password',
       })
       .expect(201)
 
@@ -182,7 +181,7 @@ describe('Hermes node pairing', () => {
       .expect(201)
     expect(claim.body.serverUrl).toBe(`http://127.0.0.1:8800/node/${claim.body.deviceId}`)
     expect(readFileSync(join(home, 'paired-devices.json'), 'utf8'))
-      .not.toContain('paired-password')
+      .not.toContain('paired-access')
 
     const profiles = await request(runtime.app.callback())
       .get(`/node/${claim.body.deviceId}/api/profiles`)
@@ -195,7 +194,7 @@ describe('Hermes node pairing', () => {
       authorization: '',
     })
     expect(upstreamRequests.at(-1)?.cookie).toContain('hermes_session_at=paired-access')
-    expect(upstreamRequests.at(-1)?.cookie).toContain('hermes_session_rt=independent-refresh')
+    expect(upstreamRequests.at(-1)?.cookie).not.toContain('hermes_session_rt=independent-refresh')
 
     const attachment = Buffer.from('remote attachment')
     await request(runtime.app.callback())

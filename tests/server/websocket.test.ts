@@ -2,11 +2,12 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import WebSocket, { WebSocketServer } from 'ws'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApplication, createNodeServer, type NodeServerRuntime } from '../../src/server/app.js'
+import { createNodeServer, type NodeServerRuntime } from '../../src/server/app.js'
 import type { ServerConfig } from '../../src/server/config.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createAuthenticatedApplication as createApplication } from './authenticatedApplication.js'
 
 const closers: Array<() => Promise<void>> = []
 const homes: string[] = []

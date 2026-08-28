@@ -3,10 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import request from 'supertest'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createApplication, type ApplicationRuntime } from '../../src/server/app.js'
+import type { ApplicationRuntime } from '../../src/server/app.js'
 import type { ServerConfig } from '../../src/server/config.js'
 import { systemUpdateRequestAllowed } from '../../src/server/routes.js'
 import { SystemUpdateManager } from '../../src/server/updateManager.js'
+import { createAuthenticatedApplication as createApplication } from './authenticatedApplication.js'
 
 const runtimes: ApplicationRuntime[] = []
 const roots: string[] = []

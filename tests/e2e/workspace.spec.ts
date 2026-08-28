@@ -2,11 +2,35 @@ import { expect, test } from '@playwright/test'
 
 const WIDE_DOCX_BASE64 = 'UEsDBAoAAAAIAKwmFF15bjPX6AAAAK0BAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbH1QyU7DMBD9FWuuKHHggBCK0wPLETiUDxjZk8SqN3nc0v49Tlt6QIXjzFv1+tXeO7GjzDYGBbdtB4KCjsaGScHn+rV5AMEFg0EXAyk4EMNq6NeHRCyqNrCCuZT0KCXrmTxyGxOFiowxeyz1zJNMqDc4kbzrunupYygUSlMWDxj6Zxpx64p42df3qUcmxyCeTsQlSwGm5KzGUnG5C+ZXSnNOaKvyyOHZJr6pBJBXExbk74Cz7r0Ok60h8YG5vKGvLPkVs5Em6q2vyvZ/mys94zhaTRf94pZy1MRcF/euvSAebfjpL49zD99QSwMECgAAAAAArCYUXQAAAAAAAAAAAAAAAAYAAABfcmVscy9QSwMECgAAAAgArCYUXZv9N+qtAAAAKQEAAAsAAABfcmVscy8ucmVsc43POw7CMAwG4KtE3mlaBoRQ0y4IqSsqB7ASN61oHkrCo7cnAwNFDIy2f3+W6/ZpZnanECdnBVRFCYysdGqyWsClP232wGJCq3B2lgQsFKFt6jPNmPJKHCcfWTZsFDCm5A+cRzmSwVg4TzZPBhcMplwGzT3KK2ri27Lc8fBpwNpknRIQOlUB6xdP/9huGCZJRydvhmz6ceIrkWUMmpKAhwuKq3e7yCzwpuarF5sXUEsDBAoAAAAAAKwmFF0AAAAAAAAAAAAAAAAFAAAAd29yZC9QSwMECgAAAAgArCYUXalT+9hjAQAABwMAABEAAAB3b3JkL2RvY3VtZW50LnhtbKVSW0/CMBT+K03fpXMBJYRBFAaaYDSKwdeydluTrW3awsBfb7uVDYwmJr6cc75z+c6lHU8PZQH2VGkmeASvewEElCeCMJ5F8H29uBpCoA3mBBeC0wgeqYbTybgaEZHsSsoNsARcj6oI5sbIEUI6yWmJdU9Iym0sFarExkKVoUooIpVIqNaWvyxQGAQ3qMSMQ0e5FeTotHRCOWEmG0YomD/PPoBUdM9oNUbO7aSqZZ1stoVXL8obG1C5oa6DYWB3sq6jtOOTA4bIZ6zwUexMG0rZgRIXRJdES8WIMzOrZ6JoaAd9y4p+daOLStNQJY30xMnmrOT7fKhLPD/GKl6swfrufhWDeL6MfzgF6vr8u9vr4/Lhb+1QsyNqH0LTxHjC7O3Tv0QY9uveubUHw76/n8yesHITCRnB27DOUCzLTYu2whhRtrCgaRfLKSZURbAGqRCmBdnOeNBseBoJnf4Z6v7w5AtQSwECFAAKAAAACACsJhRdeW4z1+gAAACtAQAAEwAAAAAAAAAAAAAAAAAAAAAAW0NvbnRlbnRfVHlwZXNdLnhtbFBLAQIUAAoAAAAAAKwmFF0AAAAAAAAAAAAAAAAGAAAAAAAAAAAAEAAAABkBAABfcmVscy9QSwECFAAKAAAACACsJhRdm/036q0AAAApAQAACwAAAAAAAAAAAAAAAAA9AQAAX3JlbHMvLnJlbHNQSwECFAAKAAAAAACsJhRdAAAAAAAAAAAAAAAABQAAAAAAAAAAABAAAAATAgAAd29yZC9QSwECFAAKAAAACACsJhRdqVP72GMBAAAHAwAAEQAAAAAAAAAAAAAAAAA2AgAAd29yZC9kb2N1bWVudC54bWxQSwUGAAAAAAUABQAgAQAAyAMAAAAA'
 
+const E2E_PASSWORD = 'e2e-password'
+
+test.beforeAll(async ({ request }) => {
+  const signIn = async (password: string) => {
+    const initial = await request.get('/api/app/bootstrap')
+    const initialBody = await initial.json() as { csrfToken: string }
+    return request.post('/api/app/login', {
+      headers: { Origin: 'http://127.0.0.1:18801', 'X-CSRF-Token': initialBody.csrfToken },
+      data: { username: 'admin', password },
+    })
+  }
+  let login = await signIn(E2E_PASSWORD)
+  if (!login.ok()) login = await signIn('admin')
+  expect(login.ok()).toBe(true)
+  const loginBody = await login.json() as { csrfToken: string; user: { mustChangePassword?: boolean } }
+  if (loginBody.user.mustChangePassword) {
+    const changed = await request.put('/api/app/account/credentials', {
+      headers: { Origin: 'http://127.0.0.1:18801', 'X-CSRF-Token': loginBody.csrfToken },
+      data: { currentPassword: 'admin', newPassword: E2E_PASSWORD, username: 'admin' },
+    })
+    expect(changed.ok()).toBe(true)
+  }
+})
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/chat')
-  if (await page.getByRole('heading', { name: '登录 Hermes' }).isVisible()) {
-    await page.getByLabel('账号').fill('test')
-    await page.getByLabel('密码').fill('test')
+  if (await page.getByRole('heading', { name: '登录夭夭' }).isVisible()) {
+    await page.getByLabel('账号').fill('admin')
+    await page.getByLabel('密码').fill(E2E_PASSWORD)
     await page.getByRole('button', { name: '登录' }).click()
   }
   await expect(page.getByRole('navigation')).toBeVisible()

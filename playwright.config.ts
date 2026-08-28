@@ -21,7 +21,7 @@ export default defineConfig({
       timeout: 15_000,
     },
     {
-      command: 'cross-env NODE_ENV=production HERMES_YAOYAO_HOST=127.0.0.1 HERMES_YAOYAO_PORT=18801 HERMES_YAOYAO_UPSTREAM=http://127.0.0.1:19119 node dist-server/server/index.js',
+      command: 'node tests/fixtures/e2e-web-server.mjs',
       url: 'http://127.0.0.1:18801/healthz',
       reuseExistingServer: true,
       timeout: 15_000,
