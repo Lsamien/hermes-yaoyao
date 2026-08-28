@@ -22,6 +22,7 @@ export interface DashboardSupervisorOptions {
   launch?: Launch
   probe?: Probe
   lanProbeHost?: string
+  resolveLanProbeHost?: () => string | undefined
   log?: (message: string) => void
   credentials?: { username: string; password: string }
 }
@@ -81,7 +82,7 @@ export class DashboardSupervisor {
   private readonly launch: Launch
   private readonly probe: Probe
   private readonly allowLan: boolean
-  private readonly lanProbeHost: string | undefined
+  private readonly resolveLanProbeHost: () => string | undefined
   private readonly log: (message: string) => void
   private readonly intervalMs: number
   private readonly credentials: { username: string; password: string }
@@ -95,7 +96,8 @@ export class DashboardSupervisor {
     this.run = options.run ?? defaultRun(this.command)
     this.launch = options.launch ?? defaultLaunch(this.command)
     this.probe = options.probe ?? portIsListening
-    this.lanProbeHost = options.lanProbeHost ?? privateLanAddress()
+    this.resolveLanProbeHost = options.resolveLanProbeHost
+      ?? (() => options.lanProbeHost ?? privateLanAddress())
     this.log = options.log ?? console.info
     this.intervalMs = options.intervalMs ?? SUPERVISION_INTERVAL_MS
     this.credentials = options.credentials ?? {
@@ -153,8 +155,9 @@ export class DashboardSupervisor {
   }
 
   private async bindingMatches(): Promise<boolean> {
-    if (!this.lanProbeHost) return true
-    const listeningOnLan = await this.probe(this.lanProbeHost, DASHBOARD_PORT)
+    const lanProbeHost = this.resolveLanProbeHost()
+    if (!lanProbeHost) return true
+    const listeningOnLan = await this.probe(lanProbeHost, DASHBOARD_PORT)
     return this.allowLan ? listeningOnLan : !listeningOnLan
   }
 

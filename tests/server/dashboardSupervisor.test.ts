@@ -9,6 +9,7 @@ function supervisor(overrides: {
   running?: boolean
   runningHost?: '127.0.0.1' | '0.0.0.0'
   allowLan?: boolean
+  resolveLanProbeHost?: () => string | undefined
 } = {}) {
   const values = { ...overrides.values }
   let running = overrides.running ?? false
@@ -18,7 +19,8 @@ function supervisor(overrides: {
   const launches: string[][] = []
   const instance = new DashboardSupervisor({
     allowLan: overrides.allowLan ?? false,
-    lanProbeHost,
+    lanProbeHost: overrides.resolveLanProbeHost ? undefined : lanProbeHost,
+    resolveLanProbeHost: overrides.resolveLanProbeHost,
     run(args) {
       calls.push([...args])
       if (args[0] === 'config' && args[1] === 'get') return values[args[2]] ?? ''
@@ -112,6 +114,29 @@ describe('DashboardSupervisor', () => {
 
     expect(value.calls).toContainEqual(['dashboard', '--stop'])
     expect(value.launches).toEqual([['dashboard', '--host', '127.0.0.1', '--no-open']])
+  })
+
+  it('rechecks LAN binding after the network interface becomes available', async () => {
+    let networkReady = false
+    const value = supervisor({
+      running: true,
+      runningHost: '127.0.0.1',
+      allowLan: true,
+      resolveLanProbeHost: () => networkReady ? '192.168.1.20' : undefined,
+      values: {
+        'dashboard.basic_auth.username': 'operator',
+        'dashboard.basic_auth.password_hash': 'scrypt$existing',
+        'dashboard.basic_auth.secret': 'configured-secret',
+      },
+    })
+
+    await value.instance.checkNow()
+    expect(value.launches).toEqual([])
+
+    networkReady = true
+    await value.instance.checkNow()
+    expect(value.calls).toContainEqual(['dashboard', '--stop'])
+    expect(value.launches).toEqual([['dashboard', '--host', '0.0.0.0', '--no-open']])
   })
 
   it('explicitly restarts a healthy dashboard and waits for 9119 to return', async () => {
