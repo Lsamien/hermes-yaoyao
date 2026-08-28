@@ -115,15 +115,24 @@ function launchctlBootstrapRetryable(error) {
 export async function bootstrapLaunchAgent(
   runCommand = run,
   wait = delay,
-  retryDelays = [250, 500, 1_000, 1_500],
+  options = {},
 ) {
-  for (let attempt = 0; ; attempt += 1) {
+  const timeoutMs = options.timeoutMs ?? 20_000
+  const initialDelayMs = options.initialDelayMs ?? 250
+  const maximumDelayMs = options.maximumDelayMs ?? 2_000
+  const now = options.now ?? Date.now
+  const deadline = now() + timeoutMs
+  let retryDelayMs = initialDelayMs
+  for (;;) {
     try {
       return runCommand('launchctl', ['bootstrap', domain, plistPath])
     } catch (error) {
-      const waitMs = retryDelays[attempt]
-      if (waitMs === undefined || !launchctlBootstrapRetryable(error)) throw error
+      if (!launchctlBootstrapRetryable(error)) throw error
+      const remainingMs = deadline - now()
+      if (remainingMs <= 0) throw error
+      const waitMs = Math.min(retryDelayMs, maximumDelayMs, remainingMs)
       await wait(waitMs)
+      retryDelayMs = Math.min(retryDelayMs * 2, maximumDelayMs)
     }
   }
 }

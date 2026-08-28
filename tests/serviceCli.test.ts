@@ -48,6 +48,41 @@ describe('hermes-yaoyao LaunchAgent plist', () => {
     expect(wait).toHaveBeenCalledWith(250)
   })
 
+  it('keeps retrying until a slow launchd removal finishes', async () => {
+    const error = Object.assign(new Error('launchctl bootstrap failed'), {
+      stderr: 'Bootstrap failed: 5: Input/output error',
+    })
+    let elapsedMs = 0
+    const run = vi.fn(() => {
+      if (elapsedMs < 5_000) throw error
+      return ''
+    })
+    const wait = vi.fn(async (waitMs: number) => { elapsedMs += waitMs })
+
+    await expect(bootstrapLaunchAgent(run, wait, {
+      timeoutMs: 20_000,
+      now: () => elapsedMs,
+    })).resolves.toBe('')
+    expect(elapsedMs).toBeGreaterThanOrEqual(5_000)
+    expect(run).toHaveBeenCalledTimes(6)
+  })
+
+  it('stops retrying a transient launchctl error at the deadline', async () => {
+    const error = Object.assign(new Error('launchctl bootstrap failed'), {
+      stderr: 'Bootstrap failed: 5: Input/output error',
+    })
+    let elapsedMs = 0
+    const run = vi.fn(() => { throw error })
+    const wait = vi.fn(async (waitMs: number) => { elapsedMs += waitMs })
+
+    await expect(bootstrapLaunchAgent(run, wait, {
+      timeoutMs: 2_000,
+      now: () => elapsedMs,
+    })).rejects.toThrow(error)
+    expect(elapsedMs).toBe(2_000)
+    expect(run).toHaveBeenCalledTimes(5)
+  })
+
   it('does not retry permanent launchctl bootstrap failures', async () => {
     const error = new Error('Bootstrap failed: 125: Domain does not support specified action')
     const run = vi.fn(() => { throw error })
