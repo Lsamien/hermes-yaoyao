@@ -188,7 +188,7 @@ describe('8800 BFF', () => {
           headers: new Headers(init?.headers),
           body: JSON.parse(rawBody),
         })
-        pluginVersion = '1.7.2'
+        pluginVersion = '1.7.3'
         return jsonResponse({ ok: true, plugin_name: 'yaoyao', enabled: true })
       }
       return baseGateway(input, init)
@@ -209,8 +209,8 @@ describe('8800 BFF', () => {
 
     expect(response.body).toMatchObject({
       updated: true,
-      installedPluginVersion: '1.7.2',
-      expectedPluginVersion: '1.7.2',
+      installedPluginVersion: '1.7.3',
+      expectedPluginVersion: '1.7.3',
       restarted: false,
       restartRequired: false,
     })
