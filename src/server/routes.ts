@@ -157,6 +157,8 @@ function profilesWithHermesBotNames(profiles: unknown[], pluginProfiles: JsonObj
     return agentName ? {
       ...profile,
       agentName,
+      description: agentName,
+      display_name: agentName,
     } : profile
   })
 }
@@ -873,6 +875,18 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       role: user.role,
       must_change_password: user.mustChangePassword,
       server_kind: 'yaoyao-web',
+    })
+  })
+  router.get('/api/profiles', async (ctx) => {
+    dependencies.auth.require(ctx, true)
+    const profilesResponse = await dependencies.upstreamSession.request('/api/profiles')
+    const pluginProfilesResponse = await dependencies.upstreamSession.request('/api/plugins/yaoyao/profiles')
+    json(ctx, profilesResponse.status, {
+      profiles: profilesWithHermesBotNames(
+        normalizedProfiles(requireSuccess(profilesResponse)),
+        pluginProfilesResponse.status >= 200 && pluginProfilesResponse.status < 300
+          ? parseJson(pluginProfilesResponse) : undefined,
+      ),
     })
   })
   router.put('/api/account/credentials', (ctx) => {
@@ -1688,7 +1702,11 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       method: ctx.method,
       search: new URLSearchParams(ctx.querystring),
       body: ['GET', 'HEAD'].includes(ctx.method) ? undefined : optionalBody(ctx),
-      clientAddress: ctx.req.socket.remoteAddress,
+      // Hermes binds WebSocket tickets to the request address. The relay's
+      // upstream connection originates from 8800 itself, so forwarding the
+      // phone's address here would make 9119 reject the ticket during Upgrade.
+      clientAddress: upstreamPath === '/api/auth/ws-ticket'
+        ? undefined : ctx.req.socket.remoteAddress,
     })
     sendUpstreamResponse(ctx, response, dependencies.upstreamSession.jar)
   })

@@ -30,6 +30,7 @@ describe('8800 local authentication routes', () => {
       mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
       superviseDashboard: true,
     }
+    let wsTicketForwardedFor: string | null | undefined
     const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
       const path = new URL(input instanceof Request ? input.url : String(input)).pathname
       const headers = new Headers(init?.headers)
@@ -42,8 +43,11 @@ describe('8800 local authentication routes', () => {
         headers: { 'content-type': 'application/json', 'set-cookie': 'hermes_service=session; Path=/; HttpOnly' },
       })
       if (path === '/api/profiles') return Response.json({ profiles: [{ name: 'default', is_default: true }] })
-      if (path === '/api/auth/ws-ticket') return Response.json({ ticket: 'upstream-ticket' })
-      if (path === '/api/plugins/yaoyao/profiles') return Response.json({ profiles: [] })
+      if (path === '/api/auth/ws-ticket') {
+        wsTicketForwardedFor = headers.get('x-forwarded-for')
+        return Response.json({ ticket: 'upstream-ticket' })
+      }
+      if (path === '/api/plugins/yaoyao/profiles') return Response.json({ profiles: [{ name: 'default', botName: '丫头' }] })
       return Response.json({ ok: true })
     }) as typeof fetch
     const runtime = createApplication({ config, fetchImpl })
@@ -96,8 +100,12 @@ describe('8800 local authentication routes', () => {
       .send({ provider: 'basic', username: 'owner', password: 'new-password', next: '' }).expect(200)
     const identity = await native.get('/api/auth/me').set('Host', '127.0.0.1:8800').expect(200)
     expect(identity.body).toMatchObject({ username: 'owner', role: 'admin', server_kind: 'yaoyao-web' })
-    await native.get('/api/profiles').set('Host', '127.0.0.1:8800').expect(200)
+    const nativeProfiles = await native.get('/api/profiles').set('Host', '127.0.0.1:8800').expect(200)
+    expect(nativeProfiles.body.profiles[0]).toMatchObject({
+      name: 'default', description: '丫头', display_name: '丫头', agentName: '丫头',
+    })
     await native.post('/api/auth/ws-ticket').set('Host', '127.0.0.1:8800').send({}).expect(200, /upstream-ticket/)
+    expect(wsTicketForwardedFor).toBeNull()
   })
 
   it('lets one 8800 claim another 8800 as a direct child node', async () => {
