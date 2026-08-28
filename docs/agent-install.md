@@ -14,23 +14,23 @@
 
 ## 网络默认值与局域网策略
 
-默认情况下，两个服务都**不开启局域网访问**。受管 8800 服务启用局域网时，会将两个端口一起开放：
+通过 `service install` 安装的受管服务默认监听可信局域网，两个端口一起开放：
 
 | 端口 | 服务 | 默认监听地址 | 开启局域网的责任边界 |
 | --- | --- | --- | --- |
-| `9119` | Hermes Dashboard | `127.0.0.1` | 由 8800 服务持续监督；无配置时创建 `admin/admin` 认证并启动 |
-| `8800` | 夭夭 Web | `127.0.0.1` | 显式设置 `HERMES_YAOYAO_HOST=0.0.0.0` 后与 9119 一起开放 |
+| `9119` | Hermes Dashboard | `0.0.0.0` | 由 8800 服务持续监督；沿用或创建独立服务认证后启动 |
+| `8800` | 夭夭 Web | `0.0.0.0` | LaunchAgent 显式写入可信局域网 HTTP 开关 |
 
-最小暴露策略是保持两个端口仅本机监听。受管服务不支持“仅开放 8800”：用户明确允许局域网后，它会同时以局域网地址启动 8800 和 9119。
+受管服务不支持“仅开放 8800”：安装后会同时以局域网地址启动 8800 和 9119。该默认值只适用于受管 macOS LaunchAgent；手动 `npm start` 和 Docker 部署仍使用各自的绑定配置。
 
-若用户明确要求开放可信局域网 HTTP，Agent 必须在安装或重启夭夭 Web 前设置：
+若部署必须限制为仅本机访问，Agent 应在安装前显式覆盖：
 
 ```bash
-export HERMES_YAOYAO_HOST=0.0.0.0
-export HERMES_YAOYAO_ALLOW_INSECURE_LAN=1
+export HERMES_YAOYAO_HOST=127.0.0.1
+export HERMES_YAOYAO_ALLOW_INSECURE_LAN=0
 ```
 
-生产环境优先设置 `HERMES_YAOYAO_TLS_CERT` 和 `HERMES_YAOYAO_TLS_KEY`。该开关会将受管 9119 一起绑定至 `0.0.0.0`；`hermes dashboard --insecure` 不会关闭认证，不能将它当成局域网开关。
+默认局域网模式会显式设置 `HERMES_YAOYAO_ALLOW_INSECURE_LAN=1`，只适合受信网络。跨不受信网络部署时必须设置 `HERMES_YAOYAO_TLS_CERT` 和 `HERMES_YAOYAO_TLS_KEY`，并使用防火墙或反向代理限制访问；`hermes dashboard --insecure` 不会关闭认证，不能将它当成局域网开关。
 
 ## 受管 9119 的默认认证与持续监督
 
@@ -196,11 +196,11 @@ hermes dashboard --status
 lsof -nP -iTCP:9119 -sTCP:LISTEN
 ```
 
-验收条件：Dashboard 状态正常，且只有一个 `9119` TCP 监听器。插件路由位于 `/api/plugins/yaoyao/`，该 API 需要现有 Hermes 登录会话；不要为了探测路由而关闭认证。除非用户明确授权且已配置对应生命周期所有者，否则保持 `9119` 仅本机监听。
+验收条件：Dashboard 状态正常，且只有一个 `9119` TCP 监听器。插件路由位于 `/api/plugins/yaoyao/`，该 API 需要现有 Hermes 登录会话；不要为了探测路由而关闭认证。独立运行的 Dashboard 默认保持本机监听；通过夭夭受管服务安装时则跟随 8800 默认监听局域网。
 
 ## 6. 可选：部署夭夭 Web
 
-夭夭 Web 默认监听 `8800` 并连接 Dashboard `9119`。通过 LaunchAgent 安装后，它持续监督 Dashboard `9119`，但在自身停止或卸载时不会主动停止正在运行的 Dashboard。
+夭夭 Web 默认使用端口 `8800` 并连接 Dashboard `9119`。通过 LaunchAgent 安装后，8800 与受监督的 9119 都默认监听 `0.0.0.0`；8800 停止或卸载时不会主动停止正在运行的 Dashboard。
 
 ```bash
 npm ci
@@ -209,7 +209,7 @@ node bin/hermes-yaoyao.mjs service install
 node bin/hermes-yaoyao.mjs service status
 ```
 
-若需要显式指定 Dashboard 上游，只在安装服务前设置 `HERMES_YAOYAO_UPSTREAM`。默认值为 `http://127.0.0.1:9119`。只有用户明确要求时才允许局域网：设置 `HERMES_YAOYAO_HOST=0.0.0.0` 和 `HERMES_YAOYAO_ALLOW_INSECURE_LAN=1`；受管服务会同时将 9119 绑定至 `0.0.0.0`。
+若需要显式指定 Dashboard 上游，只在安装服务前设置 `HERMES_YAOYAO_UPSTREAM`。默认值为 `http://127.0.0.1:9119`，因为 8800 仍通过本机回环访问受监督的 9119。若要恢复仅本机监听，请在安装前设置 `HERMES_YAOYAO_HOST=127.0.0.1` 和 `HERMES_YAOYAO_ALLOW_INSECURE_LAN=0`。
 
 受管服务的配置被写入 `~/Library/LaunchAgents/com.samien.hermes-yaoyao.plist`。任何监听、TLS、上游或监督配置变更后，都要再次执行 `service install`，随后确认状态、两个监听器和日志：
 

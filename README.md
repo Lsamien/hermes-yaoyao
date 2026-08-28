@@ -184,27 +184,27 @@ npm run dev
 
 原生群聊由房主 Hermes 保存权威房间、话题和消息。扫码时，iOS 会把远端节点以加密凭据注册到房主插件；房主通过远端 `nodeWorker` 执行 Session，并转发流式事件、审批、澄清、中断和受限群聊附件。房主工作目录不会作为远端绝对路径使用，远端 Agent 默认采用自己的工作区。
 
-免密配对和跨节点执行应使用 HTTPS/WSS 或 Tailscale。只有显式设置 `HERMES_YAOYAO_ALLOW_INSECURE_LAN=1` 时才应在可信局域网使用 HTTP；不要把二维码或配对凭据发送给不受信任的人。
+免密配对和跨节点执行应使用 HTTPS/WSS 或 Tailscale。受管安装会显式设置 `HERMES_YAOYAO_ALLOW_INSECURE_LAN=1`，因此默认 HTTP 监听只适合可信局域网；不要把二维码或配对凭据发送给不受信任的人。
 
 ## 网络暴露：9119 与 8800 分别控制
 
-默认情况下，两个端口都**不开放局域网**：Hermes Dashboard `9119` 和夭夭 Web `8800` 都只监听 `127.0.0.1`。通过本项目安装的受管服务开启局域网时，两个端口会一起开放。
+通过 `service install` 安装的受管服务默认开放可信局域网：Hermes Dashboard `9119` 和夭夭 Web `8800` 都监听 `0.0.0.0`。手动 `npm start` 与 Docker 部署仍保留各自的绑定默认值。
 
 | 端口 | 服务 | 默认 | 单独开启局域网 |
 | --- | --- | --- | --- |
-| `9119` | Hermes Dashboard | `127.0.0.1` | 由夭夭 Web 监督；首次缺失配置时创建随机服务账号并启动 |
-| `8800` | 夭夭 Web | `127.0.0.1` | 显式设置 `HERMES_YAOYAO_HOST=0.0.0.0` 后与 9119 一起开放 |
+| `9119` | Hermes Dashboard | `0.0.0.0` | 由夭夭 Web 监督；沿用或创建随机服务账号后启动 |
+| `8800` | 夭夭 Web | `0.0.0.0` | LaunchAgent 显式启用可信局域网 HTTP |
 
-夭夭 Web 默认上游仍是 `http://127.0.0.1:9119`。受管服务的局域网开关会同时让它监听局域网地址，并让其启动的 Dashboard `9119` 监听局域网地址。
+夭夭 Web 默认上游仍是 `http://127.0.0.1:9119`，8800 在本机通过回环连接受监督的 9119；两个服务对局域网的监听地址均为 `0.0.0.0`。
 
-仅在可信局域网中以 HTTP 开放受管服务时，必须同时设置：
+若需要把受管安装恢复为仅本机访问，可在安装前显式设置：
 
 ```bash
-HERMES_YAOYAO_HOST=0.0.0.0
-HERMES_YAOYAO_ALLOW_INSECURE_LAN=1
+HERMES_YAOYAO_HOST=127.0.0.1
+HERMES_YAOYAO_ALLOW_INSECURE_LAN=0
 ```
 
-生产局域网使用建议同时配置 `HERMES_YAOYAO_TLS_CERT` 和 `HERMES_YAOYAO_TLS_KEY`。
+默认局域网 HTTP 只适合可信网络。跨不受信网络使用时必须配置 `HERMES_YAOYAO_TLS_CERT` 和 `HERMES_YAOYAO_TLS_KEY`，并限制防火墙或反向代理访问范围。
 
 受管服务会在 `dashboard.basic_auth` 未配置时创建 `yaoyao-service` 和随机密码的
 scrypt 哈希，同时生成会话签名 `secret`；明文服务密码只加密保存在 8800 数据目录。
@@ -322,7 +322,7 @@ curl --fail --silent http://127.0.0.1:9119/api/dashboard/plugins
 
 ## 受管服务操作与验收
 
-`service install` 会写入并启动 `com.samien.hermes-yaoyao` LaunchAgent；它默认监督本机 `9119`。已安装服务的环境变量写入 plist，因此改变监听地址、TLS 或监督开关后需要再次执行 `service install`，仅执行 `service start` 不会刷新这些配置。
+`service install` 会写入并启动 `com.samien.hermes-yaoyao` LaunchAgent；它默认让 8800 与受监督的 9119 监听局域网。已安装服务的环境变量写入 plist，因此改变监听地址、TLS 或监督开关后需要再次执行 `service install`，仅执行 `service start` 不会刷新这些配置。
 
 | 目标 | 命令 | 预期结果 |
 | --- | --- | --- |

@@ -32,7 +32,7 @@ function escapeXml(value) {
     .replaceAll("'", '&apos;')
 }
 
-function environment() {
+function environment(env = process.env) {
   const allowed = [
     'HERMES_YAOYAO_HOST',
     'HERMES_YAOYAO_PORT',
@@ -50,7 +50,7 @@ function environment() {
     'HERMES_YAOYAO_ALLOW_REMOTE_UPDATE',
     'HERMES_YAOYAO_SERVICE_ROOT',
   ]
-  return Object.fromEntries(allowed.flatMap(key => process.env[key] ? [[key, process.env[key]]] : []))
+  return Object.fromEntries(allowed.flatMap(key => env[key] ? [[key, env[key]]] : []))
 }
 
 export function launchAgentPlist(options = {}) {
@@ -61,11 +61,12 @@ export function launchAgentPlist(options = {}) {
     PATH: `${dirname(node)}:${join(homedir(), '.local', 'bin')}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
     NODE_ENV: 'production',
     HERMES_YAOYAO_HOME: dataHome,
-    HERMES_YAOYAO_HOST: '127.0.0.1',
+    HERMES_YAOYAO_HOST: '0.0.0.0',
     HERMES_YAOYAO_PORT: '8800',
     HERMES_YAOYAO_UPSTREAM: 'http://127.0.0.1:9119',
+    HERMES_YAOYAO_ALLOW_INSECURE_LAN: '1',
     HERMES_YAOYAO_SUPERVISE_DASHBOARD: '1',
-    ...environment(),
+    ...environment(options.environment),
   }
   const envXml = Object.entries(envEntries).map(([key, value]) => (
     `      <key>${escapeXml(key)}</key>\n      <string>${escapeXml(value)}</string>`
