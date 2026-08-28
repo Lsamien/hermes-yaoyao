@@ -1,6 +1,8 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { randomBytes, scryptSync } from 'node:crypto'
 import { createConnection } from 'node:net'
+import { networkInterfaces } from 'node:os'
+import { isPrivateHost } from './config.js'
 
 export const DEFAULT_DASHBOARD_USERNAME = 'admin'
 export const DEFAULT_DASHBOARD_PASSWORD = 'admin'
@@ -19,6 +21,7 @@ export interface DashboardSupervisorOptions {
   run?: Run
   launch?: Launch
   probe?: Probe
+  lanProbeHost?: string
   log?: (message: string) => void
   credentials?: { username: string; password: string }
 }
@@ -49,6 +52,17 @@ function portIsListening(host: string, port: number): Promise<boolean> {
   })
 }
 
+function privateLanAddress(): string | undefined {
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === 'IPv4' && !address.internal && isPrivateHost(address.address)) {
+        return address.address
+      }
+    }
+  }
+  return undefined
+}
+
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
@@ -66,6 +80,8 @@ export class DashboardSupervisor {
   private readonly run: Run
   private readonly launch: Launch
   private readonly probe: Probe
+  private readonly allowLan: boolean
+  private readonly lanProbeHost: string | undefined
   private readonly log: (message: string) => void
   private readonly intervalMs: number
   private readonly credentials: { username: string; password: string }
@@ -74,10 +90,12 @@ export class DashboardSupervisor {
 
   constructor(options: DashboardSupervisorOptions) {
     this.command = options.command ?? 'hermes'
+    this.allowLan = options.allowLan
     this.dashboardHost = options.allowLan ? '0.0.0.0' : '127.0.0.1'
     this.run = options.run ?? defaultRun(this.command)
     this.launch = options.launch ?? defaultLaunch(this.command)
     this.probe = options.probe ?? portIsListening
+    this.lanProbeHost = options.lanProbeHost ?? privateLanAddress()
     this.log = options.log ?? console.info
     this.intervalMs = options.intervalMs ?? SUPERVISION_INTERVAL_MS
     this.credentials = options.credentials ?? {
@@ -115,8 +133,12 @@ export class DashboardSupervisor {
     try {
       const credentialsChanged = this.ensureBasicAuthentication()
       let running = await this.probe('127.0.0.1', DASHBOARD_PORT)
-      if (credentialsChanged && running) {
-        this.log('Hermes Dashboard authentication was configured; restarting 9119 to load it.')
+      const bindingChanged = running && !(await this.bindingMatches())
+      if ((credentialsChanged || bindingChanged) && running) {
+        const reason = credentialsChanged
+          ? 'authentication was configured'
+          : `listener must move to ${this.dashboardHost}`
+        this.log(`Hermes Dashboard ${reason}; restarting 9119 to load it.`)
         this.run(['dashboard', '--stop'])
         running = await this.probe('127.0.0.1', DASHBOARD_PORT)
       }
@@ -128,6 +150,12 @@ export class DashboardSupervisor {
     } finally {
       this.checking = false
     }
+  }
+
+  private async bindingMatches(): Promise<boolean> {
+    if (!this.lanProbeHost) return true
+    const listeningOnLan = await this.probe(this.lanProbeHost, DASHBOARD_PORT)
+    return this.allowLan ? listeningOnLan : !listeningOnLan
   }
 
   private value(key: string): string {

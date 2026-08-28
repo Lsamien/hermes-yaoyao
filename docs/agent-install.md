@@ -23,12 +23,7 @@
 
 受管服务不支持“仅开放 8800”：安装后会同时以局域网地址启动 8800 和 9119。该默认值只适用于受管 macOS LaunchAgent；手动 `npm start` 和 Docker 部署仍使用各自的绑定配置。
 
-若部署必须限制为仅本机访问，Agent 应在安装前显式覆盖：
-
-```bash
-export HERMES_YAOYAO_HOST=127.0.0.1
-export HERMES_YAOYAO_ALLOW_INSECURE_LAN=0
-```
+受管 `service install` 会覆盖遗留的 loopback 环境并保持局域网监听。若部署必须限制为仅本机访问，请使用手动 `npm start` 或 Docker 的回环绑定，不要使用受管 LaunchAgent。
 
 默认局域网模式会显式设置 `HERMES_YAOYAO_ALLOW_INSECURE_LAN=1`，只适合受信网络。跨不受信网络部署时必须设置 `HERMES_YAOYAO_TLS_CERT` 和 `HERMES_YAOYAO_TLS_KEY`，并使用防火墙或反向代理限制访问；`hermes dashboard --insecure` 不会关闭认证，不能将它当成局域网开关。
 
@@ -209,7 +204,7 @@ node bin/hermes-yaoyao.mjs service install
 node bin/hermes-yaoyao.mjs service status
 ```
 
-若需要显式指定 Dashboard 上游，只在安装服务前设置 `HERMES_YAOYAO_UPSTREAM`。默认值为 `http://127.0.0.1:9119`，因为 8800 仍通过本机回环访问受监督的 9119。若要恢复仅本机监听，请在安装前设置 `HERMES_YAOYAO_HOST=127.0.0.1` 和 `HERMES_YAOYAO_ALLOW_INSECURE_LAN=0`。
+若需要显式指定 Dashboard 上游，只在安装服务前设置 `HERMES_YAOYAO_UPSTREAM`。默认值为 `http://127.0.0.1:9119`，因为 8800 仍通过本机回环访问受监督的 9119。受管升级会迁移旧版 `127.0.0.1/0` 环境并继续使用局域网监听。
 
 受管服务的配置被写入 `~/Library/LaunchAgents/com.samien.hermes-yaoyao.plist`。任何监听、TLS、上游或监督配置变更后，都要再次执行 `service install`，随后确认状态、两个监听器和日志：
 

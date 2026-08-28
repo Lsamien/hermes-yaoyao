@@ -7,14 +7,18 @@ import {
 function supervisor(overrides: {
   values?: Record<string, string>
   running?: boolean
+  runningHost?: '127.0.0.1' | '0.0.0.0'
   allowLan?: boolean
 } = {}) {
   const values = { ...overrides.values }
   let running = overrides.running ?? false
+  let runningHost = overrides.runningHost ?? '127.0.0.1'
+  const lanProbeHost = '192.168.1.20'
   const calls: string[][] = []
   const launches: string[][] = []
   const instance = new DashboardSupervisor({
     allowLan: overrides.allowLan ?? false,
+    lanProbeHost,
     run(args) {
       calls.push([...args])
       if (args[0] === 'config' && args[1] === 'get') return values[args[2]] ?? ''
@@ -31,8 +35,12 @@ function supervisor(overrides: {
     launch(args) {
       launches.push([...args])
       running = true
+      runningHost = args[2] as typeof runningHost
     },
-    probe: async () => running,
+    probe: async (host) => running && (
+      host === '127.0.0.1'
+      || (host === lanProbeHost && runningHost === '0.0.0.0')
+    ),
     log: () => undefined,
   })
   return { instance, calls, launches, values }
@@ -70,6 +78,40 @@ describe('DashboardSupervisor', () => {
 
     expect(value.calls).toContainEqual(['dashboard', '--stop'])
     expect(value.launches).toEqual([['dashboard', '--host', '0.0.0.0', '--no-open']])
+  })
+
+  it('moves an authenticated loopback dashboard onto the LAN when managed installation requires it', async () => {
+    const value = supervisor({
+      running: true,
+      runningHost: '127.0.0.1',
+      allowLan: true,
+      values: {
+        'dashboard.basic_auth.username': 'operator',
+        'dashboard.basic_auth.password_hash': 'scrypt$existing',
+        'dashboard.basic_auth.secret': 'configured-secret',
+      },
+    })
+    await value.instance.checkNow()
+
+    expect(value.calls).toContainEqual(['dashboard', '--stop'])
+    expect(value.launches).toEqual([['dashboard', '--host', '0.0.0.0', '--no-open']])
+  })
+
+  it('moves an authenticated LAN dashboard back to loopback when unmanaged LAN is requested', async () => {
+    const value = supervisor({
+      running: true,
+      runningHost: '0.0.0.0',
+      allowLan: false,
+      values: {
+        'dashboard.basic_auth.username': 'operator',
+        'dashboard.basic_auth.password_hash': 'scrypt$existing',
+        'dashboard.basic_auth.secret': 'configured-secret',
+      },
+    })
+    await value.instance.checkNow()
+
+    expect(value.calls).toContainEqual(['dashboard', '--stop'])
+    expect(value.launches).toEqual([['dashboard', '--host', '127.0.0.1', '--no-open']])
   })
 
   it('explicitly restarts a healthy dashboard and waits for 9119 to return', async () => {

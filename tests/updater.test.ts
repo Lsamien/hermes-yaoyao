@@ -70,6 +70,8 @@ describe('standalone updater primitives', () => {
     expect(invocation.cli).toBe(join(newRelease, 'bin', 'hermes-yaoyao.mjs'))
     expect(invocation.env.HERMES_YAOYAO_SERVICE_ROOT).toBe(join(releaseRoot, 'current'))
     expect(invocation.env.HERMES_YAOYAO_RELEASE_SOURCE).toBe('https://example.test/hermes-yaoyao.git')
+    expect(invocation.env.HERMES_YAOYAO_HOST).toBe('0.0.0.0')
+    expect(invocation.env.HERMES_YAOYAO_ALLOW_INSECURE_LAN).toBe('1')
 
     const sourceRollback = serviceInstallInvocation(
       oldRelease,

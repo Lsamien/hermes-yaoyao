@@ -197,12 +197,7 @@ npm run dev
 
 夭夭 Web 默认上游仍是 `http://127.0.0.1:9119`，8800 在本机通过回环连接受监督的 9119；两个服务对局域网的监听地址均为 `0.0.0.0`。
 
-若需要把受管安装恢复为仅本机访问，可在安装前显式设置：
-
-```bash
-HERMES_YAOYAO_HOST=127.0.0.1
-HERMES_YAOYAO_ALLOW_INSECURE_LAN=0
-```
+受管 `service install` 会覆盖遗留的 loopback 环境并保持局域网监听。若必须限制为仅本机访问，请使用手动 `npm start` 或 Docker 的回环绑定，不要使用受管 LaunchAgent。
 
 默认局域网 HTTP 只适合可信网络。跨不受信网络使用时必须配置 `HERMES_YAOYAO_TLS_CERT` 和 `HERMES_YAOYAO_TLS_KEY`，并限制防火墙或反向代理访问范围。
 

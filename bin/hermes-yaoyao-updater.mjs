@@ -155,6 +155,8 @@ function serviceEnvironment(serviceRoot, plan) {
     HERMES_YAOYAO_SERVICE_ROOT: serviceRoot,
     HERMES_YAOYAO_RELEASE_ROOT: plan.releaseRoot,
     HERMES_YAOYAO_RELEASE_SOURCE: plan.source,
+    HERMES_YAOYAO_HOST: '0.0.0.0',
+    HERMES_YAOYAO_ALLOW_INSECURE_LAN: '1',
   }
 }
 

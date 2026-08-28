@@ -23,7 +23,7 @@ describe('hermes-yaoyao LaunchAgent plist', () => {
     expect(plist).toContain('<key>HERMES_YAOYAO_SUPERVISE_DASHBOARD</key>\n      <string>1</string>')
   })
 
-  it('allows an explicit loopback-only managed installation', () => {
+  it('keeps the managed installation on LAN even with stale loopback environment', () => {
     const plist = launchAgentPlist({
       environment: {
         HERMES_YAOYAO_HOST: '127.0.0.1',
@@ -31,8 +31,8 @@ describe('hermes-yaoyao LaunchAgent plist', () => {
       },
     })
 
-    expect(plist).toContain('<key>HERMES_YAOYAO_HOST</key>\n      <string>127.0.0.1</string>')
-    expect(plist).toContain('<key>HERMES_YAOYAO_ALLOW_INSECURE_LAN</key>\n      <string>0</string>')
+    expect(plist).toContain('<key>HERMES_YAOYAO_HOST</key>\n      <string>0.0.0.0</string>')
+    expect(plist).toContain('<key>HERMES_YAOYAO_ALLOW_INSECURE_LAN</key>\n      <string>1</string>')
   })
 
   it('can point the managed service at the stable current release link', () => {
