@@ -17,6 +17,9 @@ function normalizeBootstrap(payload: unknown): BootstrapResponse {
     csrfToken,
     insecureLan: bool(root.insecureLan ?? root.insecure_lan),
     groupUploadsEnabled: bool(root.groupUploadsEnabled ?? root.group_uploads_enabled),
+    upstreamReady: bool(root.upstreamReady ?? root.upstream_ready),
+    upstreamError: string(root.upstreamError ?? root.upstream_error) || undefined,
+    serverKind: string(root.serverKind ?? root.server_kind) || undefined,
   }
   if (rawUser) response.user = normalizeUser(rawUser)
   setApiCsrfToken(csrfToken)
@@ -61,4 +64,15 @@ export async function fetchProfileAvatars(profiles: Profile[]): Promise<Record<s
 export async function fetchCurrentUser(): Promise<CurrentUser | undefined> {
   const response = await bootstrap()
   return response.user
+}
+
+export async function changeCredentials(input: {
+  currentPassword: string
+  newPassword: string
+  username?: string
+}): Promise<CurrentUser> {
+  const payload = record(unwrapData(await apiRequest<unknown>('/api/app/account/credentials', {
+    method: 'PUT', body: input as unknown as JsonValue,
+  })))
+  return normalizeUser(payload.user ?? payload)
 }

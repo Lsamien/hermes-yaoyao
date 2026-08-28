@@ -10,6 +10,7 @@ import { loadServerConfig } from './config.js'
 import { errorMessage, HttpError } from './errors.js'
 import { RealtimeLeaseStore } from './leases.js'
 import { NodePairingStore } from './pairing.js'
+import { LocalAuthStore, UpstreamServiceSession } from './localAuth.js'
 import { createApiRouter } from './routes.js'
 import {
   applySecurityHeaders,
@@ -30,6 +31,8 @@ export interface ApplicationOptions {
   pairings?: NodePairingStore
   uploads?: UploadStore
   updates?: SystemUpdateManager
+  auth?: LocalAuthStore
+  upstreamSession?: UpstreamServiceSession
 }
 
 export interface ApplicationRuntime {
@@ -41,6 +44,8 @@ export interface ApplicationRuntime {
   upstream: UpstreamClient
   uploads: UploadStore
   updates: SystemUpdateManager
+  auth: LocalAuthStore
+  upstreamSession: UpstreamServiceSession
   close(): void
 }
 
@@ -81,6 +86,17 @@ export function createApplication(options: ApplicationOptions = {}): Application
   const upstream = new UpstreamClient(config.upstream, options.fetchImpl, Boolean(config.tlsCert))
   const uploads = options.uploads ?? new UploadStore(config.home)
   const updates = options.updates ?? new SystemUpdateManager(config)
+  const auth = options.auth ?? new LocalAuthStore(config.home, Boolean(config.tlsCert))
+  if (config.superviseDashboard && !config.upstreamUsername && !config.upstreamPassword) {
+    auth.ensureUpstreamCredentials()
+  }
+  const configuredUpstreamCredentials = config.upstreamUsername && config.upstreamPassword
+    ? { username: config.upstreamUsername, password: config.upstreamPassword }
+    : undefined
+  const upstreamSession = options.upstreamSession ?? new UpstreamServiceSession(
+    upstream,
+    () => auth.upstreamCredentials(configuredUpstreamCredentials),
+  )
   try {
     uploads.cleanupUncommitted()
   } catch {
@@ -141,6 +157,45 @@ export function createApplication(options: ApplicationOptions = {}): Application
       throw new HttpError(ctx.status === 413 ? 413 : 400, 'Invalid JSON request body', 'invalid_json_body')
     },
   }))
+  app.use(async (ctx, next) => {
+    ctx.state.localAuth = auth
+    ctx.state.upstreamSession = upstreamSession
+    const anonymous = ctx.path === '/api/app/bootstrap'
+      || ctx.path === '/api/app/login'
+      || ctx.path === '/api/status'
+      || ctx.path === '/api/auth/providers'
+      || ctx.path === '/auth/password-login'
+      || ctx.path.startsWith('/api/pair/v1/')
+      || ctx.path === '/healthz'
+      || ctx.path === '/readyz'
+    if (ctx.path.startsWith('/api/app/') && !anonymous) {
+      const allowPasswordChange = ctx.path === '/api/app/account/credentials'
+        || ctx.path === '/api/app/logout'
+      ctx.state.localUser = auth.require(ctx, allowPasswordChange)
+      const adminOnly = ctx.path.startsWith('/api/app/admin/')
+        || ctx.path.startsWith('/api/app/system/')
+        || ctx.path.startsWith('/api/app/plugins/')
+        || ctx.path.startsWith('/api/app/pairings')
+        || ctx.path.startsWith('/api/app/paired-devices')
+        || ctx.path.startsWith('/api/app/groups/nodes')
+      if (adminOnly) ctx.state.localUser = auth.requireAdmin(ctx)
+    }
+    const gatewayCompatibility = (ctx.path.startsWith('/api/') && !ctx.path.startsWith('/api/app/')
+      && !ctx.path.startsWith('/api/pair/'))
+      || ctx.path === '/auth/logout'
+    if (gatewayCompatibility && !anonymous) {
+      const allowPasswordChange = ctx.path === '/api/auth/me' || ctx.path === '/api/profiles'
+        || ctx.path === '/api/account/credentials'
+      ctx.state.localUser = auth.require(ctx, allowPasswordChange)
+      if (isMutation(ctx.method)) {
+        const origin = ctx.get('origin')
+        if (origin && !isExactOrigin(origin, ctx.get('host'), ctx.secure || Boolean(config.tlsCert), config.allowedHosts)) {
+          throw new HttpError(403, 'Request Origin is not allowed', 'invalid_origin')
+        }
+      }
+    }
+    await next()
+  })
 
   const router = createApiRouter({
     config,
@@ -150,6 +205,8 @@ export function createApplication(options: ApplicationOptions = {}): Application
     pairings,
     uploads,
     updates,
+    auth,
+    upstreamSession,
   })
   app.use(router.routes())
   app.use(router.allowedMethods({ throw: false }))
@@ -172,6 +229,8 @@ export function createApplication(options: ApplicationOptions = {}): Application
     upstream,
     uploads,
     updates,
+    auth,
+    upstreamSession,
     close: () => uploads.close(),
   }
 }

@@ -9,7 +9,6 @@ const auth = useAuthStore()
 const theme = useThemeStore()
 const username = ref('')
 const password = ref('')
-const provider = ref('')
 const localError = ref('')
 const submitting = computed(() => auth.status === 'authenticating')
 
@@ -17,7 +16,7 @@ async function login() {
   if (!username.value.trim() || !password.value) return
   localError.value = ''
   try {
-    await auth.login({ username: username.value.trim(), password: password.value, provider: provider.value || undefined })
+    await auth.login({ username: username.value.trim(), password: password.value })
   } catch (error) {
     localError.value = error instanceof Error ? error.message : '登录失败，请检查账号和密码'
     password.value = ''
@@ -36,12 +35,11 @@ async function login() {
     <section class="login-panel" aria-labelledby="login-title">
       <BrandMark :size="72" />
       <div class="login-copy">
-        <h1 id="login-title">登录 Hermes</h1>
+        <h1 id="login-title">登录夭夭</h1>
       </div>
       <form @submit.prevent="login">
         <label><span>账号</span><input v-model="username" name="username" autocomplete="username" autofocus required placeholder="用户名" /></label>
         <label><span>密码</span><input id="password" v-model="password" name="password" type="password" autocomplete="current-password" required placeholder="密码" /></label>
-        <label class="provider"><span>认证方式 <small>可选</small></span><input v-model="provider" name="provider" autocomplete="off" placeholder="使用服务器默认设置" /></label>
         <p v-if="localError || auth.error" class="login-error" role="alert"><AppIcon name="alert" :size="14" />{{ localError || auth.error }}</p>
         <button class="login-submit solid-button" type="submit" :disabled="submitting || !username.trim() || !password">
           <span>{{ submitting ? '正在登录…' : '登录' }}</span><AppIcon v-if="!submitting" name="arrow-up" :size="15" />

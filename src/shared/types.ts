@@ -16,6 +16,8 @@ export interface CurrentUser {
   email?: string
   provider?: string
   role?: string
+  enabled?: boolean
+  mustChangePassword?: boolean
 }
 
 export interface Profile {
@@ -48,6 +50,9 @@ export interface BootstrapResponse {
   csrfToken: string
   insecureLan?: boolean
   groupUploadsEnabled?: boolean
+  upstreamReady?: boolean
+  upstreamError?: string
+  serverKind?: string
   models?: ModelOption[]
 }
 

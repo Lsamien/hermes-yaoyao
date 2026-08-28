@@ -1,0 +1,39 @@
+import type { JsonValue } from '@shared/types'
+import { apiRequest } from './client'
+
+export interface ManagedUser {
+  id: string
+  username: string
+  role: 'admin' | 'user'
+  enabled: boolean
+  mustChangePassword: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export async function listUsers(): Promise<ManagedUser[]> {
+  const response = await apiRequest<{ items: ManagedUser[] }>('/api/app/admin/users')
+  return response.items
+}
+
+export async function createUser(username: string, password: string): Promise<ManagedUser> {
+  return apiRequest('/api/app/admin/users', {
+    method: 'POST', body: { username, password } as unknown as JsonValue,
+  })
+}
+
+export async function updateUser(id: string, input: { enabled?: boolean; password?: string }): Promise<ManagedUser> {
+  return apiRequest(`/api/app/admin/users/${encodeURIComponent(id)}`, {
+    method: 'PATCH', body: input as unknown as JsonValue,
+  })
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  await apiRequest(`/api/app/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} })
+}
+
+export async function setUpstreamCredentials(username: string, password: string): Promise<void> {
+  await apiRequest('/api/app/admin/upstream-credentials', {
+    method: 'PUT', body: { username, password } as unknown as JsonValue,
+  })
+}

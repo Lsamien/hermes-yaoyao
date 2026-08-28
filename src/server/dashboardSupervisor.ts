@@ -20,6 +20,7 @@ export interface DashboardSupervisorOptions {
   launch?: Launch
   probe?: Probe
   log?: (message: string) => void
+  credentials?: { username: string; password: string }
 }
 
 function defaultRun(command: string): Run {
@@ -67,6 +68,7 @@ export class DashboardSupervisor {
   private readonly probe: Probe
   private readonly log: (message: string) => void
   private readonly intervalMs: number
+  private readonly credentials: { username: string; password: string }
   private timer: NodeJS.Timeout | undefined
   private checking = false
 
@@ -78,6 +80,10 @@ export class DashboardSupervisor {
     this.probe = options.probe ?? portIsListening
     this.log = options.log ?? console.info
     this.intervalMs = options.intervalMs ?? SUPERVISION_INTERVAL_MS
+    this.credentials = options.credentials ?? {
+      username: DEFAULT_DASHBOARD_USERNAME,
+      password: DEFAULT_DASHBOARD_PASSWORD,
+    }
   }
 
   start(): void {
@@ -144,11 +150,11 @@ export class DashboardSupervisor {
     let changed = false
 
     if (!username) {
-      this.set('dashboard.basic_auth.username', DEFAULT_DASHBOARD_USERNAME)
+      this.set('dashboard.basic_auth.username', this.credentials.username)
       changed = true
     }
     if (!configuredPasswordHash && !password) {
-      this.set('dashboard.basic_auth.password_hash', passwordHash(DEFAULT_DASHBOARD_PASSWORD))
+      this.set('dashboard.basic_auth.password_hash', passwordHash(this.credentials.password))
       changed = true
     }
     if (!secret) {

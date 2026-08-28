@@ -517,6 +517,70 @@ export function installWebSocketRelay(
       rejectUpgrade(socket, 400, 'Invalid WebSocket URL')
       return
     }
+    const gatewayChannel: RealtimeChannel | undefined = url.pathname === '/api/ws'
+      ? 'chat'
+      : url.pathname === '/api/plugins/yaoyao/v1/events' ? 'groups' : undefined
+    if (gatewayChannel) {
+      const host = request.headers.host
+      const origin = typeof request.headers.origin === 'string' ? request.headers.origin : undefined
+      const secure = Boolean(config.tlsCert)
+      if (!isAllowedHostHeader(host, config)
+        || (origin !== undefined && !isExactOrigin(origin, host, secure, config.allowedHosts))) {
+        rejectUpgrade(socket, 403, 'Host or Origin rejected')
+        return
+      }
+      const allowed = gatewayChannel === 'groups'
+        ? new Set(['ticket', 'epoch', 'cursor']) : new Set(['ticket'])
+      if ([...url.searchParams.keys()].some(name => !allowed.has(name))) {
+        rejectUpgrade(socket, 400, 'Unexpected WebSocket query parameter')
+        return
+      }
+      const ticket = url.searchParams.get('ticket')
+      const epoch = gatewayChannel === 'groups' ? url.searchParams.get('epoch') : undefined
+      const cursor = Number(url.searchParams.get('cursor') ?? '0')
+      if (!ticket || ticket.length > 4_096
+        || (gatewayChannel === 'groups' && (!epoch || !Number.isSafeInteger(cursor) || cursor < 0))) {
+        rejectUpgrade(socket, 401, 'Missing or invalid Gateway ticket')
+        return
+      }
+      const connectionKey = `gateway:${request.socket.remoteAddress ?? 'unknown'}:${gatewayChannel}`
+      if ((active.get(connectionKey) ?? 0) >= (gatewayChannel === 'chat' ? 4 : 2)) {
+        rejectUpgrade(socket, 429, 'Too many realtime connections')
+        return
+      }
+      active.set(connectionKey, (active.get(connectionKey) ?? 0) + 1)
+      socketServer.handleUpgrade(request, socket, head, (client) => {
+        const upstream = new WebSocket(pairedUpstreamWebSocketURL(
+          config, gatewayChannel, ticket, epoch ?? undefined, cursor,
+        ), {
+          headers: { Origin: config.upstream.origin },
+          maxPayload: gatewayChannel === 'chat' ? CHAT_MAX_PAYLOAD : GROUP_MAX_PAYLOAD,
+          handshakeTimeout: 15_000,
+        })
+        let released = false
+        const release = () => {
+          if (released) return
+          released = true
+          const count = (active.get(connectionKey) ?? 1) - 1
+          if (count <= 0) active.delete(connectionKey)
+          else active.set(connectionKey, count)
+        }
+        upstream.once('open', () => relaySocket(
+          client, upstream, gatewayChannel, release,
+          gatewayChannel === 'groups' ? { epoch: epoch!, cursor } : undefined,
+        ))
+        upstream.once('unexpected-response', release)
+        upstream.once('error', () => {
+          if (client.readyState === WebSocket.OPEN) client.close(1011, 'Unable to connect to Hermes')
+          release()
+        })
+        client.once('close', () => {
+          if (upstream.readyState === WebSocket.CONNECTING) upstream.terminate()
+          release()
+        })
+      })
+      return
+    }
     const pairedMatch = url.pathname.match(
       /^\/node\/([0-9a-f-]{36})\/api\/(ws|plugins\/yaoyao\/v1\/events)$/,
     )

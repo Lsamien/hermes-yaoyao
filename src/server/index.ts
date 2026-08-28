@@ -7,12 +7,15 @@ import { isLoopbackHost, loadServerConfig } from './config.js'
 import { DashboardSupervisor } from './dashboardSupervisor.js'
 
 const config = loadServerConfig()
-const dashboardSupervisor = config.superviseDashboard
-  ? new DashboardSupervisor({ allowLan: !isLoopbackHost(config.host) })
-  : undefined
 const runtime = createApplication({
   config,
 })
+const dashboardSupervisor = config.superviseDashboard
+  ? new DashboardSupervisor({
+      allowLan: !isLoopbackHost(config.host),
+      credentials: runtime.auth.upstreamCredentials(),
+    })
+  : undefined
 const nodeRuntime = createNodeServer(runtime)
 let closeFrontend = async (): Promise<void> => undefined
 

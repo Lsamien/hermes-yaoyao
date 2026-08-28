@@ -34,16 +34,18 @@ export HERMES_YAOYAO_ALLOW_INSECURE_LAN=1
 
 ## 受管 9119 的默认认证与持续监督
 
-夭夭 Web LaunchAgent 默认启用 `HERMES_YAOYAO_SUPERVISE_DASHBOARD=1`。它每 5 秒检查本机 `9119`；端口未监听时会启动 Dashboard。首次发现 `dashboard.basic_auth` 未配置时，它会写入下列默认认证并重启 Dashboard 载入配置：
+夭夭 Web LaunchAgent 默认启用 `HERMES_YAOYAO_SUPERVISE_DASHBOARD=1`。它每 5 秒检查本机 `9119`；端口未监听时会启动 Dashboard。首次发现 `dashboard.basic_auth` 未配置时，它会写入 8800 生成的服务账号并重启 Dashboard 载入配置：
 
 | 项目 | 默认值 |
 | --- | --- |
-| 用户名 | `admin` |
-| 密码 | `admin` |
+| 用户名 | `yaoyao-service` |
+| 密码 | 8800 首次安装随机生成并加密保存 |
 | 密码存储 | `password_hash` scrypt 哈希，不保存明文 |
 | 会话签名密钥 | 首次配置时随机生成 |
 
-`admin/admin` 是发布要求的已知默认凭据，不适合长期使用。首次登录后，管理员必须用 Hermes 配置替换该账号或密码，并重启 8800 服务，让监督器加载新的认证配置。监督器只会填补缺失的用户名、密码和会话签名密钥，绝不会覆盖已有的用户名、密码哈希、密码或密钥。
+8800 自己的默认管理员仍为 `admin/admin`，首次登录必须修改。它与上述 9119 服务
+账号相互独立。监督器只会填补缺失的 9119 用户名、密码和会话签名密钥，绝不会
+覆盖已有配置；已有或外部 9119 请在 8800“系统管理”中验证并保存服务凭据。
 
 如需在首次登录后替换默认密码，可用下列命令以 scrypt 哈希方式写入配置。不要将新密码放入命令历史、Git 或日志。
 

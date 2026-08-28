@@ -191,6 +191,6 @@ export function applySecurityHeaders(ctx: Koa.Context, tls: boolean, allowedHost
   ctx.set('Referrer-Policy', 'no-referrer')
   ctx.set('X-Content-Type-Options', 'nosniff')
   ctx.set('X-Frame-Options', 'DENY')
-  ctx.set('Permissions-Policy', 'camera=(), geolocation=(), microphone=()')
+  ctx.set('Permissions-Policy', 'camera=(self), geolocation=(), microphone=()')
   if (tls) ctx.set('Strict-Transport-Security', 'max-age=31536000')
 }

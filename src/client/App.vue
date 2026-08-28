@@ -3,6 +3,7 @@ import { computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import LoadingScreen from '@/components/app/LoadingScreen.vue'
 import LoginView from '@/views/LoginView.vue'
+import PasswordChangeView from '@/views/PasswordChangeView.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useGroupsStore } from '@/stores/groups'
@@ -45,5 +46,6 @@ onMounted(() => auth.bootstrap())
 <template>
   <LoadingScreen v-if="auth.status === 'checking'" />
   <LoginView v-else-if="!auth.isAuthenticated" />
+  <PasswordChangeView v-else-if="auth.user?.mustChangePassword" />
   <RouterView v-else />
 </template>

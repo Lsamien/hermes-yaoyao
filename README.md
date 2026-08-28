@@ -2,6 +2,20 @@
 
 夭夭 Web 是一个独立的本地 Web 工作台，通过端口 `8800` 连接 Hermes Dashboard/Gateway `9119`，提供普通聊天、群聊、文件库和产物浏览。通过本项目安装的 LaunchAgent 会持续监督 `9119`：缺失时自动配置 Dashboard 认证并启动它。
 
+## 8800 用户与 iOS
+
+8800 拥有独立于 9119 的用户机制。首次安装会创建管理员 `admin/admin`，首次登录
+必须修改凭据。管理员可在“系统管理”中创建、禁用、删除普通用户和重置临时密码。
+所有 8800 用户共享本机 9119 的 Bots、历史、团队和文件；普通用户不能管理用户、
+节点、插件或系统升级。
+
+iOS 默认连接 `http://主机:8800` 并使用 8800 用户登录；已有 9119 账号继续兼容。
+9119 和 8800 都可管理由 8800 签发配对码的直接子节点，节点不会递归暴露孙节点。
+
+8800 使用单独托管的 9119 服务账号。受管本机首次安装会生成随机服务密码并加密
+保存；外部或 Docker 9119 可在“系统管理”中配置，或设置
+`HERMES_YAOYAO_UPSTREAM_USERNAME` 和 `HERMES_YAOYAO_UPSTREAM_PASSWORD_FILE`。
+
 仓库同时归档了夭夭的 Hermes Dashboard 插件，位于
 [`hermes-plugins/yaoyao/dashboard`](hermes-plugins/yaoyao/dashboard)。Web 工作台和该插件是两个独立部署单元：前者运行在 `8800`，后者由已运行的 Hermes Dashboard 在 `9119` 加载。
 
@@ -175,7 +189,7 @@ npm run dev
 
 | 端口 | 服务 | 默认 | 单独开启局域网 |
 | --- | --- | --- | --- |
-| `9119` | Hermes Dashboard | `127.0.0.1` | 由夭夭 Web 受管服务监督；首次缺失配置时自动创建 `admin/admin` 登录并启动 |
+| `9119` | Hermes Dashboard | `127.0.0.1` | 由夭夭 Web 监督；首次缺失配置时创建随机服务账号并启动 |
 | `8800` | 夭夭 Web | `127.0.0.1` | 显式设置 `HERMES_YAOYAO_HOST=0.0.0.0` 后与 9119 一起开放 |
 
 夭夭 Web 默认上游仍是 `http://127.0.0.1:9119`。受管服务的局域网开关会同时让它监听局域网地址，并让其启动的 Dashboard `9119` 监听局域网地址。
@@ -189,7 +203,11 @@ HERMES_YAOYAO_ALLOW_INSECURE_LAN=1
 
 生产局域网使用建议同时配置 `HERMES_YAOYAO_TLS_CERT` 和 `HERMES_YAOYAO_TLS_KEY`。
 
-受管服务会在 `dashboard.basic_auth` 未配置时创建用户名 `admin`、密码 `admin` 的 scrypt 哈希和随机会话签名 `secret`。这是已知默认凭据，首次登录后必须立即修改。具体步骤见 [Agent 安装手册](docs/agent-install.md#受管-9119-的默认认证与持续监督)。Dashboard 的 `--insecure` 参数不会关闭认证；不要并行安装其他 Dashboard 监督器。
+受管服务会在 `dashboard.basic_auth` 未配置时创建 `yaoyao-service` 和随机密码的
+scrypt 哈希，同时生成会话签名 `secret`；明文服务密码只加密保存在 8800 数据目录。
+8800 本地管理员 `admin/admin` 首次登录强制修改。具体步骤见
+[Agent 安装手册](docs/agent-install.md#受管-9119-的默认认证与持续监督)。
+Dashboard 的 `--insecure` 参数不会关闭认证；不要并行安装其他 Dashboard 监督器。
 
 ## 构建与运行
 

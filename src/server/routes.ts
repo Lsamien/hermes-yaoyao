@@ -6,7 +6,7 @@ import { basename, resolve, sep } from 'node:path'
 import { lookup as mimeLookup } from 'mime-types'
 import { isSupportedGroupProtocolVersion, SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL } from '../shared/types.js'
 import type { ServerConfig } from './config.js'
-import { DEFAULT_YAOYAO_PLUGIN_SOURCE, isLoopbackHost, isLoopbackUpstream } from './config.js'
+import { DEFAULT_YAOYAO_PLUGIN_SOURCE, isLoopbackHost, isLoopbackUpstream, isPrivateHost } from './config.js'
 import { HttpError } from './errors.js'
 import { canonicalEpoch, groupCursor, type RealtimeChannel, RealtimeLeaseStore } from './leases.js'
 import { compareReleaseVersions } from './releases.js'
@@ -28,6 +28,7 @@ import {
 } from './upstream.js'
 import { receiveGroupUploads, uploadMarkdown, UploadStore } from './uploads.js'
 import { SystemUpdateManager, type SystemUpdateStatus } from './updateManager.js'
+import { LocalAuthStore, type LocalUser, UpstreamServiceSession } from './localAuth.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -39,6 +40,8 @@ export interface RouteDependencies {
   pairings: NodePairingStore
   uploads: UploadStore
   updates: SystemUpdateManager
+  auth: LocalAuthStore
+  upstreamSession: UpstreamServiceSession
 }
 
 function body(ctx: Koa.Context): JsonObject {
@@ -332,12 +335,13 @@ function updateFailure(error: unknown): HttpError {
 }
 
 async function withJar<T>(ctx: Koa.Context, run: (jar: CookieJar) => Promise<T>): Promise<T> {
-  const jar = new CookieJar(ctx.get('cookie'))
-  try {
-    return await run(jar)
-  } finally {
-    applyUpstreamCookies(ctx, jar)
+  const service = ctx.state.upstreamSession as UpstreamServiceSession | undefined
+  if (service) {
+    await service.ensure()
+    return run(service.jar)
   }
+  const jar = new CookieJar(ctx.get('cookie'))
+  try { return await run(jar) } finally { applyUpstreamCookies(ctx, jar) }
 }
 
 function json(ctx: Koa.Context, status: number, value: unknown): void {
@@ -357,6 +361,102 @@ function pairingScopes(value: unknown): string[] | undefined {
     throw new HttpError(400, 'scopes must be a string array', 'invalid_scope')
   }
   return value
+}
+
+async function addPairedChildNode(
+  qrPayload: string,
+  nameValue: string | undefined,
+  dependencies: RouteDependencies,
+): Promise<JsonObject> {
+  let deepLink: URL
+  try { deepLink = new URL(qrPayload.trim()) } catch {
+    throw new HttpError(400, '配对码格式无效', 'invalid_pairing_code')
+  }
+  if (deepLink.protocol !== 'yaoyao:' || deepLink.hostname !== 'pair' || deepLink.searchParams.get('v') !== '1') {
+    throw new HttpError(400, '这不是 8800 节点配对码', 'invalid_pairing_code')
+  }
+  const serviceValue = deepLink.searchParams.get('url') ?? ''
+  let serviceURL: URL
+  try { serviceURL = new URL(serviceValue) } catch {
+    throw new HttpError(400, '配对码缺少有效的 8800 地址', 'invalid_pairing_code')
+  }
+  if (!['http:', 'https:'].includes(serviceURL.protocol)
+    || serviceURL.username || serviceURL.password || serviceURL.search || serviceURL.hash
+    || (serviceURL.protocol === 'http:' && !isPrivateHost(serviceURL.hostname))) {
+    throw new HttpError(400, '子节点必须使用可信局域网 HTTP 或 HTTPS', 'invalid_node_url')
+  }
+  const requestJSON = async (url: URL, init?: RequestInit): Promise<JsonObject> => {
+    let response: Response
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      response = await Promise.race([
+        fetch(url, { ...init, redirect: 'error' }),
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error('request timed out')), 20_000)
+          timeout.unref()
+        }),
+      ])
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'connection failed'
+      throw new HttpError(502, `无法连接子 8800 节点：${reason}`, 'child_node_unavailable')
+    } finally {
+      if (timeout) clearTimeout(timeout)
+    }
+    let value: unknown
+    try { value = await response.json() } catch { value = undefined }
+    if (!response.ok || !value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new HttpError(response.status || 502, '子节点拒绝了配对请求', 'child_node_rejected')
+    }
+    return value as JsonObject
+  }
+  const capabilities = await requestJSON(new URL('/api/pair/v1/capabilities', serviceURL))
+  if (capabilities.serviceType !== 'yaoyao-web') {
+    throw new HttpError(409, '子节点必须是 8800 夭夭 Web 服务', 'child_node_must_be_8800')
+  }
+  const pairingId = deepLink.searchParams.get('id') ?? ''
+  const secret = deepLink.searchParams.get('secret') ?? ''
+  const expectedNode = deepLink.searchParams.get('node') ?? ''
+  const expectedFingerprint = deepLink.searchParams.get('fingerprint') ?? ''
+  const claimed = await requestJSON(new URL('/api/pair/v1/claim', serviceURL), {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ pairingId, secret, deviceName: '夭夭 8800 父节点' }),
+  })
+  if (claimed.serviceType !== 'yaoyao-web'
+    || claimed.nodeId !== expectedNode
+    || claimed.fingerprint !== expectedFingerprint
+    || typeof claimed.serverUrl !== 'string'
+    || typeof claimed.token !== 'string') {
+    throw new HttpError(502, '子节点身份与二维码不一致', 'child_node_identity_mismatch')
+  }
+  const nodeURL = new URL(claimed.serverUrl)
+  const profiles = await requestJSON(new URL(`${nodeURL.pathname.replace(/\/$/, '')}/api/profiles`, nodeURL), {
+    headers: { accept: 'application/json', authorization: `Bearer ${claimed.token}` },
+  })
+  const profileItems = normalizedProfiles(profiles).flatMap(entry => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const value = entry as JsonObject
+    const name = typeof value.name === 'string' ? value.name : ''
+    if (!name) return []
+    return [{
+      name,
+      displayName: typeof value.agentName === 'string' ? value.agentName
+        : typeof value.display_name === 'string' ? value.display_name : name,
+      model: typeof value.model === 'string' ? value.model : '',
+    }]
+  })
+  const registration = {
+    nodeId: claimed.nodeId,
+    name: nameValue?.trim() || nodeURL.host,
+    serverUrl: claimed.serverUrl,
+    fingerprint: claimed.fingerprint,
+    accessToken: claimed.token,
+    profiles: profileItems,
+  }
+  const response = await dependencies.upstreamSession.request('/api/plugins/yaoyao/v1/nodes', {
+    method: 'POST', body: registration,
+  })
+  return requireSuccess(response)
 }
 
 function pairedProxyScope(path: string, method: string): NodeScope {
@@ -445,62 +545,61 @@ async function proxyOptionalUnread(
 async function bootstrap(
   ctx: Koa.Context,
   dependencies: RouteDependencies,
-  jar: CookieJar,
   rotateCsrf = false,
 ): Promise<void> {
-  const statusResponse = await dependencies.upstream.request('/api/status', jar)
-  if (statusResponse.status < 200 || statusResponse.status >= 300) {
-    sendUpstreamResponse(ctx, statusResponse, jar)
-    return
-  }
-  const status = parseJson(statusResponse)
-  const required = authRequired(status)
-  const identityResponse = await dependencies.upstream.request('/api/auth/me', jar)
-  if (required && [401, 403].includes(identityResponse.status)) {
+  const user = dependencies.auth.current(ctx)
+  const csrfToken = dependencies.csrf.issue(ctx, rotateCsrf)
+  if (!user) {
     json(ctx, 200, {
-      status: publicStatus(status),
-      authRequired: required,
+      status: { state: 'ready' },
+      authRequired: true,
       authenticated: false,
       profiles: [],
-      csrfToken: dependencies.csrf.issue(ctx, rotateCsrf),
+      csrfToken,
       insecureLan: dependencies.config.insecureLan,
       groupUploadsEnabled: isLoopbackUpstream(dependencies.config.upstream),
+      upstreamReady: false,
+      serverKind: 'yaoyao-web',
     })
     return
   }
-  if (identityResponse.status < 200 || identityResponse.status >= 300) {
-    // An auth-disabled local Gateway may not expose an identity route.
-    if (required) {
-      sendUpstreamResponse(ctx, identityResponse, jar)
-      return
+  let status: JsonObject = { state: user.mustChangePassword ? 'password_change_required' : 'degraded' }
+  let profiles: unknown[] = []
+  let upstreamReady = false
+  let upstreamError: string | undefined
+  if (!user.mustChangePassword) {
+    try {
+      const statusResponse = await dependencies.upstreamSession.request('/api/status')
+      const rawStatus = requireSuccess(statusResponse)
+      status = publicStatus(rawStatus)
+      const profilesResponse = await dependencies.upstreamSession.request('/api/profiles')
+      const pluginProfilesResponse = await dependencies.upstreamSession.request('/api/plugins/yaoyao/profiles')
+      profiles = profilesWithHermesBotNames(
+        normalizedProfiles(requireSuccess(profilesResponse)),
+        pluginProfilesResponse.status >= 200 && pluginProfilesResponse.status < 300
+          ? parseJson(pluginProfilesResponse) : undefined,
+      )
+      upstreamReady = true
+    } catch (error) {
+      upstreamError = error instanceof Error ? error.message : '9119 不可用'
     }
   }
-  const profilesResponse = await dependencies.upstream.request('/api/profiles', jar)
-  if (profilesResponse.status < 200 || profilesResponse.status >= 300) {
-    sendUpstreamResponse(ctx, profilesResponse, jar)
-    return
-  }
-  const identity = identityResponse.status >= 200 && identityResponse.status < 300
-    ? parseJson(identityResponse)
-    : { user_id: 'local', display_name: '本机 Hermes', provider: 'local' }
-  const pluginProfilesResponse = await dependencies.upstream.request('/api/plugins/yaoyao/profiles', jar)
-  const profiles = profilesWithHermesBotNames(
-    normalizedProfiles(parseJson(profilesResponse)),
-    pluginProfilesResponse.status >= 200 && pluginProfilesResponse.status < 300 ? parseJson(pluginProfilesResponse) : undefined,
-  )
   json(ctx, 200, {
-    status: publicStatus(status),
-    authRequired: required,
+    status,
+    authRequired: true,
     authenticated: true,
-    user: identity.user && typeof identity.user === 'object' ? identity.user : identity,
+    user,
     profiles,
-    csrfToken: dependencies.csrf.issue(ctx, rotateCsrf),
+    csrfToken,
     insecureLan: dependencies.config.insecureLan,
     groupUploadsEnabled: isLoopbackUpstream(dependencies.config.upstream),
+    upstreamReady,
+    upstreamError,
+    serverKind: 'yaoyao-web',
   })
 }
 
-async function login(ctx: Koa.Context, dependencies: RouteDependencies, jar: CookieJar): Promise<void> {
+async function login(ctx: Koa.Context, dependencies: RouteDependencies): Promise<void> {
   const request = body(ctx)
   const username = typeof request.username === 'string' ? request.username.trim() : ''
   const password = typeof request.password === 'string' ? request.password : ''
@@ -508,30 +607,8 @@ async function login(ctx: Koa.Context, dependencies: RouteDependencies, jar: Coo
     throw new HttpError(400, 'Username and password are required', 'invalid_credentials')
   }
 
-  const providersResponse = await dependencies.upstream.request('/api/auth/providers', jar)
-  const providersBody = requireSuccess(providersResponse)
-  const providers = Array.isArray(providersBody.providers) ? providersBody.providers : []
-  const passwordProviders = providers.filter((entry): entry is JsonObject =>
-    Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)
-      && (entry as JsonObject).supports_password === true),
-  )
-  const requestedProvider = typeof request.provider === 'string' ? request.provider.trim() : ''
-  const provider = requestedProvider
-    ? passwordProviders.find((entry) => entry.name === requestedProvider)
-    : passwordProviders.find((entry) => String(entry.name).toLowerCase() === 'basic')
-      ?? (passwordProviders.length === 1 ? passwordProviders[0] : undefined)
-  if (!provider || typeof provider.name !== 'string') {
-    throw new HttpError(403, 'Hermes does not offer the requested password provider', 'password_login_unavailable')
-  }
-
-  const response = await dependencies.upstream.request('/auth/password-login', jar, {
-    method: 'POST',
-    body: { provider: provider.name, username, password, next: '' },
-    clientAddress: ctx.req.socket.remoteAddress,
-  })
-  const result = requireSuccess(response)
-  if (result.ok !== true) throw new HttpError(401, 'Hermes rejected the login', 'login_failed')
-  await bootstrap(ctx, dependencies, jar, true)
+  dependencies.auth.login(ctx, username, password)
+  await bootstrap(ctx, dependencies, true)
 }
 
 async function independentPairingCookies(
@@ -759,16 +836,59 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     json(ctx, 200, { ok: true })
   })
 
+  // Hermes Gateway-compatible authentication surface for native clients.
+  // Content requests are still executed through the server-owned 9119 session.
+  router.get('/api/status', (ctx) => {
+    json(ctx, 200, {
+      overall: 'ready',
+      auth_required: true,
+      gateway_running: true,
+      server_kind: 'yaoyao-web',
+      node_transport: '8800',
+    })
+  })
+  router.get('/api/auth/providers', (ctx) => {
+    json(ctx, 200, { providers: [{ name: 'basic', supports_password: true }] })
+  })
+  router.post('/auth/password-login', async (ctx) => {
+    const request = body(ctx)
+    const username = typeof request.username === 'string' ? request.username : ''
+    const password = typeof request.password === 'string' ? request.password : ''
+    const user = dependencies.auth.login(ctx, username, password)
+    json(ctx, 200, { ok: true, must_change_password: user.mustChangePassword, server_kind: 'yaoyao-web' })
+  })
+  router.post('/auth/logout', (ctx) => {
+    dependencies.auth.logout(ctx)
+    json(ctx, 200, { ok: true })
+  })
+  router.get('/api/auth/me', (ctx) => {
+    const user = dependencies.auth.require(ctx, true)
+    json(ctx, 200, {
+      user_id: user.id,
+      display_name: user.username,
+      username: user.username,
+      provider: 'yaoyao-local',
+      role: user.role,
+      must_change_password: user.mustChangePassword,
+      server_kind: 'yaoyao-web',
+    })
+  })
+  router.put('/api/account/credentials', (ctx) => {
+    const request = body(ctx)
+    const currentPassword = typeof request.currentPassword === 'string' ? request.currentPassword : ''
+    const newPassword = typeof request.newPassword === 'string' ? request.newPassword : ''
+    const username = typeof request.username === 'string' ? request.username : undefined
+    const user = dependencies.auth.changeCredentials(ctx, currentPassword, newPassword, username)
+    json(ctx, 200, { user, must_change_password: false, server_kind: 'yaoyao-web' })
+  })
+
   router.post('/api/app/pairings', async (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
     await withJar(ctx, async (jar) => {
       await requireGatewayAuthentication(ctx, dependencies, jar)
       const request = optionalBody(ctx)
-      const cookieHeader = await independentPairingCookies(
-        ctx,
-        dependencies,
-        jar,
-        request,
-      )
+      const cookieHeader = jar.header
+      if (!cookieHeader) throw new HttpError(503, '9119 服务会话尚未就绪', 'upstream_session_missing')
       const pairing = dependencies.pairings.create(
         cookieHeader,
         pairingScopes(request?.scopes),
@@ -783,6 +903,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       deepLink.searchParams.set('fingerprint', pairing.fingerprint)
       json(ctx, 201, {
         protocolVersion: NODE_PAIRING_PROTOCOL_VERSION,
+        serviceType: 'yaoyao-web',
         pairingId: pairing.id,
         nodeId: pairing.nodeID,
         fingerprint: pairing.fingerprint,
@@ -794,6 +915,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   })
 
   router.get('/api/app/pairings/:pairingID', async (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
     await withJar(ctx, async (jar) => {
       await requireGatewayAuthentication(ctx, dependencies, jar)
       json(ctx, 200, dependencies.pairings.status(ctx.params.pairingID))
@@ -801,6 +923,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   })
 
   router.get('/api/app/paired-devices', async (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
     await withJar(ctx, async (jar) => {
       await requireGatewayAuthentication(ctx, dependencies, jar)
       json(ctx, 200, {
@@ -812,6 +935,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   })
 
   router.delete('/api/app/paired-devices/:deviceID', async (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
     await withJar(ctx, async (jar) => {
       await requireGatewayAuthentication(ctx, dependencies, jar)
       try {
@@ -841,6 +965,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     const origin = requestOrigin(ctx, dependencies.config)
     json(ctx, 201, {
       protocolVersion: NODE_PAIRING_PROTOCOL_VERSION,
+      serviceType: 'yaoyao-web',
       nodeId: claimed.nodeID,
       fingerprint: claimed.fingerprint,
       deviceId: claimed.device.id,
@@ -854,6 +979,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   router.get('/api/pair/v1/capabilities', (ctx) => {
     json(ctx, 200, {
       protocolVersion: NODE_PAIRING_PROTOCOL_VERSION,
+      serviceType: 'yaoyao-web',
       nodeId: dependencies.pairings.nodeID,
       fingerprint: dependencies.pairings.fingerprint,
       scopes: [...DEFAULT_NODE_SCOPES],
@@ -1003,21 +1129,55 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   })
 
   router.get('/api/app/bootstrap', async (ctx) => {
-    await withJar(ctx, (jar) => bootstrap(ctx, dependencies, jar))
+    await bootstrap(ctx, dependencies)
   })
   router.post('/api/app/login', async (ctx) => {
-    await withJar(ctx, (jar) => login(ctx, dependencies, jar))
+    await login(ctx, dependencies)
   })
   router.post('/api/app/logout', async (ctx) => {
-    await withJar(ctx, async (jar) => {
-      const response = await dependencies.upstream.request('/auth/logout', jar, { method: 'POST' })
-      const nextCsrf = dependencies.csrf.issue(ctx, true)
-      if (response.status >= 400 && ![401, 403].includes(response.status)) {
-        sendUpstreamResponse(ctx, response, jar)
-      } else {
-        json(ctx, 200, { ok: true, csrfToken: nextCsrf })
-      }
-    })
+    dependencies.auth.logout(ctx)
+    json(ctx, 200, { ok: true, csrfToken: dependencies.csrf.issue(ctx, true) })
+  })
+  router.put('/api/app/account/credentials', async (ctx) => {
+    const request = body(ctx)
+    const currentPassword = typeof request.currentPassword === 'string' ? request.currentPassword : ''
+    const newPassword = typeof request.newPassword === 'string' ? request.newPassword : ''
+    const username = typeof request.username === 'string' ? request.username : undefined
+    const user = dependencies.auth.changeCredentials(ctx, currentPassword, newPassword, username)
+    json(ctx, 200, { user, mustChangePassword: false, csrfToken: dependencies.csrf.issue(ctx, true) })
+  })
+  router.get('/api/app/admin/users', (ctx) => {
+    const admin = dependencies.auth.requireAdmin(ctx)
+    json(ctx, 200, { items: dependencies.auth.list(admin) })
+  })
+  router.post('/api/app/admin/users', (ctx) => {
+    const admin = dependencies.auth.requireAdmin(ctx)
+    const request = body(ctx)
+    const username = typeof request.username === 'string' ? request.username : ''
+    const password = typeof request.password === 'string' ? request.password : ''
+    json(ctx, 201, dependencies.auth.create(admin, username, password))
+  })
+  router.patch('/api/app/admin/users/:userID', (ctx) => {
+    const admin = dependencies.auth.requireAdmin(ctx)
+    const request = body(ctx)
+    json(ctx, 200, dependencies.auth.updateUser(admin, canonicalUUID(ctx.params.userID, 'user ID'), {
+      enabled: typeof request.enabled === 'boolean' ? request.enabled : undefined,
+      password: typeof request.password === 'string' ? request.password : undefined,
+    }))
+  })
+  router.delete('/api/app/admin/users/:userID', (ctx) => {
+    const admin = dependencies.auth.requireAdmin(ctx)
+    dependencies.auth.deleteUser(admin, canonicalUUID(ctx.params.userID, 'user ID'))
+    json(ctx, 200, { ok: true })
+  })
+  router.put('/api/app/admin/upstream-credentials', async (ctx) => {
+    const admin = dependencies.auth.requireAdmin(ctx)
+    const request = body(ctx)
+    const username = typeof request.username === 'string' ? request.username : ''
+    const password = typeof request.password === 'string' ? request.password : ''
+    await dependencies.upstreamSession.verify({ username, password })
+    dependencies.auth.setUpstreamCredentials(admin, { username, password })
+    json(ctx, 200, { ok: true })
   })
   router.get('/api/app/system/update/status', async (ctx) => {
     await withJar(ctx, async (jar) => {
@@ -1279,6 +1439,19 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       method: 'POST', requestBody: body(ctx),
     })
   })
+  router.post('/api/app/groups/nodes/pair', async (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
+    const request = body(ctx)
+    const qrPayload = typeof request.qrPayload === 'string' ? request.qrPayload : ''
+    if (!qrPayload || qrPayload.length > 4_096) {
+      throw new HttpError(400, '请粘贴有效的 8800 配对码', 'invalid_pairing_code')
+    }
+    json(ctx, 201, await addPairedChildNode(
+      qrPayload,
+      typeof request.name === 'string' ? request.name : undefined,
+      dependencies,
+    ))
+  })
   router.delete('/api/app/groups/nodes/:nodeID', async (ctx) => {
     const nodeID = canonicalUUID(ctx.params.nodeID, 'node ID')
     await proxy(
@@ -1458,6 +1631,24 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       }
     })
   }
+
+  router.all('/api/*gatewayPath', async (ctx) => {
+    if (ctx.path.startsWith('/api/app/') || ctx.path.startsWith('/api/pair/')) {
+      throw new HttpError(404, 'Route not found', 'not_found')
+    }
+    dependencies.auth.require(ctx, ctx.path === '/api/profiles')
+    const raw = Array.isArray(ctx.params.gatewayPath)
+      ? ctx.params.gatewayPath.join('/')
+      : ctx.params.gatewayPath
+    const upstreamPath = pairedProxyPath(raw)
+    const response = await dependencies.upstreamSession.request(upstreamPath, {
+      method: ctx.method,
+      search: new URLSearchParams(ctx.querystring),
+      body: ['GET', 'HEAD'].includes(ctx.method) ? undefined : optionalBody(ctx),
+      clientAddress: ctx.req.socket.remoteAddress,
+    })
+    sendUpstreamResponse(ctx, response, dependencies.upstreamSession.jar)
+  })
 
   return router
 }

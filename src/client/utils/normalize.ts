@@ -69,6 +69,8 @@ export function normalizeUser(value: unknown): CurrentUser {
     email: string(source.email) || undefined,
     provider: string(source.provider) || undefined,
     role: string(source.role) || undefined,
+    enabled: source.enabled === undefined ? undefined : bool(source.enabled),
+    mustChangePassword: bool(pick(source, 'mustChangePassword', 'must_change_password')),
   }
 }
 

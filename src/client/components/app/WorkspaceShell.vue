@@ -7,6 +7,8 @@ import AppIcon from '@/components/common/AppIcon.vue'
 import BrandMark from '@/components/common/BrandMark.vue'
 import NodePairingDialog from '@/components/app/NodePairingDialog.vue'
 import SystemUpdateDialog from '@/components/app/SystemUpdateDialog.vue'
+import SystemManagementDialog from '@/components/app/SystemManagementDialog.vue'
+import AccountSecurityDialog from '@/components/app/AccountSecurityDialog.vue'
 import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 
 type NavItem = {
@@ -33,6 +35,9 @@ const props = withDefaults(defineProps<{
   sidebarFocusMode?: boolean
   inspectorOpen?: boolean
   inspectorCloseLabel?: string
+  isAdmin?: boolean
+  upstreamReady?: boolean
+  upstreamError?: string
 }>(), {
   userName: '',
   pairingUserName: '',
@@ -46,6 +51,9 @@ const props = withDefaults(defineProps<{
   sidebarFocusMode: false,
   inspectorOpen: false,
   inspectorCloseLabel: '关闭预览',
+  isAdmin: false,
+  upstreamReady: false,
+  upstreamError: '',
 })
 
 const emit = defineEmits<{
@@ -64,6 +72,8 @@ const sidebarCollapsed = ref(false)
 const sidebarSearchOpen = ref(false)
 const nodePairingOpen = ref(false)
 const systemUpdateOpen = ref(false)
+const systemManagementOpen = ref(false)
+const accountSecurityOpen = ref(false)
 const desktopSidebarContext = ref<HTMLElement | null>(null)
 const mobileSidebarContext = ref<HTMLElement | null>(null)
 
@@ -272,7 +282,7 @@ onBeforeUnmount(() => {
           <button class="sidebar-account__utility" type="button" :title="theme === 'dark' ? '切换浅色主题' : '切换深色主题'" @click="emit('toggleTheme')">
             <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="17" />
           </button>
-          <button class="sidebar-account__utility" type="button" title="手机与节点" aria-label="手机与节点" @click="nodePairingOpen = true">
+          <button v-if="isAdmin" class="sidebar-account__utility" type="button" title="手机与节点" aria-label="手机与节点" @click="nodePairingOpen = true">
             <AppIcon name="users" :size="17" />
           </button>
           <Transition name="menu-fade">
@@ -289,7 +299,9 @@ onBeforeUnmount(() => {
                 <AppIcon v-if="profile.name === activeProfile?.name" name="check" :size="15" />
               </button>
               <button class="profile-menu__edit" type="button" :disabled="!activeProfile" @click="profileMenuOpen = false; emit('editProfile')"><AppIcon name="settings" :size="15" /><strong>编辑当前 Agent</strong></button>
-              <button class="profile-menu__update" type="button" @click="profileMenuOpen = false; systemUpdateOpen = true"><AppIcon name="download" :size="15" /><strong>系统更新</strong></button>
+              <button class="profile-menu__edit" type="button" @click="profileMenuOpen = false; accountSecurityOpen = true"><AppIcon name="settings" :size="15" /><strong>账号安全</strong></button>
+              <button v-if="isAdmin" class="profile-menu__edit" type="button" @click="profileMenuOpen = false; systemManagementOpen = true"><AppIcon name="settings" :size="15" /><strong>系统管理</strong></button>
+              <button v-if="isAdmin" class="profile-menu__update" type="button" @click="profileMenuOpen = false; systemUpdateOpen = true"><AppIcon name="download" :size="15" /><strong>系统更新</strong></button>
               <button class="profile-menu__logout" type="button" @click="profileMenuOpen = false; emit('logout')">
                 <AppIcon name="logout" :size="15" /><strong>退出登录</strong>
               </button>
@@ -383,7 +395,7 @@ onBeforeUnmount(() => {
           <button class="sidebar-account__utility" type="button" :title="theme === 'dark' ? '切换浅色主题' : '切换深色主题'" @click="emit('toggleTheme')">
             <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="17" />
           </button>
-          <button class="sidebar-account__utility" type="button" title="手机与节点" aria-label="手机与节点" @click="nodePairingOpen = true; mobileDrawerOpen = false">
+          <button v-if="isAdmin" class="sidebar-account__utility" type="button" title="手机与节点" aria-label="手机与节点" @click="nodePairingOpen = true; mobileDrawerOpen = false">
             <AppIcon name="users" :size="17" />
           </button>
           <Transition name="menu-fade">
@@ -400,7 +412,9 @@ onBeforeUnmount(() => {
                 <AppIcon v-if="profile.name === activeProfile?.name" name="check" :size="15" />
               </button>
               <button class="profile-menu__edit" type="button" :disabled="!activeProfile" @click="profileMenuOpen = false; emit('editProfile')"><AppIcon name="settings" :size="15" /><strong>编辑当前 Agent</strong></button>
-              <button class="profile-menu__update" type="button" @click="profileMenuOpen = false; systemUpdateOpen = true; mobileDrawerOpen = false"><AppIcon name="download" :size="15" /><strong>系统更新</strong></button>
+              <button class="profile-menu__edit" type="button" @click="profileMenuOpen = false; accountSecurityOpen = true; mobileDrawerOpen = false"><AppIcon name="settings" :size="15" /><strong>账号安全</strong></button>
+              <button v-if="isAdmin" class="profile-menu__edit" type="button" @click="profileMenuOpen = false; systemManagementOpen = true; mobileDrawerOpen = false"><AppIcon name="settings" :size="15" /><strong>系统管理</strong></button>
+              <button v-if="isAdmin" class="profile-menu__update" type="button" @click="profileMenuOpen = false; systemUpdateOpen = true; mobileDrawerOpen = false"><AppIcon name="download" :size="15" /><strong>系统更新</strong></button>
               <button class="profile-menu__logout" type="button" @click="profileMenuOpen = false; emit('logout')">
                 <AppIcon name="logout" :size="15" /><strong>退出登录</strong>
               </button>
@@ -427,6 +441,8 @@ onBeforeUnmount(() => {
 
     <NodePairingDialog :open="nodePairingOpen" :insecure-transport="insecureTransport" :user-name="pairingUserName || userName" @close="nodePairingOpen = false" />
     <SystemUpdateDialog :open="systemUpdateOpen" @close="systemUpdateOpen = false" />
+    <SystemManagementDialog :open="systemManagementOpen" :upstream-ready="upstreamReady" :upstream-error="upstreamError" @close="systemManagementOpen = false" />
+    <AccountSecurityDialog :open="accountSecurityOpen" @close="accountSecurityOpen = false" />
   </div>
 </template>
 

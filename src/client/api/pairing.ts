@@ -34,12 +34,16 @@ export interface PairedDevicesResponse {
 
 export async function createPairing(
   scopes: NodeScope[],
-  username: string,
-  password: string,
 ): Promise<PairingSession> {
   return apiRequest<PairingSession>('/api/app/pairings', {
     method: 'POST',
-    body: { scopes, username, password } as unknown as JsonValue,
+    body: { scopes } as unknown as JsonValue,
+  })
+}
+
+export async function pairChildNode(qrPayload: string, name?: string): Promise<void> {
+  await apiRequest('/api/app/groups/nodes/pair', {
+    method: 'POST', body: { qrPayload, name: name || '' } as unknown as JsonValue,
   })
 }
 

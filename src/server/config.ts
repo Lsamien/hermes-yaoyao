@@ -1,6 +1,7 @@
 import { isIP } from 'node:net'
 import { homedir } from 'node:os'
 import { basename, resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
 
 export interface ServerConfig {
   host: string
@@ -22,6 +23,8 @@ export interface ServerConfig {
   releaseSource?: string
   releaseRoot?: string
   allowRemoteUpdate?: boolean
+  upstreamUsername?: string
+  upstreamPassword?: string
 }
 
 export const DEFAULT_YAOYAO_PLUGIN_SOURCE = 'https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao'
@@ -142,6 +145,13 @@ export function loadServerConfig(
   const releaseSource = parseReleaseSource(env.HERMES_YAOYAO_RELEASE_SOURCE)
   const releaseRoot = resolve(env.HERMES_YAOYAO_RELEASE_ROOT?.trim() || `${homedir()}/.local/share/hermes-yaoyao`)
   const allowRemoteUpdate = flag(env.HERMES_YAOYAO_ALLOW_REMOTE_UPDATE)
+  const upstreamUsername = env.HERMES_YAOYAO_UPSTREAM_USERNAME?.trim() || undefined
+  const upstreamPasswordFile = env.HERMES_YAOYAO_UPSTREAM_PASSWORD_FILE?.trim()
+  if (env.HERMES_YAOYAO_UPSTREAM_PASSWORD && upstreamPasswordFile) {
+    throw new Error('Set only one of HERMES_YAOYAO_UPSTREAM_PASSWORD or HERMES_YAOYAO_UPSTREAM_PASSWORD_FILE')
+  }
+  const upstreamPassword = env.HERMES_YAOYAO_UPSTREAM_PASSWORD
+    || (upstreamPasswordFile ? readFileSync(resolve(upstreamPasswordFile), 'utf8').replace(/[\r\n]+$/, '') : undefined)
   const insecureLan = !tlsCert && !isLoopbackHost(host)
   if (production && insecureLan && !allowInsecureLan) {
     throw new Error(
@@ -174,5 +184,7 @@ export function loadServerConfig(
     releaseSource,
     releaseRoot,
     allowRemoteUpdate,
+    upstreamUsername,
+    upstreamPassword,
   }
 }

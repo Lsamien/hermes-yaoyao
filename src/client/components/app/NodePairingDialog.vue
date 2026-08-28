@@ -4,6 +4,7 @@ import QRCode from 'qrcode'
 import AppIcon from '@/components/common/AppIcon.vue'
 import {
   createPairing,
+  pairChildNode,
   pairedDevices,
   pairingStatus,
   revokePairedDevice,
@@ -27,10 +28,17 @@ const devices = ref<PairedDevice[]>([])
 const nodeID = ref('')
 const busy = ref(false)
 const error = ref('')
-const username = ref('')
-const password = ref('')
+const childCode = ref('')
+const childName = ref('')
+const scanVideo = ref<HTMLVideoElement>()
+const scanning = ref(false)
 const now = ref(Date.now())
 let timer: number | undefined
+let scanTimer: number | undefined
+let scanStream: MediaStream | undefined
+
+type BarcodeDetectorLike = { detect(source: ImageBitmapSource): Promise<Array<{ rawValue?: string }>> }
+type BarcodeDetectorConstructor = new (options: { formats: string[] }) => BarcodeDetectorLike
 
 const secondsRemaining = computed(() => pairing.value
   ? Math.max(0, Math.ceil((pairing.value.expiresAt - now.value) / 1_000))
@@ -39,6 +47,38 @@ const secondsRemaining = computed(() => pairing.value
 function stopPolling() {
   if (timer !== undefined) window.clearInterval(timer)
   timer = undefined
+}
+
+function stopScanning() {
+  if (scanTimer !== undefined) window.clearInterval(scanTimer)
+  scanTimer = undefined
+  scanStream?.getTracks().forEach(track => track.stop())
+  scanStream = undefined
+  scanning.value = false
+}
+
+async function startScanning() {
+  const Detector = (window as unknown as { BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector
+  if (!Detector || !navigator.mediaDevices?.getUserMedia) {
+    error.value = '当前浏览器不支持直接扫码，请粘贴配对码。'
+    return
+  }
+  stopScanning(); error.value = ''
+  try {
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+    scanning.value = true
+    await new Promise(resolve => window.setTimeout(resolve, 0))
+    if (scanVideo.value) { scanVideo.value.srcObject = scanStream; await scanVideo.value.play() }
+    const detector = new Detector({ formats: ['qr_code'] })
+    scanTimer = window.setInterval(() => {
+      const video = scanVideo.value
+      if (!video || video.readyState < 2) return
+      void detector.detect(video).then(values => {
+        const payload = values.find(value => value.rawValue?.startsWith('yaoyao://pair'))?.rawValue
+        if (payload) { childCode.value = payload; stopScanning() }
+      }).catch(() => undefined)
+    }, 350)
+  } catch { error.value = '无法使用摄像头，请检查权限或直接粘贴配对码。'; stopScanning() }
 }
 
 async function refreshDevices() {
@@ -74,12 +114,7 @@ async function beginPairing() {
   error.value = ''
   stopPolling()
   try {
-    const created = await createPairing(
-      ALL_SCOPES,
-      username.value.trim(),
-      password.value,
-    )
-    password.value = ''
+    const created = await createPairing(ALL_SCOPES)
     pairing.value = created
     now.value = Date.now()
     qrImage.value = await QRCode.toDataURL(created.qrPayload, {
@@ -91,6 +126,20 @@ async function beginPairing() {
     timer = window.setInterval(() => { void poll() }, 1_000)
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '无法创建配对二维码'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function addChild() {
+  busy.value = true
+  error.value = ''
+  try {
+    await pairChildNode(childCode.value.trim(), childName.value.trim() || undefined)
+    childCode.value = ''
+    childName.value = ''
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '添加子节点失败'
   } finally {
     busy.value = false
   }
@@ -112,12 +161,11 @@ async function revoke(device: PairedDevice) {
 
 watch(() => props.open, open => {
   stopPolling()
+  stopScanning()
   pairing.value = undefined
   qrImage.value = ''
   error.value = ''
-  password.value = ''
   if (open) {
-    username.value = props.userName
     busy.value = true
     void refreshDevices()
       .catch(cause => { error.value = cause instanceof Error ? cause.message : '读取配对设备失败' })
@@ -125,7 +173,7 @@ watch(() => props.open, open => {
   }
 })
 
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => { stopPolling(); stopScanning() })
 </script>
 
 <template>
@@ -142,12 +190,6 @@ onBeforeUnmount(stopPolling)
           <p v-if="insecureTransport" class="pairing-warning"><AppIcon name="alert" :size="15" />当前是局域网 HTTP，二维码免密配对仅适用于可信网络。正式使用请配置 HTTPS/WSS 或 Tailscale。</p>
           <p v-if="error" class="pairing-error">{{ error }}</p>
 
-          <div v-if="!pairing" class="pairing-credentials">
-            <label><span>Hermes 用户名</span><input v-model="username" autocomplete="username" /></label>
-            <label><span>密码</span><input v-model="password" type="password" autocomplete="current-password" @keydown.enter="beginPairing" /></label>
-            <small>密码只用于向 Hermes 创建一份独立的设备会话，不写入二维码，也不会由夭夭 Web 保存。</small>
-          </div>
-
           <section v-if="pairing" class="qr-card">
             <img v-if="qrImage" :src="qrImage" alt="添加此 Hermes 节点的二维码" />
             <strong>用夭夭 iOS 扫描</strong>
@@ -155,7 +197,7 @@ onBeforeUnmount(stopPolling)
             <span v-else>二维码已失效</span>
             <button v-if="!secondsRemaining" class="quiet-button" type="button" @click="beginPairing">重新生成</button>
           </section>
-          <button v-else class="solid-button create-pairing" type="button" :disabled="busy || !username.trim() || !password" @click="beginPairing">
+          <button v-else class="solid-button create-pairing" type="button" :disabled="busy" @click="beginPairing">
             <AppIcon name="users" :size="17" />{{ busy ? '正在准备…' : '生成手机配对二维码' }}
           </button>
 
@@ -166,6 +208,14 @@ onBeforeUnmount(stopPolling)
               <span><b>{{ device.name }}</b><small>{{ device.scopes.includes('history.read') ? 'Bots、历史与团队' : '受限访问' }}</small></span>
               <button type="button" :disabled="busy" @click="revoke(device)">撤销</button>
             </div>
+          </section>
+          <section class="device-section child-section">
+            <div class="device-heading"><strong>添加 8800 子节点</strong><small>只管理直接子节点</small></div>
+            <label><span>节点名称（可选）</span><input v-model="childName" placeholder="例如：办公室 Mac" /></label>
+            <label><span>子节点配对码</span><textarea v-model="childCode" rows="3" placeholder="粘贴子节点生成的 yaoyao://pair…" /></label>
+            <video v-if="scanning" ref="scanVideo" class="scanner-video" muted playsinline />
+            <button class="quiet-button" type="button" @click="scanning ? stopScanning() : startScanning()">{{ scanning ? '停止扫码' : '使用摄像头扫码' }}</button>
+            <button class="solid-button create-pairing" type="button" :disabled="busy || !childCode.trim()" @click="addChild">验证并添加子节点</button>
           </section>
         </section>
       </div>
@@ -184,6 +234,8 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
 .qr-card { display: grid; justify-items: center; gap: 7px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: #fff; color: #191918; }.qr-card img { width: min(296px, 100%); aspect-ratio: 1; }.qr-card strong { font-size: 12px; }.qr-card span { color: #686865; font-size: 10px; }.qr-card .quiet-button { color: #191918; }
 .device-section { margin-top: 19px; padding-top: 15px; border-top: 1px solid var(--line); }.device-heading { display: flex; justify-content: space-between; margin-bottom: 8px; }.device-heading strong { font-size: 11px; }.device-heading small, .device-empty { color: var(--text-muted); font-size: 9px; }.device-empty { margin: 12px 1px; }
 .device-row { display: flex; align-items: center; gap: 12px; min-height: 47px; padding: 6px 2px; border-bottom: 1px solid var(--line); }.device-row span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }.device-row b { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }.device-row small { color: var(--text-muted); font-size: 9px; }.device-row button { border: 0; background: transparent; color: var(--danger); font-size: 10px; cursor: pointer; }
+.child-section { display: grid; gap: 9px; }.child-section label { display: grid; gap: 5px; color: var(--text-secondary); font-size: 10px; }.child-section input,.child-section textarea { padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); color: var(--text-primary); font: inherit; resize: vertical; }
+.scanner-video { width: 100%; max-height: 260px; border-radius: 11px; background: #111; object-fit: cover; }
 .pairing-fade-enter-active, .pairing-fade-leave-active { transition: opacity 140ms ease; }.pairing-fade-enter-active .pairing-dialog, .pairing-fade-leave-active .pairing-dialog { transition: transform 170ms var(--ease-out); }.pairing-fade-enter-from, .pairing-fade-leave-to { opacity: 0; }.pairing-fade-enter-from .pairing-dialog, .pairing-fade-leave-to .pairing-dialog { transform: translateY(8px) scale(.985); }
 @media (max-width: 540px) { .pairing-layer { place-items: end center; padding: 0; }.pairing-dialog { width: 100%; max-height: calc(100vh - 12px); border-radius: 19px 19px 0 0; padding-bottom: max(18px, env(safe-area-inset-bottom)); } }
 </style>

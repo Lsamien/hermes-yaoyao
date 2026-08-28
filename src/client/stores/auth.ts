@@ -18,6 +18,8 @@ export const useAuthStore = defineStore('auth', () => {
   const authRequired = ref(true)
   const insecureLan = ref(false)
   const groupUploadsEnabled = ref(false)
+  const upstreamReady = ref(false)
+  const upstreamError = ref<string>()
 
   const activeProfile = computed(() => profiles.value.find(profile => profile.name === activeProfileName.value)
     ?? profiles.value.find(profile => profile.isDefault)
@@ -29,6 +31,8 @@ export const useAuthStore = defineStore('auth', () => {
     csrfToken.value = response.csrfToken
     insecureLan.value = Boolean(response.insecureLan)
     groupUploadsEnabled.value = Boolean(response.groupUploadsEnabled)
+    upstreamReady.value = Boolean(response.upstreamReady)
+    upstreamError.value = response.upstreamError
     profiles.value = response.profiles
     user.value = response.user ?? (!response.authRequired
       ? { id: 'local', username: '本机 Hermes', role: 'local' }
@@ -108,8 +112,14 @@ export const useAuthStore = defineStore('auth', () => {
     }))
   }
 
+  async function changeCredentials(input: { currentPassword: string; newPassword: string; username?: string }): Promise<void> {
+    user.value = await authApi.changeCredentials(input)
+    await bootstrap()
+  }
+
   return {
     status, user, profiles, activeProfileName, activeProfile, csrfToken, error, authRequired, insecureLan, groupUploadsEnabled,
-    isAuthenticated, bootstrap, login, logout, selectProfile, refreshProfiles, refreshProfileAvatars, expire,
+    upstreamReady, upstreamError, isAuthenticated, bootstrap, login, logout, selectProfile, refreshProfiles, refreshProfileAvatars,
+    changeCredentials, expire,
   }
 })
