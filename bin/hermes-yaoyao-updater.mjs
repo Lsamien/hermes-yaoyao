@@ -158,11 +158,21 @@ function serviceEnvironment(serviceRoot, plan) {
   }
 }
 
-function startService(serviceRoot, plan, stableRoot = true) {
-  const cli = join(serviceRoot, 'bin', 'hermes-yaoyao.mjs')
-  if (!existsSync(cli)) fail(`服务入口不存在：${cli}`)
+export function serviceInstallInvocation(
+  serviceRoot,
+  plan,
+  stableRoot = true,
+  lifecycleRoot = serviceRoot,
+) {
+  const cli = join(lifecycleRoot, 'bin', 'hermes-yaoyao.mjs')
   const env = serviceEnvironment(stableRoot ? join(plan.releaseRoot, 'current') : serviceRoot, plan)
   if (!stableRoot) delete env.HERMES_YAOYAO_SERVICE_ROOT
+  return { cli, env }
+}
+
+function startService(serviceRoot, plan, stableRoot = true, lifecycleRoot = serviceRoot) {
+  const { cli, env } = serviceInstallInvocation(serviceRoot, plan, stableRoot, lifecycleRoot)
+  if (!existsSync(cli)) fail(`服务入口不存在：${cli}`)
   run(process.execPath, [cli, 'service', 'install'], { env, timeout: 30_000 })
 }
 
@@ -254,10 +264,10 @@ async function runUpdate(jobPath, job) {
         stopService()
         if (previousCurrentTarget) {
           switchCurrent(plan.releaseRoot, previousCurrentTarget, `${id}-rollback`)
-          startService(join(plan.releaseRoot, 'current'), plan, true)
+          startService(join(plan.releaseRoot, 'current'), plan, true, finalRoot)
         } else {
           removeCurrent(plan.releaseRoot)
-          startService(plan.previousServiceRoot, plan, false)
+          startService(plan.previousServiceRoot, plan, false, finalRoot)
         }
         await verifyRuntime()
         updateJob(jobPath, { state: 'failed', message: '升级失败，已自动恢复上一版本', error: message })
@@ -276,14 +286,16 @@ async function runRollback(jobPath, job) {
   const recordPath = join(dirname(jobPath), 'last-success.json')
   if (!existsSync(recordPath)) fail('没有可回滚的上一版本')
   const record = readJSON(recordPath)
+  const lifecycleRoot = currentTarget(plan.releaseRoot)
+  if (!lifecycleRoot) fail('当前发布版本不可用，无法安全执行回滚')
   updateJob(jobPath, { state: 'rolling_back', message: '正在恢复上一版本' })
   stopService()
   if (record.previousCurrentTarget) {
     switchCurrent(plan.releaseRoot, record.previousCurrentTarget, id)
-    startService(join(plan.releaseRoot, 'current'), plan, true)
+    startService(join(plan.releaseRoot, 'current'), plan, true, lifecycleRoot)
   } else {
     removeCurrent(plan.releaseRoot)
-    startService(record.previousServiceRoot, plan, false)
+    startService(record.previousServiceRoot, plan, false, lifecycleRoot)
   }
   await verifyRuntime()
   rmSync(recordPath, { force: true })

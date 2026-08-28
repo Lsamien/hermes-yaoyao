@@ -2,7 +2,13 @@ import { lstatSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { currentTarget, formatCommandFailure, switchCurrent, validateManifest } from '../bin/hermes-yaoyao-updater.mjs'
+import {
+  currentTarget,
+  formatCommandFailure,
+  serviceInstallInvocation,
+  switchCurrent,
+  validateManifest,
+} from '../bin/hermes-yaoyao-updater.mjs'
 
 const roots: string[] = []
 afterEach(() => {
@@ -46,6 +52,31 @@ describe('standalone updater primitives', () => {
     expect(message).toContain('vue-tsc: command not found')
     expect(message).not.toContain('secret')
     expect(message).not.toContain('\u001B')
+  })
+
+  it('uses the new lifecycle code while starting a rolled-back release', () => {
+    const releaseRoot = '/Users/test/.local/share/hermes-yaoyao'
+    const oldRelease = join(releaseRoot, 'releases', '0.2.11-old')
+    const newRelease = join(releaseRoot, 'releases', '0.2.12-new')
+    const invocation = serviceInstallInvocation(
+      oldRelease,
+      { releaseRoot, source: 'https://example.test/hermes-yaoyao.git' },
+      true,
+      newRelease,
+    )
+
+    expect(invocation.cli).toBe(join(newRelease, 'bin', 'hermes-yaoyao.mjs'))
+    expect(invocation.env.HERMES_YAOYAO_SERVICE_ROOT).toBe(join(releaseRoot, 'current'))
+    expect(invocation.env.HERMES_YAOYAO_RELEASE_SOURCE).toBe('https://example.test/hermes-yaoyao.git')
+
+    const sourceRollback = serviceInstallInvocation(
+      oldRelease,
+      { releaseRoot, source: 'https://example.test/hermes-yaoyao.git' },
+      false,
+      newRelease,
+    )
+    expect(sourceRollback.cli).toBe(join(newRelease, 'bin', 'hermes-yaoyao.mjs'))
+    expect(sourceRollback.env.HERMES_YAOYAO_SERVICE_ROOT).toBeUndefined()
   })
 
 })

@@ -65,6 +65,7 @@ describe('hermes-yaoyao LaunchAgent plist', () => {
     })).resolves.toBe('')
     expect(elapsedMs).toBeGreaterThanOrEqual(5_000)
     expect(run).toHaveBeenCalledTimes(6)
+    expect(wait.mock.calls.map(([waitMs]) => waitMs)).toEqual([250, 500, 1_000, 2_000, 2_000])
   })
 
   it('stops retrying a transient launchctl error at the deadline', async () => {
