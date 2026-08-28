@@ -99,6 +99,23 @@ describe('DashboardSupervisor', () => {
     expect(value.launches).toEqual([['dashboard', '--host', '0.0.0.0', '--no-open']])
   })
 
+  it('keeps an authenticated dashboard running when it already listens on the LAN', async () => {
+    const value = supervisor({
+      running: true,
+      runningHost: '0.0.0.0',
+      allowLan: true,
+      values: {
+        'dashboard.basic_auth.username': 'operator',
+        'dashboard.basic_auth.password_hash': 'scrypt$existing',
+        'dashboard.basic_auth.secret': 'configured-secret',
+      },
+    })
+    await value.instance.checkNow()
+
+    expect(value.calls).not.toContainEqual(['dashboard', '--stop'])
+    expect(value.launches).toEqual([])
+  })
+
   it('moves an authenticated LAN dashboard back to loopback when unmanaged LAN is requested', async () => {
     const value = supervisor({
       running: true,
