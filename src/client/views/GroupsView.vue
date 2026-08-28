@@ -155,12 +155,18 @@ const messages = computed(() => groups.messages.map(message => groupMessageToUi(
 const conversationMediaItems = computed(() => mediaItemsFromMessages(messages.value))
 const lightboxMedia = computed(() => conversationMediaItems.value.map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })).filter(item => item.url))
 const agents = computed(() => displayAgents.value.map(agentToUi))
-const agentAvatars = computed(() => Object.fromEntries(auth.profiles.flatMap(profile =>
-  profile.agentAvatar ? [[profile.name, profile.agentAvatar] as const] : []
-)))
-const agentAvatarsByName = computed(() => Object.fromEntries(auth.profiles.flatMap(profile =>
-  profile.agentAvatar ? [[profile.agentName || profile.displayName || profile.name, profile.agentAvatar] as const] : []
-)))
+const agentAvatars = computed(() => Object.fromEntries([
+  ...auth.profiles.flatMap(profile =>
+    profile.agentAvatar ? [[profile.name, profile.agentAvatar] as const] : []),
+  ...groups.nodes.flatMap(node => node.profiles.flatMap(profile =>
+    profile.avatar ? [[`node:${node.nodeId}:${profile.name}`, profile.avatar] as const] : [])),
+]))
+const agentAvatarsByName = computed(() => Object.fromEntries([
+  ...auth.profiles.flatMap(profile =>
+    profile.agentAvatar ? [[profile.agentName || profile.displayName || profile.name, profile.agentAvatar] as const] : []),
+  ...groups.nodes.flatMap(node => node.profiles.flatMap(profile =>
+    profile.avatar ? [[profile.displayName || profile.name, profile.avatar] as const] : [])),
+]))
 function serverAddress(value: string): string {
   try { return new URL(value).host }
   catch { return value.replace(/^https?:\/\//i, '').replace(/\/.*$/, '') }
@@ -188,6 +194,7 @@ const profiles = computed<GroupProfileOption[]>(() => [
     displayName: profile.displayName || profile.name,
     nodeId: node.nodeId,
     nodeLabel: node.name,
+    avatar: profile.avatar,
   }))),
 ])
 const availableProfiles = computed(() => profiles.value.filter(profile => !groups.agents.some(agent =>
@@ -712,7 +719,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         <template #header-actions>
           <div class="group-header-actions">
             <span v-if="hostAgent" class="group-host-chip" :title="`用户未明确 @ 时由管理员 ${hostAgent.displayName || hostAgent.profile} 负责回应`">管理员 {{ hostAgent.displayName || hostAgent.profile }}</span>
-            <div class="group-avatars" aria-label="团队成员"><AgentAvatar v-for="agent in agents.slice(0, 4)" :key="agent.id" :name="agent.name" :avatar="agent.nodeId === 'local' ? agentAvatars[agent.profile || ''] || '' : ''" :size="24" :title="agent.isHost ? `${agent.name} · 管理员` : agent.name" /><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
+            <div class="group-avatars" aria-label="团队成员"><AgentAvatar v-for="agent in agents.slice(0, 4)" :key="agent.id" :name="agent.name" :avatar="agentAvatars[agent.nodeId === 'local' ? agent.profile || '' : `node:${agent.nodeId}:${agent.profile}`] || ''" :size="24" :title="agent.isHost ? `${agent.name} · 管理员` : agent.name" /><em v-if="agents.length > 4">+{{ agents.length - 4 }}</em></div>
             <button class="icon-button" type="button" title="管理团队" aria-label="管理团队" :disabled="!groups.selectedRoom" @click="openSelectedRoomManager"><AppIcon name="dots" /></button>
           </div>
         </template>

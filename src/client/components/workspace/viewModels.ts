@@ -238,6 +238,9 @@ export function groupMessageToUi(message: GroupMessage, agents: GroupAgent[] = [
   const sender = message.senderKind === 'agent'
     ? agents.find(agent => agent.id === message.senderId)
     : undefined
+  const content = sender && sender.nodeId !== 'local'
+    ? rewriteRemoteNodeFiles(message.content, sender.nodeId)
+    : message.content
   return {
     id: message.id,
     role: message.senderKind === 'human' ? 'user' : message.senderKind === 'agent' ? 'assistant' : 'system',
@@ -246,8 +249,12 @@ export function groupMessageToUi(message: GroupMessage, agents: GroupAgent[] = [
     // Only local agents share this Web client's Desktop Bots identity map.
     // Remote nodes keep their own identity and intentionally do not collide by
     // profile slug with a local agent.
-    profile: sender?.nodeId === 'local' ? sender.profile : undefined,
-    content: message.content,
+    profile: sender
+      ? sender.nodeId === 'local'
+        ? sender.profile
+        : `node:${sender.nodeId}:${sender.profile}`
+      : undefined,
+    content,
     reasoning: message.reasoning,
     createdAt: message.createdAt < 10_000_000_000 ? message.createdAt * 1000 : message.createdAt,
     status: message.status === 'completed' ? 'settled' : message.status === 'queued' ? 'pending' : message.status === 'streaming' ? 'streaming' : message.status === 'failed' ? 'failed' : message.status === 'unknown' ? 'unknown-receipt' : 'settled',
@@ -255,6 +262,16 @@ export function groupMessageToUi(message: GroupMessage, agents: GroupAgent[] = [
     tools,
     metadata,
   }
+}
+
+export function rewriteRemoteNodeFiles(content: string, nodeId: string): string {
+  if (!/^[0-9a-f-]{36}$/i.test(nodeId)) return content
+  return content.replace(
+    /(!?\[[^\]]*\]\()<?(?:file:\/\/)?(\/(?:Users|private|var|tmp)\/[^)>\n]+)>?(\))/g,
+    (_match, prefix: string, path: string, suffix: string) => (
+      `${prefix}/api/plugins/yaoyao/v1/nodes/${encodeURIComponent(nodeId)}/files?path=${encodeURIComponent(path)}${suffix}`
+    ),
+  )
 }
 
 export function groupInteraction(interaction?: GroupInteraction): UiInteraction | null {

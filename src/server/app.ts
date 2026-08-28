@@ -12,6 +12,7 @@ import { RealtimeLeaseStore } from './leases.js'
 import { NodePairingStore } from './pairing.js'
 import { LocalAuthStore, UpstreamServiceSession } from './localAuth.js'
 import { AccountLoginPairingStore } from './accountPairing.js'
+import { UpstreamProfileIdentityService } from './profileIdentities.js'
 import { createApiRouter } from './routes.js'
 import {
   applySecurityHeaders,
@@ -35,6 +36,7 @@ export interface ApplicationOptions {
   auth?: LocalAuthStore
   upstreamSession?: UpstreamServiceSession
   accountPairings?: AccountLoginPairingStore
+  profileIdentities?: UpstreamProfileIdentityService
 }
 
 export interface ApplicationRuntime {
@@ -49,6 +51,7 @@ export interface ApplicationRuntime {
   auth: LocalAuthStore
   upstreamSession: UpstreamServiceSession
   accountPairings: AccountLoginPairingStore
+  profileIdentities: UpstreamProfileIdentityService
   close(): void
 }
 
@@ -101,6 +104,8 @@ export function createApplication(options: ApplicationOptions = {}): Application
     () => auth.upstreamCredentials(configuredUpstreamCredentials),
   )
   const accountPairings = options.accountPairings ?? new AccountLoginPairingStore()
+  const profileIdentities = options.profileIdentities
+    ?? new UpstreamProfileIdentityService(config, upstreamSession)
   try {
     uploads.cleanupUncommitted()
   } catch {
@@ -213,6 +218,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     auth,
     upstreamSession,
     accountPairings,
+    profileIdentities,
   })
   app.use(router.routes())
   app.use(router.allowedMethods({ throw: false }))
@@ -238,6 +244,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     auth,
     upstreamSession,
     accountPairings,
+    profileIdentities,
     close: () => uploads.close(),
   }
 }

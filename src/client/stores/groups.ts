@@ -7,7 +7,7 @@ import type {
 import {
   addGroupAgent, approveGroupInteraction as approveApi, archiveGroupRoom as archiveApi, archiveGroupTopic as archiveTopicApi,
   clarifyGroupInteraction as clarifyApi, createGroupRoom as createApi, getGroupCapabilities,
-  getGroupMessages, getGroupNodes, getGroupRoom, getGroupRooms, getGroupTopics, getPinnedGroupTopics, interruptGroupAgent as interruptApi, markGroupTopicRead,
+  getGroupMessages, getGroupNodes, getGroupRoom, getGroupRooms, getGroupTopics, getPinnedGroupTopics, interruptGroupAgent as interruptApi, markGroupTopicRead, refreshGroupNodeIdentities,
   removeGroupAgent as removeAgentApi, restoreGroupRoom as restoreRoomApi, restoreGroupTopic as restoreTopicApi, sendGroupMessage as sendApi, updateGroupAgent as updateAgentApi,
   updateGroupRoom as updateRoomApi, updateGroupTopic as updateTopicApi, uploadGroupFiles, type AgentSeed,
 } from '@/api/groups'
@@ -145,6 +145,9 @@ export const useGroupsStore = defineStore('groups', () => {
       nodes.value = []
       return
     }
+    if (auth.user?.role === 'admin') {
+      try { await refreshGroupNodeIdentities() } catch { /* Keep last known node roster. */ }
+    }
     nodes.value = await getGroupNodes()
   }
 
@@ -224,9 +227,10 @@ export const useGroupsStore = defineStore('groups', () => {
           throw new Error(`团队协议版本不兼容：支持 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}，服务器返回 v${anchor.protocolVersion || 'unknown'}`)
         }
         const loadedRooms = await loadRooms()
-        nodes.value = anchor.features?.includes('nodeRegistry')
-          ? await getGroupNodes()
-          : []
+        if (anchor.features?.includes('nodeRegistry') && auth.user?.role === 'admin') {
+          try { await refreshGroupNodeIdentities() } catch { /* Older plugins remain readable. */ }
+        }
+        nodes.value = anchor.features?.includes('nodeRegistry') ? await getGroupNodes() : []
         if (expectedGeneration !== generation) return
         await loadPinnedTopics()
         if (expectedGeneration !== generation) return

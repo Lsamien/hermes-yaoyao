@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import threading
 import time
@@ -254,14 +255,30 @@ class PairedNodeRegistry:
             seen.add(name)
             display_name = raw.get("displayName", "")
             model = raw.get("model", "")
+            avatar = raw.get("avatar", "")
+            color = raw.get("color", "")
             if not isinstance(display_name, str) or len(display_name) > 100:
                 raise ValueError("profiles.displayName is invalid")
             if not isinstance(model, str) or len(model) > 4096:
                 raise ValueError("profiles.model is invalid")
+            if not isinstance(avatar, str) or len(avatar) > 2_800_000:
+                raise ValueError("profiles.avatar is invalid")
+            if avatar and not re.fullmatch(
+                r"data:image/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}",
+                avatar,
+                re.IGNORECASE,
+            ):
+                raise ValueError("profiles.avatar is invalid")
+            if not isinstance(color, str) or (
+                color and re.fullmatch(r"#[0-9A-Fa-f]{6}", color) is None
+            ):
+                raise ValueError("profiles.color is invalid")
             result.append({
                 "name": name,
                 "displayName": display_name.strip(),
                 "model": model.strip(),
+                **({"avatar": avatar} if avatar else {}),
+                **({"color": color} if color else {}),
             })
         return result
 

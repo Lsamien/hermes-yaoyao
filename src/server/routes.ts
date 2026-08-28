@@ -30,6 +30,7 @@ import { receiveGroupUploads, uploadMarkdown, UploadStore } from './uploads.js'
 import { SystemUpdateManager, type SystemUpdateStatus } from './updateManager.js'
 import { LocalAuthStore, type LocalUser, UpstreamServiceSession } from './localAuth.js'
 import { AccountLoginPairingStore } from './accountPairing.js'
+import { UpstreamProfileIdentityService } from './profileIdentities.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -44,6 +45,7 @@ export interface RouteDependencies {
   auth: LocalAuthStore
   upstreamSession: UpstreamServiceSession
   accountPairings: AccountLoginPairingStore
+  profileIdentities: UpstreamProfileIdentityService
 }
 
 function body(ctx: Koa.Context): JsonObject {
@@ -437,16 +439,37 @@ async function addPairedChildNode(
   const profiles = await requestJSON(new URL(`${nodeURL.pathname.replace(/\/$/, '')}/api/profiles`, nodeURL), {
     headers: { accept: 'application/json', authorization: `Bearer ${claimed.token}` },
   })
+  let profileIdentities = new Map<string, JsonObject>()
+  try {
+    const identityPayload = await requestJSON(
+      new URL(`${nodeURL.pathname.replace(/\/$/, '')}/api/profile-identities`, nodeURL),
+      { headers: { accept: 'application/json', authorization: `Bearer ${claimed.token}` } },
+    )
+    profileIdentities = new Map(
+      (Array.isArray(identityPayload.profiles) ? identityPayload.profiles : [])
+        .flatMap(value => {
+          if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+          const identity = value as JsonObject
+          return typeof identity.name === 'string' ? [[identity.name, identity] as const] : []
+        }),
+    )
+  } catch {
+    // Older 8800 nodes remain pairable; they simply use their REST names.
+  }
   const profileItems = normalizedProfiles(profiles).flatMap(entry => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
     const value = entry as JsonObject
     const name = typeof value.name === 'string' ? value.name : ''
     if (!name) return []
+    const identity = profileIdentities.get(name)
     return [{
       name,
-      displayName: typeof value.agentName === 'string' ? value.agentName
+      displayName: typeof identity?.displayName === 'string' ? identity.displayName
+        : typeof value.agentName === 'string' ? value.agentName
         : typeof value.display_name === 'string' ? value.display_name : name,
       model: typeof value.model === 'string' ? value.model : '',
+      ...(typeof identity?.avatar === 'string' ? { avatar: identity.avatar } : {}),
+      ...(typeof identity?.color === 'string' ? { color: identity.color } : {}),
     }]
   })
   const registration = {
@@ -832,6 +855,23 @@ function sendLocalMedia(ctx: Koa.Context, path: string): void {
   ctx.body = createReadStream(path, { start, end: boundedEnd })
 }
 
+function pairedLocalMediaPath(config: ServerConfig, rawPath: string): string {
+  if (!rawPath || rawPath.length > 8_192 || rawPath.includes('\u0000')) {
+    throw new HttpError(400, '远程文件路径无效', 'invalid_node_file_path')
+  }
+  let file: string
+  try { file = realpathSync(rawPath) } catch {
+    throw new HttpError(404, '远程文件不存在', 'node_file_not_found')
+  }
+  const roots = [config.mediaRoot, config.attachmentsRoot, config.imagesRoot].flatMap(root => {
+    try { return [realpathSync(root)] } catch { return [] }
+  })
+  if (!roots.some(root => file.startsWith(`${root}${sep}`)) || !statSync(file).isFile()) {
+    throw new HttpError(403, '远程文件不在允许的目录中', 'node_file_forbidden')
+  }
+  return file
+}
+
 export function createApiRouter(dependencies: RouteDependencies): Router {
   const router = new Router()
 
@@ -876,6 +916,10 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       must_change_password: user.mustChangePassword,
       server_kind: 'yaoyao-web',
     })
+  })
+  router.get('/api/profile-identities', async (ctx) => {
+    dependencies.auth.require(ctx, true)
+    json(ctx, 200, { profiles: await dependencies.profileIdentities.load() })
   })
   router.get('/api/profiles', async (ctx) => {
     dependencies.auth.require(ctx, true)
@@ -1060,6 +1104,29 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     json(ctx, 200, { ok: true })
   })
 
+  router.get('/node/:deviceID/api/node-files', (ctx) => {
+    const token = bearerToken(ctx.get('authorization'))
+    dependencies.pairings.authorize(
+      ctx.params.deviceID,
+      token,
+      'history.read',
+    )
+    const value = typeof ctx.query.path === 'string' ? ctx.query.path : ''
+    sendLocalMedia(
+      ctx,
+      pairedLocalMediaPath(dependencies.config, value),
+    )
+  })
+  router.get('/node/:deviceID/api/profile-identities', async (ctx) => {
+    const token = bearerToken(ctx.get('authorization'))
+    dependencies.pairings.authorize(
+      ctx.params.deviceID,
+      token,
+      'agents.read',
+    )
+    json(ctx, 200, { profiles: await dependencies.profileIdentities.load() })
+  })
+
   router.all('/node/:deviceID/api/*nodePath', async (ctx) => {
     const rawPath = Array.isArray(ctx.params.nodePath)
       ? ctx.params.nodePath.join('/')
@@ -1109,7 +1176,8 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
         ? undefined : optionalBody(ctx),
       rawBody,
       headers: requestHeaders,
-      clientAddress: ctx.req.socket.remoteAddress,
+      clientAddress: path === '/api/auth/ws-ticket'
+        ? undefined : ctx.req.socket.remoteAddress,
     })
     dependencies.pairings.updateCookies(ctx.params.deviceID, jar.header)
     sendUpstreamResponse(ctx, response, jar)
@@ -1509,6 +1577,11 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       dependencies,
     ))
   })
+  router.post('/api/app/groups/nodes/refresh-identities', async (ctx) => {
+    await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/nodes/refresh-identities', {
+      method: 'POST', requestBody: {},
+    })
+  })
   router.delete('/api/app/groups/nodes/:nodeID', async (ctx) => {
     const nodeID = canonicalUUID(ctx.params.nodeID, 'node ID')
     await proxy(
@@ -1707,6 +1780,8 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       // phone's address here would make 9119 reject the ticket during Upgrade.
       clientAddress: upstreamPath === '/api/auth/ws-ticket'
         ? undefined : ctx.req.socket.remoteAddress,
+      maxResponseBytes: /\/plugins\/yaoyao\/v1\/nodes\/[0-9a-f-]{36}\/files$/.test(upstreamPath)
+        ? 256 * 1_024 * 1_024 : undefined,
     })
     sendUpstreamResponse(ctx, response, dependencies.upstreamSession.jar)
   })

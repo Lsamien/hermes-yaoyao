@@ -7,6 +7,7 @@ import base64
 import hashlib
 import importlib
 import inspect
+import json
 import logging
 import os
 import re
@@ -19,12 +20,15 @@ from importlib.machinery import ModuleSpec
 from pathlib import Path
 from types import ModuleType
 from typing import Annotated, Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request as URLRequest, build_opener, ProxyHandler
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, File, Query, Request, UploadFile, WebSocket
 from fastapi import Path as APIPath
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
 
 logger = logging.getLogger(__name__)
@@ -1406,11 +1410,120 @@ async def list_paired_nodes() -> dict[str, object]:
     return {"items": nodes}
 
 
+async def refresh_paired_node_identities() -> dict[str, object]:
+    nodes = await _node_registry_call("list")
+    refreshed: list[dict[str, object]] = []
+    failed: list[str] = []
+    opener = build_opener(ProxyHandler({}))
+    for public in nodes:
+        node_id = public.get("nodeId") if isinstance(public, dict) else None
+        if not isinstance(node_id, str):
+            continue
+        try:
+            node = await _node_registry_call("get", node_id)
+            server_url = node.get("serverUrl")
+            access_token = node.get("accessToken")
+            if not isinstance(server_url, str) or not isinstance(access_token, str):
+                raise ValueError("invalid node route")
+            remote_request = URLRequest(
+                server_url.rstrip("/") + "/api/profile-identities",
+                method="GET",
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {access_token}",
+                },
+            )
+
+            def fetch() -> object:
+                with opener.open(remote_request, timeout=35) as response:
+                    raw = response.read(32 * 1024 * 1024 + 1)
+                if len(raw) > 32 * 1024 * 1024:
+                    raise ValueError("identity response too large")
+                return json.loads(raw)
+
+            payload = await asyncio.to_thread(fetch)
+            profiles = payload.get("profiles") if isinstance(payload, dict) else None
+            refreshed.append(await _node_registry_call("register", {
+                "nodeId": node_id,
+                "name": node["name"],
+                "serverUrl": server_url,
+                "fingerprint": node["fingerprint"],
+                "accessToken": access_token,
+                "profiles": profiles,
+            }))
+        except Exception:
+            failed.append(node_id)
+    return {"items": refreshed, "failedNodeIds": failed}
+
+
 async def revoke_paired_node(node_id: UUID) -> dict[str, object]:
     removed = await _node_registry_call("revoke", str(node_id))
     if not removed:
         raise GroupInvalidRequest("Paired Hermes node was not found")
     return {"ok": True}
+
+
+async def download_paired_node_file(
+    node_id: UUID,
+    request: Request,
+    path: Annotated[str, Query(min_length=1, max_length=8192)],
+) -> object:
+    try:
+        node = await _node_registry_call("get", str(node_id))
+    except Exception as error:
+        raise GroupInvalidRequest("Paired Hermes node was not found") from error
+    server_url = node.get("serverUrl")
+    access_token = node.get("accessToken")
+    if not isinstance(server_url, str) or not isinstance(access_token, str):
+        raise GroupInvalidRequest("Paired Hermes node route is invalid")
+    target = server_url.rstrip("/") + "/api/node-files?" + urlencode({"path": path})
+    headers = {
+        "Accept": "application/octet-stream",
+        "Authorization": f"Bearer {access_token}",
+    }
+    requested_range = request.headers.get("range", "")
+    if requested_range and re.fullmatch(r"bytes=\d*-\d*", requested_range):
+        headers["Range"] = requested_range
+    remote_request = URLRequest(target, method="GET", headers=headers)
+    opener = build_opener(ProxyHandler({}))
+    try:
+        response = await asyncio.to_thread(opener.open, remote_request, timeout=60)
+    except HTTPError as error:
+        status = error.code if 400 <= error.code <= 599 else 502
+        error.close()
+        return JSONResponse(
+            status_code=status,
+            content={"error": "Remote node file request was rejected"},
+        )
+    except (URLError, TimeoutError, OSError) as error:
+        raise GroupInvalidRequest("Remote node file is unavailable") from error
+
+    def body_stream():
+        try:
+            while True:
+                chunk = response.read(256 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            response.close()
+
+    outgoing_headers = {"Cache-Control": "private, no-store"}
+    for source, target_name in (
+        ("Content-Length", "Content-Length"),
+        ("Content-Range", "Content-Range"),
+        ("Accept-Ranges", "Accept-Ranges"),
+        ("Content-Disposition", "Content-Disposition"),
+    ):
+        value = response.headers.get(source)
+        if value and "\r" not in value and "\n" not in value:
+            outgoing_headers[target_name] = value
+    return StreamingResponse(
+        body_stream(),
+        status_code=getattr(response, "status", 200),
+        media_type=response.headers.get("Content-Type", "application/octet-stream"),
+        headers=outgoing_headers,
+    )
 
 
 async def node_worker_submit_prompt(
@@ -1599,7 +1712,15 @@ def _build_router() -> APIRouter:
     built.add_api_route("/nodes", register_paired_node, methods=["POST"])
     built.add_api_route("/nodes", list_paired_nodes, methods=["GET"])
     built.add_api_route(
+        "/nodes/refresh-identities",
+        refresh_paired_node_identities,
+        methods=["POST"],
+    )
+    built.add_api_route(
         "/nodes/{node_id}", revoke_paired_node, methods=["DELETE"]
+    )
+    built.add_api_route(
+        "/nodes/{node_id}/files", download_paired_node_file, methods=["GET"]
     )
     built.add_api_route(
         "/node-worker/sessions", node_worker_open_session, methods=["POST"]

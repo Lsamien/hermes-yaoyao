@@ -294,6 +294,8 @@ export interface GroupNodeProfile {
   name: string
   displayName: string
   model: string
+  avatar?: string
+  color?: string
 }
 
 export interface GroupNode {

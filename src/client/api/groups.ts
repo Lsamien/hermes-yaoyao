@@ -32,13 +32,21 @@ export async function getGroupNodes(): Promise<GroupNode[]> {
       profiles: values(node.profiles).flatMap(profileValue => {
         const profile = record(profileValue)
         const name = String(profile.name ?? '')
-        return name ? [{
-          name,
-          displayName: String(profile.displayName ?? profile.display_name ?? name),
-          model: String(profile.model ?? ''),
-        }] : []
+          return name ? [{
+            name,
+            displayName: String(profile.displayName ?? profile.display_name ?? name),
+            model: String(profile.model ?? ''),
+            avatar: typeof profile.avatar === 'string' ? profile.avatar : undefined,
+            color: typeof profile.color === 'string' ? profile.color : undefined,
+          }] : []
       }),
     }]
+  })
+}
+
+export async function refreshGroupNodeIdentities(): Promise<void> {
+  await apiRequest(`${BASE}/nodes/refresh-identities`, {
+    method: 'POST', body: {},
   })
 }
 

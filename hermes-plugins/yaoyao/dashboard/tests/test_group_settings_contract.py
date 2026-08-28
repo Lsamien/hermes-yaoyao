@@ -140,8 +140,19 @@ class GroupSettingsContractTests(unittest.TestCase):
                 "serverUrl": "https://remote.example/node/11111111-1111-4111-8111-111111111111",
                 "fingerprint": "fingerprint",
                 "accessToken": "top-secret-token",
+                "profiles": [{
+                    "name": "default",
+                    "displayName": "远端 Agent",
+                    "model": "provider/model",
+                    "avatar": "data:image/png;base64,AAAA",
+                    "color": "#336699",
+                }],
             })
             self.assertNotIn("accessToken", registered)
+            self.assertEqual(
+                registered["profiles"][0]["avatar"],
+                "data:image/png;base64,AAAA",
+            )
             persisted = (Path(directory) / "paired-group-nodes.json").read_text()
             self.assertNotIn("top-secret-token", persisted)
             self.assertEqual(registry.get(node_id)["accessToken"], "top-secret-token")
