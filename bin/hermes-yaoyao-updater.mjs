@@ -166,7 +166,6 @@ export function serviceInstallInvocation(
 ) {
   const cli = join(lifecycleRoot, 'bin', 'hermes-yaoyao.mjs')
   const env = serviceEnvironment(stableRoot ? join(plan.releaseRoot, 'current') : serviceRoot, plan)
-  if (!stableRoot) delete env.HERMES_YAOYAO_SERVICE_ROOT
   return { cli, env }
 }
 
@@ -174,6 +173,26 @@ function startService(serviceRoot, plan, stableRoot = true, lifecycleRoot = serv
   const { cli, env } = serviceInstallInvocation(serviceRoot, plan, stableRoot, lifecycleRoot)
   if (!existsSync(cli)) fail(`服务入口不存在：${cli}`)
   run(process.execPath, [cli, 'service', 'install'], { env, timeout: 30_000 })
+}
+
+export function restorePreviousService({
+  plan,
+  previousCurrentTarget,
+  previousServiceRoot,
+  lifecycleRoot,
+  token,
+  switchCurrentCommand = switchCurrent,
+  removeCurrentCommand = removeCurrent,
+  startServiceCommand = startService,
+}) {
+  if (!lifecycleRoot) fail('当前发布版本不可用，无法安全执行回滚')
+  if (previousCurrentTarget) {
+    switchCurrentCommand(plan.releaseRoot, previousCurrentTarget, token)
+    startServiceCommand(join(plan.releaseRoot, 'current'), plan, true, lifecycleRoot)
+  } else {
+    removeCurrentCommand(plan.releaseRoot)
+    startServiceCommand(previousServiceRoot, plan, false, lifecycleRoot)
+  }
 }
 
 async function responseJSON(url) {
@@ -262,13 +281,13 @@ async function runUpdate(jobPath, job) {
       updateJob(jobPath, { state: 'rolling_back', message: '升级失败，正在自动恢复上一版本', error: message })
       try {
         stopService()
-        if (previousCurrentTarget) {
-          switchCurrent(plan.releaseRoot, previousCurrentTarget, `${id}-rollback`)
-          startService(join(plan.releaseRoot, 'current'), plan, true, finalRoot)
-        } else {
-          removeCurrent(plan.releaseRoot)
-          startService(plan.previousServiceRoot, plan, false, finalRoot)
-        }
+        restorePreviousService({
+          plan,
+          previousCurrentTarget,
+          previousServiceRoot: plan.previousServiceRoot,
+          lifecycleRoot: finalRoot,
+          token: `${id}-rollback`,
+        })
         await verifyRuntime()
         updateJob(jobPath, { state: 'failed', message: '升级失败，已自动恢复上一版本', error: message })
       } catch (rollbackError) {
@@ -290,13 +309,13 @@ async function runRollback(jobPath, job) {
   if (!lifecycleRoot) fail('当前发布版本不可用，无法安全执行回滚')
   updateJob(jobPath, { state: 'rolling_back', message: '正在恢复上一版本' })
   stopService()
-  if (record.previousCurrentTarget) {
-    switchCurrent(plan.releaseRoot, record.previousCurrentTarget, id)
-    startService(join(plan.releaseRoot, 'current'), plan, true, lifecycleRoot)
-  } else {
-    removeCurrent(plan.releaseRoot)
-    startService(record.previousServiceRoot, plan, false, lifecycleRoot)
-  }
+  restorePreviousService({
+    plan,
+    previousCurrentTarget: record.previousCurrentTarget,
+    previousServiceRoot: record.previousServiceRoot,
+    lifecycleRoot,
+    token: id,
+  })
   await verifyRuntime()
   rmSync(recordPath, { force: true })
   updateJob(jobPath, { state: 'rolled_back', message: '已回滚 Web 服务；插件继续由 9119 管理' })

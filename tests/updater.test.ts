@@ -1,10 +1,12 @@
 import { lstatSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { launchAgentPlist } from '../bin/hermes-yaoyao.mjs'
 import {
   currentTarget,
   formatCommandFailure,
+  restorePreviousService,
   serviceInstallInvocation,
   switchCurrent,
   validateManifest,
@@ -76,7 +78,65 @@ describe('standalone updater primitives', () => {
       newRelease,
     )
     expect(sourceRollback.cli).toBe(join(newRelease, 'bin', 'hermes-yaoyao.mjs'))
-    expect(sourceRollback.env.HERMES_YAOYAO_SERVICE_ROOT).toBeUndefined()
+    expect(sourceRollback.env.HERMES_YAOYAO_SERVICE_ROOT).toBe(oldRelease)
+    const rollbackPlist = launchAgentPlist({ serviceRoot: sourceRollback.env.HERMES_YAOYAO_SERVICE_ROOT })
+    expect(rollbackPlist).toContain(`<string>${join(oldRelease, 'dist-server', 'server', 'index.js')}</string>`)
+    expect(rollbackPlist).toContain(`<key>WorkingDirectory</key><string>${oldRelease}</string>`)
+  })
+
+  it('routes release and source rollbacks through the new lifecycle root', () => {
+    const plan = {
+      releaseRoot: '/Users/test/.local/share/hermes-yaoyao',
+      source: 'https://example.test/hermes-yaoyao.git',
+    }
+    const lifecycleRoot = join(plan.releaseRoot, 'releases', '0.2.12-new')
+    const previousRelease = join(plan.releaseRoot, 'releases', '0.2.11-old')
+    const previousSource = '/Users/test/git/hermes-yaoyao'
+    const switchCurrentCommand = vi.fn()
+    const removeCurrentCommand = vi.fn()
+    const startServiceCommand = vi.fn()
+
+    restorePreviousService({
+      plan,
+      previousCurrentTarget: previousRelease,
+      previousServiceRoot: previousSource,
+      lifecycleRoot,
+      token: 'release-rollback',
+      switchCurrentCommand,
+      removeCurrentCommand,
+      startServiceCommand,
+    })
+    expect(switchCurrentCommand).toHaveBeenCalledWith(plan.releaseRoot, previousRelease, 'release-rollback')
+    expect(removeCurrentCommand).not.toHaveBeenCalled()
+    expect(startServiceCommand).toHaveBeenCalledWith(
+      join(plan.releaseRoot, 'current'), plan, true, lifecycleRoot,
+    )
+
+    switchCurrentCommand.mockClear()
+    startServiceCommand.mockClear()
+    restorePreviousService({
+      plan,
+      previousCurrentTarget: undefined,
+      previousServiceRoot: previousSource,
+      lifecycleRoot,
+      token: 'source-rollback',
+      switchCurrentCommand,
+      removeCurrentCommand,
+      startServiceCommand,
+    })
+    expect(switchCurrentCommand).not.toHaveBeenCalled()
+    expect(removeCurrentCommand).toHaveBeenCalledWith(plan.releaseRoot)
+    expect(startServiceCommand).toHaveBeenCalledWith(previousSource, plan, false, lifecycleRoot)
+  })
+
+  it('refuses rollback without a usable lifecycle root', () => {
+    expect(() => restorePreviousService({
+      plan: { releaseRoot: '/tmp/releases', source: 'https://example.test/repo.git' },
+      previousCurrentTarget: '/tmp/releases/old',
+      previousServiceRoot: '/tmp/source',
+      lifecycleRoot: undefined,
+      token: 'missing-lifecycle',
+    })).toThrow('当前发布版本不可用')
   })
 
 })
