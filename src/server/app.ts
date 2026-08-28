@@ -11,6 +11,7 @@ import { errorMessage, HttpError } from './errors.js'
 import { RealtimeLeaseStore } from './leases.js'
 import { NodePairingStore } from './pairing.js'
 import { LocalAuthStore, UpstreamServiceSession } from './localAuth.js'
+import { AccountLoginPairingStore } from './accountPairing.js'
 import { createApiRouter } from './routes.js'
 import {
   applySecurityHeaders,
@@ -33,6 +34,7 @@ export interface ApplicationOptions {
   updates?: SystemUpdateManager
   auth?: LocalAuthStore
   upstreamSession?: UpstreamServiceSession
+  accountPairings?: AccountLoginPairingStore
 }
 
 export interface ApplicationRuntime {
@@ -46,6 +48,7 @@ export interface ApplicationRuntime {
   updates: SystemUpdateManager
   auth: LocalAuthStore
   upstreamSession: UpstreamServiceSession
+  accountPairings: AccountLoginPairingStore
   close(): void
 }
 
@@ -97,6 +100,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     upstream,
     () => auth.upstreamCredentials(configuredUpstreamCredentials),
   )
+  const accountPairings = options.accountPairings ?? new AccountLoginPairingStore()
   try {
     uploads.cleanupUncommitted()
   } catch {
@@ -166,6 +170,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
       || ctx.path === '/api/auth/providers'
       || ctx.path === '/auth/password-login'
       || ctx.path.startsWith('/api/pair/v1/')
+      || ctx.path.startsWith('/api/account-pair/v1/')
       || ctx.path === '/healthz'
       || ctx.path === '/readyz'
     if (ctx.path.startsWith('/api/app/') && !anonymous) {
@@ -207,6 +212,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     updates,
     auth,
     upstreamSession,
+    accountPairings,
   })
   app.use(router.routes())
   app.use(router.allowedMethods({ throw: false }))
@@ -231,6 +237,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     updates,
     auth,
     upstreamSession,
+    accountPairings,
     close: () => uploads.close(),
   }
 }

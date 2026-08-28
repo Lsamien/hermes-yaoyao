@@ -282,7 +282,7 @@ onBeforeUnmount(() => {
           <button class="sidebar-account__utility" type="button" :title="theme === 'dark' ? '切换浅色主题' : '切换深色主题'" @click="emit('toggleTheme')">
             <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="17" />
           </button>
-          <button v-if="isAdmin" class="sidebar-account__utility" type="button" title="手机与节点" aria-label="手机与节点" @click="nodePairingOpen = true">
+          <button class="sidebar-account__utility" type="button" title="手机登录与节点" aria-label="手机登录与节点" @click="nodePairingOpen = true">
             <AppIcon name="users" :size="17" />
           </button>
           <Transition name="menu-fade">
@@ -395,7 +395,7 @@ onBeforeUnmount(() => {
           <button class="sidebar-account__utility" type="button" :title="theme === 'dark' ? '切换浅色主题' : '切换深色主题'" @click="emit('toggleTheme')">
             <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="17" />
           </button>
-          <button v-if="isAdmin" class="sidebar-account__utility" type="button" title="手机与节点" aria-label="手机与节点" @click="nodePairingOpen = true; mobileDrawerOpen = false">
+          <button class="sidebar-account__utility" type="button" title="手机登录与节点" aria-label="手机登录与节点" @click="nodePairingOpen = true; mobileDrawerOpen = false">
             <AppIcon name="users" :size="17" />
           </button>
           <Transition name="menu-fade">
@@ -439,7 +439,7 @@ onBeforeUnmount(() => {
       </aside>
     </Transition>
 
-    <NodePairingDialog :open="nodePairingOpen" :insecure-transport="insecureTransport" :user-name="pairingUserName || userName" @close="nodePairingOpen = false" />
+    <NodePairingDialog :open="nodePairingOpen" :insecure-transport="insecureTransport" :user-name="pairingUserName || userName" :is-admin="isAdmin" @close="nodePairingOpen = false" />
     <SystemUpdateDialog :open="systemUpdateOpen" @close="systemUpdateOpen = false" />
     <SystemManagementDialog :open="systemManagementOpen" :upstream-ready="upstreamReady" :upstream-error="upstreamError" @close="systemManagementOpen = false" />
     <AccountSecurityDialog :open="accountSecurityOpen" @close="accountSecurityOpen = false" />

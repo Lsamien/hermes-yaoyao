@@ -120,6 +120,18 @@ export class LocalAuthStore {
     if (!user || !user.enabled || !this.#passwordMatches(user, password)) {
       throw new HttpError(401, '用户名或密码错误', 'login_failed')
     }
+    return this.#issueSession(ctx, user)
+  }
+
+  issueSession(ctx: Koa.Context, userID: string): LocalUser {
+    const user = this.#users.find(candidate => candidate.id === userID)
+    if (!user || !user.enabled) {
+      throw new HttpError(401, '用户已失效', 'account_pairing_user_unavailable')
+    }
+    return this.#issueSession(ctx, user)
+  }
+
+  #issueSession(ctx: Koa.Context, user: StoredUser): LocalUser {
     const token = randomBytes(32).toString('base64url')
     this.#sessions.set(this.#sessionKey(token), {
       userID: user.id,

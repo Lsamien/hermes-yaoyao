@@ -29,6 +29,7 @@ import {
 import { receiveGroupUploads, uploadMarkdown, UploadStore } from './uploads.js'
 import { SystemUpdateManager, type SystemUpdateStatus } from './updateManager.js'
 import { LocalAuthStore, type LocalUser, UpstreamServiceSession } from './localAuth.js'
+import { AccountLoginPairingStore } from './accountPairing.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -42,6 +43,7 @@ export interface RouteDependencies {
   updates: SystemUpdateManager
   auth: LocalAuthStore
   upstreamSession: UpstreamServiceSession
+  accountPairings: AccountLoginPairingStore
 }
 
 function body(ctx: Koa.Context): JsonObject {
@@ -880,6 +882,47 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     const username = typeof request.username === 'string' ? request.username : undefined
     const user = dependencies.auth.changeCredentials(ctx, currentPassword, newPassword, username)
     json(ctx, 200, { user, must_change_password: false, server_kind: 'yaoyao-web' })
+  })
+  router.post('/api/app/account-pairings', (ctx) => {
+    const user = dependencies.auth.require(ctx)
+    const pairing = dependencies.accountPairings.create(user.id)
+    const origin = requestOrigin(ctx, dependencies.config)
+    const deepLink = new URL('yaoyao://login')
+    deepLink.searchParams.set('v', '1')
+    deepLink.searchParams.set('url', origin)
+    deepLink.searchParams.set('id', pairing.id)
+    deepLink.searchParams.set('secret', pairing.secret)
+    json(ctx, 201, {
+      protocolVersion: 1,
+      serviceType: 'yaoyao-web',
+      pairingId: pairing.id,
+      expiresAt: pairing.expiresAt,
+      qrPayload: deepLink.toString(),
+    })
+  })
+  router.get('/api/app/account-pairings/:pairingID', (ctx) => {
+    dependencies.auth.require(ctx)
+    json(ctx, 200, dependencies.accountPairings.status(ctx.params.pairingID))
+  })
+  router.get('/api/account-pair/v1/capabilities', (ctx) => {
+    json(ctx, 200, {
+      protocolVersion: 1,
+      serviceType: 'yaoyao-web',
+      feature: 'server-login',
+    })
+  })
+  router.post('/api/account-pair/v1/claim', (ctx) => {
+    const request = body(ctx)
+    const pairingID = typeof request.pairingId === 'string' ? request.pairingId : ''
+    const secret = typeof request.secret === 'string' ? request.secret : ''
+    const userID = dependencies.accountPairings.claim(pairingID, secret)
+    const user = dependencies.auth.issueSession(ctx, userID)
+    json(ctx, 201, {
+      protocolVersion: 1,
+      serviceType: 'yaoyao-web',
+      serverUrl: requestOrigin(ctx, dependencies.config),
+      user,
+    })
   })
 
   router.post('/api/app/pairings', async (ctx) => {
