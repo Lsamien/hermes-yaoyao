@@ -16,6 +16,26 @@ describe('remote node file links', () => {
     expect(rewritten).not.toContain('](</Users/remote')
   })
 
+  it('normalizes real Hermes MEDIA directives before routing them', () => {
+    const node = '11111111-1111-4111-8111-111111111111'
+    const content = [
+      'MEDIA:/Users/samien/Agents/smoke_zimage_turbo_00001_.png',
+      'MEDIA:`/Users/samien/Agents/远程 报告.pdf`',
+    ].join('\n')
+
+    const rewritten = rewriteRemoteNodeFiles(content, node)
+
+    expect(rewritten).toContain(`![smoke_zimage_turbo_00001_.png](/api/plugins/yaoyao/v1/nodes/${node}/files?path=%2FUsers%2Fsamien%2FAgents%2Fsmoke_zimage_turbo_00001_.png)`)
+    expect(rewritten).toContain(`[远程 报告.pdf](/api/plugins/yaoyao/v1/nodes/${node}/files?path=%2FUsers%2Fsamien%2FAgents%2F%E8%BF%9C%E7%A8%8B%20%E6%8A%A5%E5%91%8A.pdf)`)
+    expect(rewritten).not.toContain('MEDIA:')
+  })
+
+  it('keeps an incomplete streaming MEDIA directive untouched', () => {
+    const node = '11111111-1111-4111-8111-111111111111'
+    expect(rewriteRemoteNodeFiles('MEDIA:/Users/samien/Agents/partial.png', node, true))
+      .toBe('MEDIA:/Users/samien/Agents/partial.png')
+  })
+
   it('does not rewrite web URLs or local-agent content', () => {
     expect(rewriteRemoteNodeFiles('[官网](https://example.com/a.png)', 'local'))
       .toBe('[官网](https://example.com/a.png)')

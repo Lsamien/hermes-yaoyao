@@ -16,6 +16,7 @@ import type { SidebarItem } from '@/components/app/types'
 import type { UiAgent, UiRoom } from '@/components/groups/types'
 import type { UiLibraryItem } from '@/components/library/types'
 import type { UiInteraction, UiMessage, UiMessageAttachment, UiToolCall } from '@/components/messages/types'
+import { normalizeAssistantMediaMarkdown } from '@/utils/mediaMarkdown'
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -239,7 +240,7 @@ export function groupMessageToUi(message: GroupMessage, agents: GroupAgent[] = [
     ? agents.find(agent => agent.id === message.senderId)
     : undefined
   const content = sender && sender.nodeId !== 'local'
-    ? rewriteRemoteNodeFiles(message.content, sender.nodeId)
+    ? rewriteRemoteNodeFiles(message.content, sender.nodeId, message.status === 'streaming')
     : message.content
   return {
     id: message.id,
@@ -264,9 +265,9 @@ export function groupMessageToUi(message: GroupMessage, agents: GroupAgent[] = [
   }
 }
 
-export function rewriteRemoteNodeFiles(content: string, nodeId: string): string {
+export function rewriteRemoteNodeFiles(content: string, nodeId: string, streaming = false): string {
   if (!/^[0-9a-f-]{36}$/i.test(nodeId)) return content
-  return content.replace(
+  return normalizeAssistantMediaMarkdown(content, streaming).replace(
     /(!?\[[^\]]*\]\()<?(?:file:\/\/)?(\/(?:Users|private|var|tmp)\/[^)>\n]+)>?(\))/g,
     (_match, prefix: string, path: string, suffix: string) => (
       `${prefix}/api/plugins/yaoyao/v1/nodes/${encodeURIComponent(nodeId)}/files?path=${encodeURIComponent(path)}${suffix}`
