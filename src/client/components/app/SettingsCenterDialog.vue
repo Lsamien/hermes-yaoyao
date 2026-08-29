@@ -252,53 +252,54 @@ watch(() => [props.open, props.initialPage] as const, ([open, initialPage]) => {
           :class="{ 'settings-center--mobile-detail': mobileDetailOpen }"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="settings-center-title"
+          aria-label="设置中心"
           tabindex="-1"
           @keydown.esc.capture.prevent.stop="handleEscape"
         >
-          <header class="settings-center__header">
-            <button v-if="mobileDetailOpen" class="mobile-back" type="button" aria-label="返回设置分类" :disabled="updateLocked" @click="backToMenu"><AppIcon name="chevron-left" :size="20" /></button>
-            <h2 id="settings-center-title">设置中心</h2>
-            <button class="settings-center__close" type="button" aria-label="关闭设置中心" :disabled="updateLocked" @click="requestClose"><AppIcon name="close" :size="20" /></button>
-          </header>
-
           <div class="settings-center__body">
             <aside class="settings-sidebar" aria-label="设置分类">
-              <div class="settings-agent-selector">
-                <button ref="settingsAgentTrigger" type="button" aria-haspopup="listbox" :aria-expanded="profileMenuOpen" @click="toggleAgentMenu">
-                  <AgentAvatar :name="profileTitle(activeProfile)" :avatar="activeProfile?.agentAvatar || ''" :size="46" />
-                  <span><strong>{{ profileTitle(activeProfile) }}</strong><small>{{ activeProfile?.name || '未选择 Agent' }}</small></span>
-                  <AppIcon name="chevron-down" :size="16" />
-                </button>
-                <div v-if="profileMenuOpen" class="settings-agent-menu" role="listbox" aria-label="切换正在设置的 Agent" @keydown="handleAgentMenuKeydown">
-                  <button v-for="profile in profiles" :key="profile.name" type="button" role="option" :aria-selected="profile.name === activeProfile?.name" @click="selectProfile(profile.name)">
-                    <AgentAvatar :name="profileTitle(profile)" :avatar="profile.agentAvatar || ''" :size="28" />
-                    <span><strong>{{ profileTitle(profile) }}</strong><small>{{ profile.name }}</small></span>
-                    <AppIcon v-if="profile.name === activeProfile?.name" name="check" :size="16" />
+              <header class="settings-sidebar__header">
+                <h2 id="settings-center-title">设置中心</h2>
+                <button class="settings-center__close" type="button" aria-label="关闭设置中心" :disabled="updateLocked" @click="requestClose"><AppIcon name="close" :size="18" /></button>
+              </header>
+              <div class="settings-sidebar__scroll">
+                <div class="settings-agent-selector">
+                  <button ref="settingsAgentTrigger" type="button" aria-haspopup="listbox" :aria-expanded="profileMenuOpen" @click="toggleAgentMenu">
+                    <AgentAvatar :name="profileTitle(activeProfile)" :avatar="activeProfile?.agentAvatar || ''" :size="34" />
+                    <span><strong>{{ profileTitle(activeProfile) }}</strong><small>{{ activeProfile?.name || '未选择 Agent' }}</small></span>
+                    <AppIcon name="chevron-down" :size="14" />
                   </button>
+                  <div v-if="profileMenuOpen" class="settings-agent-menu" role="listbox" aria-label="切换正在设置的 Agent" @keydown="handleAgentMenuKeydown">
+                    <button v-for="profile in profiles" :key="profile.name" type="button" role="option" :aria-selected="profile.name === activeProfile?.name" @click="selectProfile(profile.name)">
+                      <AgentAvatar :name="profileTitle(profile)" :avatar="profile.agentAvatar || ''" :size="24" />
+                      <span><strong>{{ profileTitle(profile) }}</strong><small>{{ profile.name }}</small></span>
+                      <AppIcon v-if="profile.name === activeProfile?.name" name="check" :size="14" />
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <nav>
-                <section>
-                  <h3>当前 Agent</h3>
-                  <button v-for="item in agentItems" :key="item.key" type="button" :class="{ active: activePage === item.key }" :aria-current="activePage === item.key ? 'page' : undefined" @click="selectPage(item.key)"><AppIcon :name="item.icon" :size="20" /><span>{{ item.label }}</span></button>
-                </section>
-                <section>
-                  <h3>账号</h3>
-                  <button v-for="item in accountItems" :key="item.key" type="button" :class="{ active: activePage === item.key }" :aria-current="activePage === item.key ? 'page' : undefined" @click="selectPage(item.key)"><AppIcon :name="item.icon" :size="20" /><span>{{ item.label }}</span></button>
-                </section>
-                <section v-if="isAdmin">
-                  <h3>系统 · 仅管理员</h3>
-                  <button v-for="item in systemItems" :key="item.key" type="button" :class="{ active: activePage === item.key }" :aria-current="activePage === item.key ? 'page' : undefined" @click="selectPage(item.key)"><AppIcon :name="item.icon" :size="20" /><span>{{ item.label }}</span><em v-if="item.key === 'system-voice'">全局</em></button>
-                </section>
-              </nav>
+                <nav>
+                  <section>
+                    <h3>当前 Agent</h3>
+                    <button v-for="item in agentItems" :key="item.key" type="button" :class="{ active: activePage === item.key }" :aria-current="activePage === item.key ? 'page' : undefined" @click="selectPage(item.key)"><AppIcon :name="item.icon" :size="20" /><span>{{ item.label }}</span></button>
+                  </section>
+                  <section>
+                    <h3>账号</h3>
+                    <button v-for="item in accountItems" :key="item.key" type="button" :class="{ active: activePage === item.key }" :aria-current="activePage === item.key ? 'page' : undefined" @click="selectPage(item.key)"><AppIcon :name="item.icon" :size="20" /><span>{{ item.label }}</span></button>
+                  </section>
+                  <section v-if="isAdmin">
+                    <h3>系统 · 仅管理员</h3>
+                    <button v-for="item in systemItems" :key="item.key" type="button" :class="{ active: activePage === item.key }" :aria-current="activePage === item.key ? 'page' : undefined" @click="selectPage(item.key)"><AppIcon :name="item.icon" :size="20" /><span>{{ item.label }}</span><em v-if="item.key === 'system-voice'">全局</em></button>
+                  </section>
+                </nav>
+              </div>
             </aside>
 
             <main class="settings-content" :class="{ 'settings-content--with-footer': showFixedFooter }">
               <header class="settings-content__header">
-                <h3 ref="contentTitle" tabindex="-1">{{ activeTitle }}</h3>
-                <p>{{ activeScope }}</p>
+                <button v-if="mobileDetailOpen" class="mobile-back" type="button" aria-label="返回设置分类" :disabled="updateLocked" @click="backToMenu"><AppIcon name="chevron-left" :size="20" /></button>
+                <div class="settings-content__heading"><h3 ref="contentTitle" tabindex="-1">{{ activeTitle }}</h3><p>{{ activeScope }}</p></div>
+                <button class="settings-center__close" type="button" aria-label="关闭设置中心" :disabled="updateLocked" @click="requestClose"><AppIcon name="close" :size="18" /></button>
               </header>
               <div class="settings-content__scroll">
                 <AgentIdentityPanel
@@ -370,26 +371,26 @@ watch(() => [props.open, props.initialPage] as const, ([open, initialPage]) => {
 </template>
 
 <style scoped>
-.settings-center-layer { position: fixed; z-index: 300; inset: 0; display: grid; place-items: center; padding: 48px; background: color-mix(in srgb, #000 24%, transparent); backdrop-filter: blur(4px); }
-.settings-center { display: grid; width: min(920px, calc(100vw - 96px)); height: min(680px, calc(100dvh - 96px)); overflow: hidden; grid-template-rows: 56px minmax(0, 1fr); border: 1px solid var(--line); border-radius: 16px; outline: 0; background: var(--surface-raised); box-shadow: 0 20px 60px rgba(0,0,0,.18); color: var(--text-primary); }
-.settings-center__header { display: flex; align-items: center; justify-content: space-between; padding: 0 16px 0 20px; border-bottom: 1px solid var(--line); }
-.settings-center__header h2 { margin: 0; font-size: 20px; letter-spacing: -.025em; }
+.settings-center-layer { position: fixed; z-index: 300; inset: 0; display: grid; place-items: center; padding: 64px; background: color-mix(in srgb, #000 24%, transparent); backdrop-filter: blur(4px); }
+.settings-center { display: block; width: min(820px, calc(100vw - 128px)); height: min(600px, calc(100dvh - 128px)); overflow: hidden; border: 1px solid var(--line); border-radius: 16px; outline: 0; background: var(--surface-raised); box-shadow: 0 20px 60px rgba(0,0,0,.18); color: var(--text-primary); }
 .settings-center__close,.mobile-back { display: grid; width: 44px; height: 44px; place-items: center; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--text-primary); cursor: pointer; }
 .settings-center__close:hover,.mobile-back:hover { background: var(--surface-soft); }
 .settings-center__close:disabled,.mobile-back:disabled { cursor: not-allowed; opacity: .45; }
 .mobile-back { display: none; }
-.settings-center__body { display: grid; min-height: 0; grid-template-columns: 248px minmax(0, 1fr); }
-.settings-sidebar { position: relative; min-height: 0; overflow-y: auto; padding: 12px 18px 14px; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--surface-soft) 42%, var(--surface-raised)); }
-.settings-agent-selector { position: sticky; z-index: 3; top: -12px; margin: -12px 0 10px; padding: 12px 0 10px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-soft) 42%, var(--surface-raised)); }
-.settings-agent-selector > button { display: grid; width: 100%; min-height: 52px; grid-template-columns: 46px minmax(0, 1fr) 20px; align-items: center; gap: 12px; padding: 3px 6px; border: 0; border-radius: 10px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }
+.settings-center__body { display: grid; height: 100%; min-height: 0; grid-template-columns: 220px minmax(0, 1fr); }
+.settings-sidebar { position: relative; min-height: 0; overflow-y: auto; padding: 12px 14px 14px; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--surface-soft) 42%, var(--surface-raised)); overscroll-behavior: contain; }
+.settings-sidebar__header { display: none; }.settings-sidebar__header h2 { margin: 0; font-size: 14px; letter-spacing: -.01em; }
+.settings-sidebar__scroll { min-height: 0; }
+.settings-agent-selector { position: sticky; z-index: 3; top: -12px; margin: -12px 0 8px; padding: 12px 0 8px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-soft) 42%, var(--surface-raised)); }
+.settings-agent-selector > button { display: grid; width: 100%; min-height: 42px; grid-template-columns: 34px minmax(0, 1fr) 16px; align-items: center; gap: 8px; padding: 2px 4px; border: 0; border-radius: 9px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }
 .settings-agent-selector > button:hover { background: var(--surface-hover); }
-.settings-agent-selector span,.settings-agent-menu span { display: grid; min-width: 0; gap: 3px; }
-.settings-agent-selector strong { overflow: hidden; font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
-.settings-agent-selector small,.settings-agent-menu small { overflow: hidden; color: var(--text-muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.settings-agent-selector span,.settings-agent-menu span { display: grid; min-width: 0; gap: 2px; }
+.settings-agent-selector strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.settings-agent-selector small,.settings-agent-menu small { overflow: hidden; color: var(--text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .settings-agent-menu { position: absolute; z-index: 5; top: calc(100% - 8px); right: 0; left: 0; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); box-shadow: var(--shadow-float); }
-.settings-agent-menu button { display: grid; width: 100%; min-height: 46px; grid-template-columns: 28px minmax(0, 1fr) 18px; align-items: center; gap: 10px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }
+.settings-agent-menu button { display: grid; width: 100%; min-height: 38px; grid-template-columns: 24px minmax(0, 1fr) 16px; align-items: center; gap: 8px; padding: 4px 6px; border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }
 .settings-agent-menu button:hover,.settings-agent-menu button[aria-selected="true"] { background: var(--surface-hover); }
-.settings-agent-menu strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.settings-agent-menu strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .settings-sidebar nav { display: grid; gap: 6px; }
 .settings-sidebar nav section { display: grid; gap: 1px; padding-bottom: 7px; border-bottom: 1px solid var(--line); }
 .settings-sidebar nav section:last-child { padding-bottom: 0; border-bottom: 0; }
@@ -402,10 +403,11 @@ watch(() => [props.open, props.initialPage] as const, ([open, initialPage]) => {
 .settings-sidebar nav button em { padding: 2px 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-muted); font: normal 10px var(--font-ui); }
 .settings-content { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); background: var(--surface-raised); }
 .settings-content--with-footer { grid-template-rows: auto minmax(0, 1fr) 68px; }
-.settings-content__header { padding: 21px 30px 14px; border-bottom: 1px solid var(--line); }
-.settings-content__header h3 { margin: 0; font-size: 23px; letter-spacing: -.035em; }
-.settings-content__header p { margin: 8px 0 0; color: var(--text-secondary); font-size: 14px; }
-.settings-content__scroll { min-height: 0; overflow-y: auto; padding: 18px 30px 20px; overscroll-behavior: contain; }
+.settings-content__header { display: grid; min-height: 52px; box-sizing: border-box; grid-template-columns: minmax(0, 1fr) 44px; align-items: center; gap: 8px; padding: 7px 8px 7px 18px; border-bottom: 1px solid var(--line); }
+.settings-content__heading { min-width: 0; }
+.settings-content__header h3 { margin: 0; font-size: 14px; letter-spacing: -.01em; }
+.settings-content__header p { overflow: hidden; margin: 3px 0 0; color: var(--text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.settings-content__scroll { min-height: 0; overflow-y: auto; padding: 16px 24px 18px; overscroll-behavior: contain; }
 .settings-content__footer { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 0 20px; border-top: 1px solid var(--line); background: var(--surface-raised); }
 .settings-content__footer button { display: inline-flex; min-width: 104px; min-height: 40px; align-items: center; justify-content: center; padding: 0 16px; border-radius: 9px; cursor: pointer; font: 650 13px var(--font-ui); }
 .settings-footer__cancel { border: 1px solid var(--line); background: var(--surface-raised); color: var(--text-primary); }
@@ -427,27 +429,23 @@ watch(() => [props.open, props.initialPage] as const, ([open, initialPage]) => {
 .settings-center-fade-enter-from,.settings-center-fade-leave-to { opacity: 0; }
 .settings-center-fade-enter-from .settings-center,.settings-center-fade-leave-to .settings-center { transform: translateY(8px) scale(.99); }
 @media (max-width: 1023px) {
-  .settings-center-layer { padding: 24px; }
-  .settings-center { width: min(920px, calc(100vw - 48px)); height: min(680px, calc(100dvh - 48px)); }
-  .settings-center__body { grid-template-columns: 240px minmax(0, 1fr); }
-  .settings-sidebar { padding-inline: 18px; }
-  .settings-content__header { padding-inline: 30px; }
-  .settings-content__scroll { padding-inline: 30px; }
+  .settings-center-layer { padding: 32px; }
+  .settings-center { width: min(820px, calc(100vw - 64px)); height: min(600px, calc(100dvh - 64px)); }
+  .settings-center__body { grid-template-columns: 220px minmax(0, 1fr); }
+  .settings-content__scroll { padding-inline: 24px; }
 }
 @media (max-width: 767px) {
   .settings-center-layer { padding: 0; }
-  .settings-center { width: 100vw; height: 100dvh; grid-template-rows: 56px minmax(0, 1fr); border: 0; border-radius: 0; }
-  .settings-center__header { padding: 0 8px 0 16px; }
-  .settings-center__header h2 { font-size: 18px; }
-  .settings-center--mobile-detail .settings-center__header { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; gap: 4px; padding-left: 6px; }
-  .settings-center--mobile-detail .mobile-back { display: grid; }
-  .settings-center__body { display: block; }
-  .settings-sidebar { width: 100%; height: 100%; box-sizing: border-box; border-right: 0; padding: 18px 20px max(24px, env(safe-area-inset-bottom)); }
+  .settings-center { width: 100vw; height: 100dvh; border: 0; border-radius: 0; }
+  .settings-center__body { display: block; height: 100%; }
+  .settings-sidebar { display: grid; width: 100%; height: 100%; box-sizing: border-box; grid-template-rows: 56px minmax(0, 1fr); overflow: hidden; padding: 0; border-right: 0; }
+  .settings-sidebar__header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 16px; border-bottom: 1px solid var(--line); }.settings-sidebar__header .settings-center__close { display: grid; }
+  .settings-sidebar__scroll { min-height: 0; overflow-y: auto; padding: 18px 20px max(24px, env(safe-area-inset-bottom)); overscroll-behavior: contain; }
   .settings-center--mobile-detail .settings-sidebar { display: none; }
   .settings-content { display: none; width: 100%; height: 100%; }
   .settings-center--mobile-detail .settings-content { display: grid; }
-  .settings-content__header { padding: 22px 20px 17px; }
-  .settings-content__header h3 { font-size: 21px; }
+  .settings-content__header { min-height: 56px; grid-template-columns: 44px minmax(0, 1fr) 44px; gap: 4px; padding: 6px 8px 6px 6px; }
+  .settings-center--mobile-detail .mobile-back { display: grid; }
   .settings-content__scroll { padding: 22px 20px max(28px, env(safe-area-inset-bottom)); }
   .settings-content--with-footer { grid-template-rows: auto minmax(0, 1fr) calc(68px + env(safe-area-inset-bottom)); }
   .settings-content__footer { padding: 0 20px env(safe-area-inset-bottom); }

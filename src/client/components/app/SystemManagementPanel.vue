@@ -332,7 +332,7 @@ watch(() => [props.active, props.section] as const, ([active, section]) => {
           <button class="danger" type="button" :aria-label="`删除用户 ${user.username}`" :disabled="busy" @click="remove(user)">删除</button>
         </template>
       </div>
-      <form @submit.prevent="add">
+      <form class="user-create-form" aria-label="创建用户" @submit.prevent="add">
         <label><span>新用户名</span><input v-model="username" name="managed-username" autocomplete="off" :disabled="busy" /></label>
         <label><span>临时密码</span><input v-model="password" name="managed-temporary-password" type="password" autocomplete="new-password" :disabled="busy" /><small>至少 8 位</small></label>
         <button class="solid-button" :disabled="busy || !username.trim() || password.length < 8">创建用户</button>
@@ -451,12 +451,15 @@ watch(() => [props.active, props.section] as const, ([active, section]) => {
 form { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 10px; margin-top: 16px; }
 form > label { display: grid; min-width: 0; gap: 6px; color: var(--text-secondary); font-size: 12px; font-weight: 650; }
 form > label small { color: var(--text-muted); font-size: 11px; font-weight: 400; }
+.user-create-form { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 12px; margin-top: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+.user-create-form .solid-button { grid-column: 1 / -1; min-width: 104px; justify-self: end; }
 input:not([type="checkbox"]) { min-width: 0; height: 42px; padding: 0 11px; border: 1px solid var(--line); border-radius: 9px; outline: 0; background: var(--surface-raised); color: var(--text-primary); font: 13px var(--font-ui); }
 input:not([type="checkbox"]):focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }
 .solid-button { min-height: 42px; padding: 0 14px; border: 0; border-radius: 9px; background: var(--accent); color: var(--text-on-solid); font: 600 13px var(--font-ui); }
 .solid-button:disabled,.user button:disabled { cursor: not-allowed; opacity: .5; }
 @media (max-width: 600px) {
   form { grid-template-columns: 1fr; }
+  .user-create-form { grid-template-columns: 1fr; }
   .user { flex-wrap: wrap; padding: 8px 0; }
   .user span { flex-basis: 100%; }
   .push-status { grid-template-columns: 1fr; }
