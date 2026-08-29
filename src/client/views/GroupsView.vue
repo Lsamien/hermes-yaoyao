@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL } from '@shared/types'
 import type { GroupAgent, GroupRoomSummary, GroupTopicSummary, ModelOption } from '@shared/types'
@@ -22,7 +22,7 @@ import MessageTimeline from '@/components/messages/MessageTimeline.vue'
 import type { UiMessage } from '@/components/messages/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
 import FloatingResourceSearch from '@/components/app/FloatingResourceSearch.vue'
-import type { SidebarItem } from '@/components/app/types'
+import type { SidebarItem, SidebarItemBase } from '@/components/app/types'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
 import { loadComposerFile } from '@/components/workspace/pendingComposer'
 import { readAgentShowThinking, writeAgentShowThinking } from '@/utils/sessionPreferences'
@@ -57,8 +57,11 @@ const roomActionMenu = ref<{ roomId: string; topicId?: string; x: number; y: num
 const topicActionRenaming = ref(false)
 const topicActionRenameValue = ref('')
 const archivedOverlayOpen = ref(false)
-const archivedRoomList = ref<GroupRoomSummary[]>([])
-const archivedTopicList = ref<GroupTopicSummary[]>([])
+const archivedRoomList = shallowRef<GroupRoomSummary[]>([])
+const archivedTopicList = shallowRef<GroupTopicSummary[]>([])
+const archivedTopicCatalog = shallowRef<GroupTopicSummary[]>([])
+const archivedTopicRoomId = ref('')
+const archivedSearchLoading = ref(false)
 const pushProtocolSupported = ref(false)
 const pushConfigured = ref(false)
 const subscribedPushRooms = ref<Set<string>>(new Set())
@@ -74,7 +77,7 @@ function handleModelCatalogChanged(event: Event) {
 }
 
 const activeRooms = computed(() => groups.rooms.filter(room => !room.archived))
-const roomSidebarItems = computed(() => activeRooms.value.map(room => {
+const roomSidebarItems = computed<SidebarItemBase[]>(() => activeRooms.value.map(room => {
   const currentMembers = room.id === groups.selectedRoomId && displayAgents.value.length
     ? displayAgents.value.slice(0, 4).map(agent => ({
       profile: agent.profile,
@@ -100,8 +103,11 @@ const allTopics = computed(() => {
 const sidebarSubtitle = computed(() => groups.availability === 'available'
   ? `${allTopics.value.length} 个话题`
   : `9119 团队 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}`)
+const SEARCH_ALL_ID = 'search:all'
 const SEARCH_ARCHIVED_ID = 'search:archived'
 const SEARCH_ROOM_PREFIX = 'room:'
+const SEARCH_ARCHIVED_ROOM_PREFIX = 'archived-room:'
+const SEARCH_ARCHIVED_TOPIC_PREFIX = 'archived-topic:'
 function topicSidebarItemId(roomId: string, topicId: string): string { return `topic:${roomId}:${topicId}` }
 function topicFromSidebarItemId(id: string): { roomId: string; topicId: string } | undefined {
   const match = /^topic:([^:]+):([^:]+)$/.exec(id)
@@ -148,10 +154,67 @@ const sidebarItems = computed<SidebarItem[]>(() => {
   }
   return items
 })
+function archivedRoomSidebarItems(): SidebarItemBase[] {
+  return archivedRoomList.value.map(room => ({
+  id: room.id,
+  title: room.name || '未命名团队',
+  subtitle: room.lastMessage?.content || `${room.agentCount} 个 Agent`,
+  meta: sidebarDate(room.updatedAt),
+  avatar: room.avatar || '',
+  avatarMembers: (room.avatarMembers || []).map(member => ({ name: member.displayName || member.profile })),
+  }))
+}
+const archivedRoomById = computed(() => new Map(archivedRoomList.value.map(room => [room.id, room])))
+const archivedTopicRoomName = computed(() => activeRoomById.value.get(archivedTopicRoomId.value)?.name
+  || archivedRoomById.value.get(archivedTopicRoomId.value)?.name
+  || '所选团队')
+function archivedTopicSidebarItem(topic: GroupTopicSummary): SidebarItem {
+  const room = activeRoomById.value.get(topic.roomId) || archivedRoomById.value.get(topic.roomId)
+  const roomItem = roomSidebarItems.value.find(item => item.id === topic.roomId)
+    || archivedRoomSidebarItems().find(item => item.id === topic.roomId)
+  return {
+    id: `${SEARCH_ARCHIVED_TOPIC_PREFIX}${topic.roomId}:${topic.id}`,
+    title: topic.title,
+    subtitle: `${room?.name || '未知团队'}：${topic.preview || '暂无消息'}`,
+    meta: sidebarDate(topic.updatedAt),
+    section: '话题',
+    avatar: roomItem?.avatar ?? '',
+    avatarMembers: roomItem?.avatarMembers,
+    showMore: false,
+  }
+}
 const groupSearchItems = computed<SidebarItem[]>(() => [
-  ...roomSidebarItems.value.map(item => ({ ...item, id: `${SEARCH_ROOM_PREFIX}${item.id}`, section: '团队', showMore: false })),
-  { id: SEARCH_ARCHIVED_ID, title: '已归档内容', subtitle: '查看已归档团队和话题', section: '已归档', icon: 'archive' as const, showMore: false },
-  ...allTopics.value.map(topic => topicSidebarItem(topic, '话题')),
+  {
+    id: SEARCH_ALL_ID,
+    title: '全部',
+    subtitle: `${allTopics.value.length} 个话题`,
+    section: '团队',
+    icon: 'groups',
+    showMore: false,
+    emptyText: '暂无话题',
+    children: allTopics.value.map(topic => topicSidebarItem(topic, '话题')),
+  },
+  ...roomSidebarItems.value.map(item => ({
+    ...item,
+    id: `${SEARCH_ROOM_PREFIX}${item.id}`,
+    section: '团队',
+    showMore: false,
+    emptyText: '该团队暂无话题',
+    children: allTopics.value.filter(topic => topic.roomId === item.id).map(topic => topicSidebarItem(topic, '话题')),
+  })),
+  {
+    id: SEARCH_ARCHIVED_ID,
+    title: '已归档内容',
+    subtitle: archivedSearchLoading.value ? '正在加载归档内容…' : `${archivedRoomList.value.length} 个团队 · ${archivedTopicCatalog.value.length} 个话题`,
+    section: '归档',
+    icon: 'archive' as const,
+    showMore: false,
+    emptyText: '暂无归档团队或话题',
+    children: [
+      ...archivedRoomSidebarItems().map(item => ({ ...item, id: `${SEARCH_ARCHIVED_ROOM_PREFIX}${item.id}`, section: '团队', showMore: false })),
+      ...archivedTopicCatalog.value.map(archivedTopicSidebarItem),
+    ],
+  },
 ])
 const localAgentIdentities = computed(() => new Map(auth.profiles.map(profile => [profile.name, {
   name: profile.agentName || profile.displayName || profile.name,
@@ -315,6 +378,15 @@ async function selectSidebarItem(id: string) {
 async function selectGroupSearchItem(id: string) {
   if (id === SEARCH_ARCHIVED_ID) {
     await openArchivedOverlay()
+    return
+  }
+  if (id.startsWith(SEARCH_ARCHIVED_ROOM_PREFIX)) {
+    await openArchivedOverlay(id.slice(SEARCH_ARCHIVED_ROOM_PREFIX.length))
+    return
+  }
+  if (id.startsWith(SEARCH_ARCHIVED_TOPIC_PREFIX)) {
+    const match = /^archived-topic:([^:]+):/.exec(id)
+    await openArchivedOverlay(match?.[1])
     return
   }
   if (id.startsWith(SEARCH_ROOM_PREFIX)) {
@@ -562,17 +634,32 @@ async function archiveRoom() {
   await router.replace(groupRoute())
 }
 
-async function openArchivedOverlay() {
+async function loadArchivedSearchCatalog() {
+  if (archivedSearchLoading.value) return
+  archivedSearchLoading.value = true
+  try {
+    const archivedRooms = await groups.archivedRooms()
+    archivedRoomList.value = archivedRooms
+    const roomIds = [...new Set([...activeRooms.value.map(room => room.id), ...archivedRooms.map(room => room.id)])]
+    const topics = await Promise.all(roomIds.map(roomId => groups.archivedTopics(roomId).catch(() => [])))
+    archivedTopicCatalog.value = topics.flat().sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id))
+  } finally {
+    archivedSearchLoading.value = false
+  }
+}
+
+async function openArchivedOverlay(roomId = groups.selectedRoomId) {
   archivedOverlayOpen.value = true
-  archivedRoomList.value = await groups.archivedRooms()
-  archivedTopicList.value = groups.selectedRoomId
-    ? await groups.archivedTopics(groups.selectedRoomId)
+  await loadArchivedSearchCatalog()
+  archivedTopicRoomId.value = roomId || ''
+  archivedTopicList.value = roomId
+    ? await groups.archivedTopics(roomId)
     : []
 }
 
 async function restoreArchivedRoom(roomId: string) {
   await groups.restoreRoom(roomId)
-  archivedRoomList.value = await groups.archivedRooms()
+  await loadArchivedSearchCatalog()
 }
 
 async function archiveTopicFromAction() {
@@ -607,10 +694,11 @@ async function archiveRoomFromAction() {
 }
 
 async function restoreArchivedTopic(topicId: string) {
-  const roomId = groups.selectedRoomId
+  const roomId = archivedTopicRoomId.value
   if (!roomId) return
   await groups.restoreTopic(roomId, topicId)
   archivedTopicList.value = await groups.archivedTopics(roomId)
+  await loadArchivedSearchCatalog()
 }
 
 function openLocalFile({ name, url }: { name: string; url: string }) {
@@ -658,6 +746,7 @@ onMounted(async () => {
     if (groups.topicProtocol) {
       await Promise.all(activeRooms.value.map(room => groups.loadRoomTopics(room.id).catch(() => undefined)))
     }
+    void loadArchivedSearchCatalog()
     const requested = typeof route.params.roomId === 'string' ? route.params.roomId : ''
     const requestedTopic = typeof route.params.topicId === 'string' ? route.params.topicId : undefined
     if (requested) {
@@ -812,7 +901,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
     </template>
   </WorkspaceView>
 
-  <FloatingResourceSearch section="groups" label="搜索话题、团队或归档" :items="groupSearchItems" @select="selectGroupSearchItem" />
+  <FloatingResourceSearch section="groups" label="搜索话题、团队或归档" :items="groupSearchItems" split @open="loadArchivedSearchCatalog" @select="selectGroupSearchItem" />
   <TopicTeamPickerDialog :open="topicTeamPickerOpen" :rooms="activeRooms" :current-room-id="groups.selectedRoomId" @close="topicTeamPickerOpen = false" @select="chooseTopicTeam" />
   <CreateGroupDialog :open="createOpen" :profiles="profiles" :avatar-enabled="groups.roomAvatarProtocol" :host-enabled="groups.hostProtocol" :host-flow-enabled="groups.hostFlowProtocol" :room-instructions-enabled="groups.roomInstructionsProtocol" :error="createError" :busy="groups.isLoading || creatingRoom" @close="createOpen = false" @create="createRoom" />
   <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="addPreviewToComposer" @source="preview = null" />
@@ -846,7 +935,7 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
         <section class="archived-overlay" role="dialog" aria-modal="true" aria-label="已归档团队和话题">
           <header><div><small>团队归档</small><strong>已归档内容</strong></div><button type="button" aria-label="关闭" @click="archivedOverlayOpen = false"><AppIcon name="close" :size="16" /></button></header>
           <section class="archived-section"><h3>团队</h3><p v-if="!archivedRoomList.length">没有已归档团队</p><article v-for="archived in archivedRoomList" :key="archived.id"><span>{{ archived.name }}</span><button type="button" @click="restoreArchivedRoom(archived.id)">恢复</button></article></section>
-          <section class="archived-section"><h3>当前团队的话题</h3><p v-if="!groups.selectedRoom">请先打开一个团队查看其已归档话题</p><p v-else-if="!archivedTopicList.length">没有已归档话题</p><article v-for="topic in archivedTopicList" :key="topic.id"><span>{{ topic.title }}</span><button type="button" @click="restoreArchivedTopic(topic.id)">恢复</button></article></section>
+          <section class="archived-section"><h3>{{ archivedTopicRoomName }}的话题</h3><p v-if="!archivedTopicRoomId">请先选择一个团队查看其已归档话题</p><p v-else-if="!archivedTopicList.length">没有已归档话题</p><article v-for="topic in archivedTopicList" :key="topic.id"><span>{{ topic.title }}</span><button type="button" @click="restoreArchivedTopic(topic.id)">恢复</button></article></section>
         </section>
       </div>
     </Transition>

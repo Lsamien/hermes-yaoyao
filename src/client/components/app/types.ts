@@ -1,4 +1,4 @@
-export type SidebarItem = {
+export type SidebarItemBase = {
   id: string
   title: string
   subtitle?: string
@@ -16,4 +16,7 @@ export type SidebarItem = {
   icon?: 'chat' | 'groups' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'artifacts' | 'branch' | 'topic' | 'chevron-left' | 'plus' | 'archive'
   avatar?: string
   avatarMembers?: Array<{ name: string; avatar?: string }>
+  emptyText?: string
 }
+
+export type SidebarItem = SidebarItemBase & { children?: SidebarItemBase[] }
