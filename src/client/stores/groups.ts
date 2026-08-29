@@ -403,7 +403,9 @@ export const useGroupsStore = defineStore('groups', () => {
     const previousRoomId = selectedRoomId.value
     const previousTopicId = selectedTopicId.value
     const sameRoom = selectedRoomId.value === roomId
+    // Keep the public selection pair coherent while the destination snapshot is loading.
     selectedRoomId.value = roomId
+    selectedTopicId.value = sameRoom ? previousTopicId : requestedTopicId
     const rollback = () => {
       if (expectedSelection !== selectionGeneration) return
       selectedRoomId.value = previousRoomId

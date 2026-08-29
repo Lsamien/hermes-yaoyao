@@ -217,6 +217,7 @@ export function roomSidebarItem(
     section: historySection(room.updatedAt),
     unread: room.unreadCount,
     avatar: room.avatar || '',
+    avatarFallbackKey: room.id,
     avatarMembers: (room.avatarMembers || []).map(member => ({
       name: member.displayName || member.profile,
       avatar: member.nodeId === 'local' ? avatars[member.profile] || avatarsByName[member.displayName] : undefined,

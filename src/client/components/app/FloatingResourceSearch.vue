@@ -109,7 +109,7 @@ onBeforeUnmount(() => document.removeEventListener(SIDEBAR_SEARCH_EVENT, show))
                 <div v-if="row.showSection" class="floating-resource-search__section">{{ row.item.section }}</div>
                 <button type="button" role="option" :aria-haspopup="row.hasChildren ? 'listbox' : undefined" @click="choose(row.item)">
                   <span v-if="row.item.avatar !== undefined || row.item.avatarMembers?.length" class="floating-resource-search__icon">
-                    <TeamAvatar :name="row.item.title" :avatar="row.item.avatar || ''" :members="row.item.avatarMembers || []" :fallback-key="row.item.id" :size="30" />
+                    <TeamAvatar :name="row.item.title" :avatar="row.item.avatar || ''" :members="row.item.avatarMembers || []" :fallback-key="row.item.avatarFallbackKey || row.item.id" :size="30" />
                   </span>
                   <span v-else-if="row.item.icon" class="floating-resource-search__icon"><AppIcon :name="row.item.icon" :size="16" /></span>
                   <span class="floating-resource-search__copy"><strong>{{ row.item.title }}</strong><small v-if="row.item.subtitle">{{ row.item.subtitle }}</small></span>

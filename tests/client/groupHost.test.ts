@@ -98,6 +98,7 @@ describe('group host controls', () => {
       ],
     } satisfies GroupRoomSummary
     const item = roomSidebarItem(room, { default: 'data:image/png;base64,LOCAL==' }, { 丫头: 'data:image/png;base64,LOCAL==' })
+    expect(item.avatarFallbackKey).toBe(room.id)
     expect(item.avatarMembers).toEqual([
       { name: '丫头', avatar: 'data:image/png;base64,LOCAL==' },
       { name: '远端丫头', avatar: undefined },

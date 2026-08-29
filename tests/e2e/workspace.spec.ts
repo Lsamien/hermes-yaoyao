@@ -153,6 +153,8 @@ test('shows the team animal avatar in the list and five choices during creation'
   await expect(roomAvatar).toBeVisible()
   await expect(roomAvatar.locator('.team-avatar__image')).toBeVisible()
   await expect(roomAvatar).toHaveCSS('border-radius', '50%')
+  const releaseTopicAvatar = page.locator('[data-sidebar-id="topic:22222222-2222-4222-8222-222222222222:88888888-8888-4888-8888-888888888888"] .team-avatar__image').first()
+  await expect(releaseTopicAvatar).toHaveAttribute('src', await roomAvatar.locator('.team-avatar__image').getAttribute('src') || '')
 
   await page.getByRole('button', { name: '新建团队' }).click()
   const dialog = page.getByRole('dialog', { name: '新建团队' })

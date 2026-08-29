@@ -15,6 +15,7 @@ export type SidebarItemBase = {
   status?: 'online' | 'working' | 'offline'
   icon?: 'chat' | 'groups' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'artifacts' | 'branch' | 'topic' | 'chevron-left' | 'plus' | 'archive'
   avatar?: string
+  avatarFallbackKey?: string
   avatarMembers?: Array<{ name: string; avatar?: string }>
   emptyText?: string
 }

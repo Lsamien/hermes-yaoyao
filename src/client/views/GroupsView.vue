@@ -130,6 +130,7 @@ function topicSidebarItem(topic: GroupTopicSummary, section?: string): SidebarIt
     section,
     topic: true,
     avatar: roomItem?.avatar ?? '',
+    avatarFallbackKey: topic.roomId,
     avatarMembers: roomItem?.avatarMembers,
     active: topic.roomId === groups.selectedRoomId && topic.id === groups.selectedTopicId,
   }
@@ -148,6 +149,7 @@ const sidebarItems = computed<SidebarItem[]>(() => {
       section: '最近话题',
       topic: true,
       avatar: roomItem?.avatar ?? '',
+      avatarFallbackKey: groups.selectedRoomId,
       avatarMembers: roomItem?.avatarMembers,
       active: true,
     })
@@ -161,6 +163,7 @@ function archivedRoomSidebarItems(): SidebarItemBase[] {
   subtitle: room.lastMessage?.content || `${room.agentCount} 个 Agent`,
   meta: sidebarDate(room.updatedAt),
   avatar: room.avatar || '',
+  avatarFallbackKey: room.id,
   avatarMembers: (room.avatarMembers || []).map(member => ({ name: member.displayName || member.profile })),
   }))
 }
@@ -179,6 +182,7 @@ function archivedTopicSidebarItem(topic: GroupTopicSummary): SidebarItem {
     meta: sidebarDate(topic.updatedAt),
     section: '话题',
     avatar: roomItem?.avatar ?? '',
+    avatarFallbackKey: topic.roomId,
     avatarMembers: roomItem?.avatarMembers,
     showMore: false,
   }
