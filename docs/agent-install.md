@@ -6,8 +6,8 @@
 
 | 项目 | 版本 | 校验位置 |
 | --- | --- | --- |
-| Git 发布标签 | `v0.2.16` | `release.json` 的 `gitTag` 与 `git describe --tags --exact-match HEAD` |
-| 夭夭 Web | `0.2.16` | `release.json` 与 `package.json` 的 `version` |
+| Git 发布标签 | `v0.2.17` | `release.json` 的 `gitTag` 与 `git describe --tags --exact-match HEAD` |
+| 夭夭 Web | `0.2.17` | `release.json` 与 `package.json` 的 `version` |
 | Hermes Dashboard 插件 | `1.7.3` | `hermes-plugins/yaoyao/dashboard/manifest.json` 的 `version` |
 
 以下步骤以仓库根目录为工作目录。不要使用浮动分支替代发布标签。
@@ -78,12 +78,12 @@ curl --fail --silent --show-error http://127.0.0.1:9119/api/auth/providers
 ## 1. 获取并校验指定发布版本
 
 ```bash
-RELEASE_VERSION=v0.2.16
+RELEASE_VERSION=v0.2.17
 git fetch --tags
 git checkout "$RELEASE_VERSION"
 
 test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_VERSION"
-test "$(node -p \"require('./package.json').version\")" = "0.2.16"
+test "$(node -p \"require('./package.json').version\")" = "0.2.17"
 test "$(node -e \"console.log(require('./hermes-plugins/yaoyao/dashboard/manifest.json').version)\")" = "1.7.3"
 npm run release:verify
 ```
@@ -224,7 +224,7 @@ launchctl load -w ~/Library/LaunchAgents/com.samien.hermes-yaoyao.plist
 
 ### 推送状态 v2 与 Android FCM
 
-Web `0.2.16` 会在首次写入时把 `$HERMES_YAOYAO_HOME/push/state.json` 从 schema 1
+Web `0.2.16` 及后续版本会在首次写入时把 `$HERMES_YAOYAO_HOME/push/state.json` 从 schema 1
 迁移为 schema 2；已有 APNs 安装、待发送队列、团队订阅、事件去重、游标和聊天恢复
 任务都会保留。旧版 Web 不能直接读取 schema 2，因此升级前必须备份整个 `push/`
 目录；若回滚 Web，也要同步恢复这份升级前备份，不能只切换 `current` 符号链接。
@@ -247,7 +247,7 @@ Git、发布目录、命令输出或日志。配置后检查系统管理中的 A
 
 ## 7. 通过受管服务进行配套升级
 
-首次按第 6 步安装 Web `0.2.16` 后，可在左下角 Agent 菜单打开“系统更新”。
+首次按第 6 步安装 Web `0.2.17` 后，可在左下角 Agent 菜单打开“系统更新”。
 检查更新只读取固定的 `HERMES_YAOYAO_RELEASE_SOURCE`，并锁定最新 `vX.Y.Z`
 标签解析到的 Git 提交；执行升级前仍会检查插件持久目录是否安全。
 

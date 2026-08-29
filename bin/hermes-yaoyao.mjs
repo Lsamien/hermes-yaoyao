@@ -52,6 +52,9 @@ function environment(env = process.env) {
     'HERMES_YAOYAO_APNS_KEY_ID',
     'HERMES_YAOYAO_APNS_TEAM_ID',
     'HERMES_YAOYAO_APNS_TOPIC',
+    'HERMES_YAOYAO_FCM_SERVICE_ACCOUNT_FILE',
+    'HERMES_YAOYAO_FCM_PROJECT_ID',
+    'HERMES_YAOYAO_FCM_PACKAGE_NAME',
     'HERMES_YAOYAO_SERVICE_ROOT',
   ]
   return Object.fromEntries(allowed.flatMap(key => env[key] ? [[key, env[key]]] : []))

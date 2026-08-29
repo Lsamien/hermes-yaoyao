@@ -52,6 +52,23 @@ describe('hermes-yaoyao LaunchAgent plist', () => {
     expect(plist).toContain('<key>HERMES_YAOYAO_APNS_TOPIC</key>')
   })
 
+  it('preserves FCM provider settings in the LaunchAgent', () => {
+    const plist = launchAgentPlist({
+      environment: {
+        HERMES_YAOYAO_FCM_SERVICE_ACCOUNT_FILE: '/Users/test/firebase-service-account.json',
+        HERMES_YAOYAO_FCM_PROJECT_ID: 'yaoyao-test-project',
+        HERMES_YAOYAO_FCM_PACKAGE_NAME: 'cn.samien.yaoyao.hermes',
+      },
+    })
+
+    expect(plist).toContain('<key>HERMES_YAOYAO_FCM_SERVICE_ACCOUNT_FILE</key>')
+    expect(plist).toContain('/Users/test/firebase-service-account.json')
+    expect(plist).toContain('<key>HERMES_YAOYAO_FCM_PROJECT_ID</key>')
+    expect(plist).toContain('yaoyao-test-project')
+    expect(plist).toContain('<key>HERMES_YAOYAO_FCM_PACKAGE_NAME</key>')
+    expect(plist).toContain('cn.samien.yaoyao.hermes')
+  })
+
   it('can point the managed service at the stable current release link', () => {
     const root = join(homedir(), '.local', 'share', 'hermes-yaoyao', 'current')
     const plist = launchAgentPlist({ serviceRoot: root })
