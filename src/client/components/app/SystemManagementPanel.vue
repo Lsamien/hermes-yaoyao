@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
-import { createUser, deleteUser, listUsers, setUpstreamCredentials, updateUser, type ManagedUser } from '@/api/admin'
+import {
+  createUser,
+  deleteUser,
+  getAllowedHostsSettings,
+  listUsers,
+  saveAllowedHostsSettings,
+  setUpstreamCredentials,
+  updateUser,
+  type AllowedHostsSettings,
+  type ManagedUser,
+} from '@/api/admin'
 import {
   getPushSystemStatus,
   saveFCMPushSystemConfig,
@@ -31,6 +41,12 @@ const password = ref('')
 const upstreamUsername = ref('')
 const upstreamPassword = ref('')
 const connectionBaseline = ref({ username: '', password: '' })
+const allowedHostsSettings = ref<AllowedHostsSettings>()
+const allowedHostsText = ref('')
+const allowedHostsBaseline = ref('')
+const allowedHostsBusy = ref(false)
+const allowedHostsError = ref('')
+const allowedHostsNotice = ref('')
 const busy = ref(false)
 const error = ref('')
 const pushStatus = ref<PushSystemStatus>()
@@ -49,6 +65,7 @@ const fcmPackageName = ref('cn.samien.yaoyao.hermes')
 const fcmBusy = ref(false)
 const fcmError = ref('')
 const fcmNotice = ref('')
+const currentAccessHost = window.location.hostname || 'localhost'
 
 interface APNsFormSnapshot {
   keyFile: string
@@ -116,6 +133,7 @@ const dirty = computed(() => {
   if (props.section === 'connection') {
     return upstreamUsername.value !== connectionBaseline.value.username
       || upstreamPassword.value !== connectionBaseline.value.password
+      || allowedHostsText.value !== allowedHostsBaseline.value
   }
   if (props.section !== 'push') return false
   const apnsDirty = Boolean(apnsBaseline.value) && Object.keys(apnsSnapshot()).some(key => apnsSnapshot()[key as keyof APNsFormSnapshot] !== apnsBaseline.value?.[key as keyof APNsFormSnapshot])
@@ -153,6 +171,13 @@ async function refresh() {
   error.value = ''
   if (props.section === 'users') {
     users.value = await listUsers()
+    return
+  }
+  if (props.section === 'connection') {
+    const settings = await getAllowedHostsSettings()
+    allowedHostsSettings.value = settings
+    allowedHostsText.value = settings.editableHosts.join('\n')
+    allowedHostsBaseline.value = allowedHostsText.value
     return
   }
   if (props.section !== 'push') return
@@ -221,6 +246,31 @@ async function saveUpstream() {
     upstreamPassword.value = ''
     connectionBaseline.value = { username: submittedUsername, password: '' }
   }, false)
+}
+
+function parsedAllowedHosts(): string[] {
+  return allowedHostsText.value
+    .split(/[\s,]+/)
+    .map(value => value.trim())
+    .filter(Boolean)
+}
+
+async function saveAllowedHosts() {
+  if (allowedHostsBusy.value) return
+  allowedHostsBusy.value = true
+  allowedHostsError.value = ''
+  allowedHostsNotice.value = ''
+  try {
+    const settings = await saveAllowedHostsSettings(parsedAllowedHosts())
+    allowedHostsSettings.value = settings
+    allowedHostsText.value = settings.editableHosts.join('\n')
+    allowedHostsBaseline.value = allowedHostsText.value
+    allowedHostsNotice.value = '允许的访问地址已保存并立即生效'
+  } catch (cause) {
+    allowedHostsError.value = cause instanceof Error ? cause.message : '无法保存允许的访问地址'
+  } finally {
+    allowedHostsBusy.value = false
+  }
 }
 
 async function savePush() {
@@ -309,8 +359,12 @@ watch(() => [props.active, props.section] as const, ([active, section]) => {
     fcmError.value = ''
     fcmNotice.value = ''
   }
+  if (section === 'connection') {
+    allowedHostsError.value = ''
+    allowedHostsNotice.value = ''
+  }
   void refresh().catch(cause => {
-    error.value = cause instanceof Error ? cause.message : '读取用户失败'
+    error.value = cause instanceof Error ? cause.message : '读取系统设置失败'
   })
 }, { immediate: true })
 </script>
@@ -347,6 +401,25 @@ watch(() => [props.active, props.section] as const, ([active, section]) => {
         <label><span>9119 密码</span><input v-model="upstreamPassword" name="upstream-password" type="password" autocomplete="new-password" :disabled="busy" /></label>
         <button class="solid-button" :disabled="busy || !upstreamUsername.trim() || !upstreamPassword">验证并保存</button>
       </form>
+      <div class="block network-access-block">
+        <h3>外网访问地址</h3>
+        <p class="network-description">允许通过指定域名或公网 IP 访问 8800。每行填写一个地址，不要包含 <code>http://</code>、端口或路径。</p>
+        <form class="allowed-hosts-form" @submit.prevent="saveAllowedHosts">
+          <label>
+            <span>允许的域名和 IP</span>
+            <textarea v-model="allowedHostsText" name="allowed-hosts" rows="5" :disabled="allowedHostsBusy" spellcheck="false" placeholder="yaoyao.example.com&#10;203.0.113.10&#10;2001:db8::10"></textarea>
+            <small>当前访问地址：{{ currentAccessHost }}。保存后立即生效，无需重启 Web。</small>
+          </label>
+          <div v-if="allowedHostsSettings?.environmentHosts.length" class="environment-hosts">
+            <small>环境变量保留地址（Web 中不能移除）</small>
+            <code>{{ allowedHostsSettings.environmentHosts.join(', ') }}</code>
+          </div>
+          <p v-if="allowedHostsSettings?.configurationError" class="allowed-hosts-error" role="alert">现有配置异常：{{ allowedHostsSettings.configurationError }}</p>
+          <p v-if="allowedHostsError" class="allowed-hosts-error" role="alert">{{ allowedHostsError }}</p>
+          <p v-else-if="allowedHostsNotice" class="allowed-hosts-notice" role="status">{{ allowedHostsNotice }}</p>
+          <footer><button class="solid-button" :disabled="allowedHostsBusy || allowedHostsText === allowedHostsBaseline">{{ allowedHostsBusy ? '保存中…' : '保存访问地址' }}</button></footer>
+        </form>
+      </div>
     </div>
 
     <template v-else>
@@ -420,6 +493,19 @@ watch(() => [props.active, props.section] as const, ([active, section]) => {
 .block h3 { margin: 0 0 14px; font-size: 16px; }
 .block p { color: var(--danger); font-size: 13px; }
 .block p.ok { color: var(--success, #21845b); }
+.network-description { margin: 0; color: var(--text-muted) !important; line-height: 1.6; }
+.network-access-block { margin-top: 26px; padding-top: 24px; border-top: 1px solid var(--line); }
+.network-description code { color: var(--text-secondary); }
+.allowed-hosts-form { display: grid; grid-template-columns: 1fr; align-items: stretch; }
+.allowed-hosts-form textarea { min-width: 0; resize: vertical; padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; outline: 0; background: var(--surface-raised); color: var(--text-primary); font: 13px/1.55 var(--font-mono, monospace); }
+.allowed-hosts-form textarea:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }
+.environment-hosts { display: grid; gap: 5px; padding: 10px 11px; border-radius: 9px; background: var(--surface-soft); }
+.environment-hosts small { color: var(--text-muted); font-size: 11px; }
+.environment-hosts code { overflow-wrap: anywhere; color: var(--text-secondary); font-size: 12px; }
+.allowed-hosts-error,.allowed-hosts-notice { margin: 0; padding: 9px 10px; border-radius: 9px; line-height: 1.55; }
+.allowed-hosts-error { background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.allowed-hosts-notice { background: color-mix(in srgb, var(--success, #21845b) 9%, transparent); color: var(--success, #21845b) !important; }
+.allowed-hosts-form footer { display: flex; justify-content: flex-end; }
 .error { margin: 0 0 12px; color: var(--danger); font-size: 13px; }
 .push-status { display: grid; grid-template-columns: minmax(0, 2fr) 1fr 1fr; gap: 8px; }
 .push-status span { display: flex; min-width: 0; flex-direction: column; gap: 5px; padding: 12px; border-radius: 9px; background: var(--surface-soft); }

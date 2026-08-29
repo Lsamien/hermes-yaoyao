@@ -37,3 +37,21 @@ export async function setUpstreamCredentials(username: string, password: string)
     method: 'PUT', body: { username, password } as unknown as JsonValue,
   })
 }
+
+export interface AllowedHostsSettings {
+  source: 'none' | 'file' | 'environment'
+  hosts: string[]
+  editableHosts: string[]
+  environmentHosts: string[]
+  configurationError?: string
+}
+
+export function getAllowedHostsSettings(): Promise<AllowedHostsSettings> {
+  return apiRequest('/api/app/system/allowed-hosts')
+}
+
+export function saveAllowedHostsSettings(hosts: string[]): Promise<AllowedHostsSettings> {
+  return apiRequest('/api/app/system/allowed-hosts', {
+    method: 'PUT', body: { hosts } as unknown as JsonValue,
+  })
+}

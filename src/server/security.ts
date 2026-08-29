@@ -65,7 +65,7 @@ export function isExactOrigin(
   // browser's same-origin request correctly carries an https Origin.
   if (!secure && actual === expectedRequestOrigin(host, true)) return true
   try {
-    return allowedHosts.has(new URL(actual).hostname.toLowerCase().replace(/\.$/, ''))
+    return allowedHosts.has(new URL(actual).hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, ''))
   } catch {
     return false
   }
@@ -171,7 +171,10 @@ export function requestAccountKey(request: IncomingMessage): string {
 
 export function applySecurityHeaders(ctx: Koa.Context, tls: boolean, allowedHosts: ReadonlySet<string> = new Set()): void {
   const socketOrigin = `${tls ? 'wss' : 'ws'}://${ctx.host}`
-  const proxySocketOrigins = [...allowedHosts].flatMap(host => [`ws://${host}`, `wss://${host}`])
+  const proxySocketOrigins = [...allowedHosts].flatMap(host => {
+    const authority = host.includes(':') ? `[${host}]` : host
+    return [`ws://${authority}`, `wss://${authority}`]
+  })
   ctx.set('Content-Security-Policy', [
     "default-src 'self'",
     "base-uri 'none'",

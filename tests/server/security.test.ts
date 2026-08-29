@@ -79,6 +79,17 @@ describe('server security boundary', () => {
     expect(headers['Content-Security-Policy']).toContain('wss://yaoyao-lc.samien.cn')
   })
 
+  it('accepts configured IPv6 addresses and brackets them in WebSocket CSP origins', () => {
+    const allowed = new Set(['2001:db8::10'])
+    expect(isAllowedHostHeader('[2001:db8::10]:8800', config({ allowedHosts: allowed }))).toBe(true)
+    expect(isExactOrigin('https://[2001:db8::10]', '10.1.5.100', false, allowed)).toBe(true)
+    const headers: Record<string, string> = {}
+    const ctx = { host: '10.1.5.100', set(name: string, value: string) { headers[name] = value } } as unknown as Koa.Context
+    applySecurityHeaders(ctx, false, allowed)
+    expect(headers['Content-Security-Policy']).toContain('ws://[2001:db8::10]')
+    expect(headers['Content-Security-Policy']).toContain('wss://[2001:db8::10]')
+  })
+
   it('requires an exact scheme and host Origin', () => {
     expect(isExactOrigin('http://127.0.0.1:8800', '127.0.0.1:8800', false)).toBe(true)
     expect(isExactOrigin('https://127.0.0.1:8800', '127.0.0.1:8800', false)).toBe(true)

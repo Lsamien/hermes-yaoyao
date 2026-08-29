@@ -78,7 +78,7 @@ ID 和包名。浏览器只提交路径和公开元数据；8800 本地校验 RS
 插件安装接口安装。默认源为
 `https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao`。
 
-当前发布版本：**Git `v0.2.20` / 夭夭 Web `0.2.20` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
+当前发布版本：**Git `v0.2.21` / 夭夭 Web `0.2.21` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
 
 需要由自动化 Agent 部署或升级时，请直接使用 [Agent 安装手册](docs/agent-install.md)。其中包含固定版本校验、备份、同步、单一 Dashboard 重载与验证步骤。
 
@@ -320,7 +320,7 @@ curl --fail --silent http://127.0.0.1:8800/readyz
 
 Docker Desktop 会把 `host.docker.internal` 转发到宿主机。Linux 上的 `host-gateway` 只负责解析宿主机地址：如果外部 9119 仍只监听宿主机 `127.0.0.1`，桥接网络中的容器无法连接它。此时应让现有 Dashboard 在有认证和防火墙保护的前提下监听容器可达的宿主机地址，或由部署方改用经过评估的 host 网络方案；Compose 本身不会更改 9119 的监听配置。
 
-如需经可信局域网或反向代理访问，可将 `HERMES_YAOYAO_BIND_ADDRESS` 改为 `0.0.0.0`。使用域名时还需配置 `HERMES_YAOYAO_ALLOWED_HOSTS`。Compose 内部的 8800 使用 HTTP；对非可信网络发布时，应在容器前配置 HTTPS 反向代理，不要直接把 8800 暴露到公网。
+如需经可信局域网或反向代理访问，可将 `HERMES_YAOYAO_BIND_ADDRESS` 改为 `0.0.0.0`。首次使用外网域名或公网 IP 前，可先从 `localhost:8800` 进入“设置中心 → Hermes 连接 → 外网访问地址”添加；也可继续通过 `HERMES_YAOYAO_ALLOWED_HOSTS` 配置，环境变量地址会与 Web 设置合并。Compose 内部的 8800 使用 HTTP；对非可信网络发布时，应在容器前配置 HTTPS 反向代理，不要直接把 8800 暴露到公网。
 
 停止或升级不会删除运行数据：
 

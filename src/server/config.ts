@@ -5,6 +5,10 @@ import { readFileSync } from 'node:fs'
 import type { APNsEnvironment } from './apns.js'
 import { loadAPNsConfiguration, type APNsConfigurationSnapshot } from './apnsConfiguration.js'
 import { loadFCMConfiguration, type FCMConfigurationSnapshot } from './fcmConfiguration.js'
+import {
+  loadAllowedHostsConfiguration,
+  type AllowedHostsConfigurationSnapshot,
+} from './allowedHostsConfiguration.js'
 export { DEFAULT_APNS_TOPIC } from './apnsConfiguration.js'
 
 export interface APNsProviderConfig {
@@ -49,6 +53,7 @@ export interface ServerConfig {
   fcm?: FCMProviderConfig
   fcmConfigurationError?: string
   fcmSettings?: FCMConfigurationSnapshot
+  allowedHostsSettings?: AllowedHostsConfigurationSnapshot
 }
 
 export const DEFAULT_YAOYAO_PLUGIN_SOURCE = 'https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao'
@@ -184,17 +189,14 @@ export function loadServerConfig(
       'Plain HTTP on a non-loopback host requires HERMES_YAOYAO_ALLOW_INSECURE_LAN=1',
     )
   }
-  const allowedHosts = new Set(
-    (env.HERMES_YAOYAO_ALLOWED_HOSTS ?? '')
-      .split(',')
-      .map(normalizeConfiguredHost)
-      .filter(Boolean),
-  )
+  const allowedHostsSettings = loadAllowedHostsConfiguration(home, env)
+  const allowedHosts = new Set(allowedHostsSettings.hosts)
   return {
     host,
     port,
     upstream,
     allowedHosts,
+    allowedHostsSettings,
     home,
     mediaRoot,
     attachmentsRoot,

@@ -8,7 +8,13 @@ import { getPushSystemStatus, saveFCMPushSystemConfig, savePushSystemConfig, typ
 vi.mock('@/api/admin', () => ({
   createUser: vi.fn(async () => undefined),
   deleteUser: vi.fn(async () => undefined),
+  getAllowedHostsSettings: vi.fn(async () => ({
+    source: 'none', hosts: [], editableHosts: [], environmentHosts: [],
+  })),
   listUsers: vi.fn(async () => []),
+  saveAllowedHostsSettings: vi.fn(async (hosts: string[]) => ({
+    source: 'file', hosts, editableHosts: hosts, environmentHosts: [],
+  })),
   setUpstreamCredentials: vi.fn(async () => undefined),
   updateUser: vi.fn(async () => undefined),
 }))

@@ -40,6 +40,11 @@ import {
   FCMConfigurationManager,
   type FCMConfigurationInput,
 } from './fcmConfiguration.js'
+import {
+  AllowedHostsConfigurationManager,
+  canonicalAllowedHosts,
+  normalizeAllowedHost,
+} from './allowedHostsConfiguration.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -58,6 +63,7 @@ export interface RouteDependencies {
   push: PushCoordinator
   apnsConfiguration: APNsConfigurationManager
   fcmConfiguration: FCMConfigurationManager
+  allowedHostsConfiguration: AllowedHostsConfigurationManager
 }
 
 function body(ctx: Koa.Context): JsonObject {
@@ -1750,6 +1756,24 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   router.get('/api/app/system/push-status', (ctx) => {
     dependencies.auth.requireAdmin(ctx)
     json(ctx, 200, pushSystemStatus(dependencies))
+  })
+  router.get('/api/app/system/allowed-hosts', (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
+    json(ctx, 200, dependencies.allowedHostsConfiguration.snapshot())
+  })
+  router.put('/api/app/system/allowed-hosts', (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
+    const request = body(ctx)
+    if (!Array.isArray(request.hosts) || request.hosts.some(host => typeof host !== 'string')) {
+      throw new HttpError(400, 'hosts 必须是域名或 IP 数组', 'invalid_allowed_hosts')
+    }
+    const requestedHosts = canonicalAllowedHosts(request.hosts as string[])
+    const currentHost = normalizeAllowedHost(ctx.hostname)
+    const environmentHosts = dependencies.allowedHostsConfiguration.snapshot().environmentHosts
+    if (!isPrivateHost(currentHost) && !new Set([...environmentHosts, ...requestedHosts]).has(currentHost)) {
+      throw new HttpError(409, `不能移除当前正在使用的访问地址 ${currentHost}`, 'current_host_required')
+    }
+    json(ctx, 200, dependencies.allowedHostsConfiguration.update(requestedHosts))
   })
   router.put('/api/app/system/push-config', async (ctx) => {
     dependencies.auth.requireAdmin(ctx)

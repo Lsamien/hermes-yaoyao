@@ -35,6 +35,10 @@ import {
 } from './fcmConfiguration.js'
 import { PushCoordinatorEventAdapter } from './pushEventAdapter.js'
 import {
+  AllowedHostsConfigurationManager,
+  type AllowedHostsConfigurationSnapshot,
+} from './allowedHostsConfiguration.js'
+import {
   ChatPushJobManager,
   GroupPushEventWatcher,
   HermesChatNotificationResolver,
@@ -56,6 +60,7 @@ export interface ApplicationOptions {
   push?: PushCoordinator
   apnsConfiguration?: APNsConfigurationManager
   fcmConfiguration?: FCMConfigurationManager
+  allowedHostsConfiguration?: AllowedHostsConfigurationManager
 }
 
 export interface ApplicationRuntime {
@@ -74,6 +79,7 @@ export interface ApplicationRuntime {
   push: PushCoordinator
   apnsConfiguration: APNsConfigurationManager
   fcmConfiguration: FCMConfigurationManager
+  allowedHostsConfiguration: AllowedHostsConfigurationManager
   pushEventCoordinator: PushCoordinatorEventAdapter
   chatPushJobs: ChatPushJobManager
   groupPushEvents: GroupPushEventWatcher
@@ -109,6 +115,8 @@ function persistentCsrfSecret(home: string, override?: Buffer): Buffer {
 
 export function createApplication(options: ApplicationOptions = {}): ApplicationRuntime {
   const config = options.config ?? loadServerConfig()
+  const runtimeAllowedHosts = new Set(config.allowedHosts)
+  config.allowedHosts = runtimeAllowedHosts
   const app = new Koa()
   app.proxy = false
   const csrf = new CsrfProtection(persistentCsrfSecret(config.home, options.csrfSecret), Boolean(config.tlsCert))
@@ -155,6 +163,14 @@ export function createApplication(options: ApplicationOptions = {}): Application
   }
   const fcmConfiguration = options.fcmConfiguration
     ?? new FCMConfigurationManager(config.home, initialFCMSettings)
+  const initialAllowedHostsSettings: AllowedHostsConfigurationSnapshot = config.allowedHostsSettings ?? {
+    source: runtimeAllowedHosts.size ? 'environment' : 'none',
+    hosts: [...runtimeAllowedHosts],
+    editableHosts: [],
+    environmentHosts: [...runtimeAllowedHosts],
+  }
+  const allowedHostsConfiguration = options.allowedHostsConfiguration
+    ?? new AllowedHostsConfigurationManager(config.home, initialAllowedHostsSettings, runtimeAllowedHosts)
   const push = options.push ?? new PushCoordinator({
     home: config.home,
     apns: config.apns,
@@ -291,6 +307,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     push,
     apnsConfiguration,
     fcmConfiguration,
+    allowedHostsConfiguration,
   })
   app.use(router.routes())
   app.use(router.allowedMethods({ throw: false }))
@@ -320,6 +337,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     push,
     apnsConfiguration,
     fcmConfiguration,
+    allowedHostsConfiguration,
     pushEventCoordinator,
     chatPushJobs,
     groupPushEvents,
