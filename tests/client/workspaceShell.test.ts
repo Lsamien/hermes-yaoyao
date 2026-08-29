@@ -95,6 +95,8 @@ describe('Workspace shell account controls', () => {
     expect(desktop.find('.profile-menu').exists()).toBe(false)
 
     const settingsTrigger = desktop.get<HTMLButtonElement>('.sidebar-settings-trigger')
+    expect(settingsTrigger.text()).toBe('')
+    expect(settingsTrigger.attributes('aria-label')).toBe('打开设置中心')
     await settingsTrigger.trigger('click')
     const settings = wrapper.get('[data-testid="settings-center"]')
     expect(settings.attributes('data-page')).toBe('agent-identity')

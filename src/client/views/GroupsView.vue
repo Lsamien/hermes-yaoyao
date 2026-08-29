@@ -11,6 +11,7 @@ import ComposerShell from '@/components/composer/ComposerShell.vue'
 import type { ComposerOption, ComposerReference, ComposerSubmit } from '@/components/composer/types'
 import CreateGroupDialog from '@/components/groups/CreateGroupDialog.vue'
 import GroupManager from '@/components/groups/GroupManager.vue'
+import TopicTeamPickerDialog from '@/components/groups/TopicTeamPickerDialog.vue'
 import type { GroupProfileOption } from '@/components/groups/types'
 import PreviewModal from '@/components/library/PreviewModal.vue'
 import ImagePreviewLightbox from '@/components/library/ImagePreviewLightbox.vue'
@@ -37,6 +38,7 @@ const groups = useGroupsStore()
 const route = useRoute()
 const router = useRouter()
 const createOpen = ref(false)
+const topicTeamPickerOpen = ref(false)
 const managerOpen = ref(false)
 const showThinking = ref(true)
 const quoted = ref<UiMessage | null>(null)
@@ -54,7 +56,6 @@ const creatingRoom = ref(false)
 const roomActionMenu = ref<{ roomId: string; topicId?: string; x: number; y: number } | null>(null)
 const topicActionRenaming = ref(false)
 const topicActionRenameValue = ref('')
-const topicListRoomId = ref<string | null>(null)
 const archivedOverlayOpen = ref(false)
 const archivedRoomList = ref<GroupRoomSummary[]>([])
 const archivedTopicList = ref<GroupTopicSummary[]>([])
@@ -83,82 +84,75 @@ const roomSidebarItems = computed(() => activeRooms.value.map(room => {
     : room.avatarMembers
   return roomSidebarItem({ ...room, avatarMembers: currentMembers }, agentAvatars.value, agentAvatarsByName.value)
 }))
-const pinnedTopics = computed(() => groups.pinnedTopics.filter(topic => !topic.archived).sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id)))
-const topicListRoom = computed(() => topicListRoomId.value ? activeRooms.value.find(room => room.id === topicListRoomId.value) : undefined)
-const sidebarSubtitle = computed(() => topicListRoom.value
-  ? `${topicListRoom.value.agentCount} 个 Agent`
-  : groups.availability === 'available' ? `${activeRooms.value.length} 个活跃团队` : `9119 团队 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}`)
-const GROUP_LIST_BACK_ID = 'group-list'
-const NEW_TOPIC_ID = 'new-topic'
+const activeRoomById = computed(() => new Map(activeRooms.value.map(room => [room.id, room])))
+const allTopics = computed(() => {
+  const topics = new Map<string, GroupTopicSummary>()
+  for (const topic of groups.pinnedTopics) {
+    if (!topic.archived && activeRoomById.value.has(topic.roomId)) topics.set(topic.id, topic)
+  }
+  for (const room of activeRooms.value) {
+    for (const topic of groups.topicsForRoom(room.id)) {
+      if (!topic.archived) topics.set(topic.id, topic)
+    }
+  }
+  return [...topics.values()].sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id))
+})
+const sidebarSubtitle = computed(() => groups.availability === 'available'
+  ? `${allTopics.value.length} 个话题`
+  : `9119 团队 ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL}`)
+const SEARCH_ARCHIVED_ID = 'search:archived'
+const SEARCH_ROOM_PREFIX = 'room:'
 function topicSidebarItemId(roomId: string, topicId: string): string { return `topic:${roomId}:${topicId}` }
 function topicFromSidebarItemId(id: string): { roomId: string; topicId: string } | undefined {
   const match = /^topic:([^:]+):([^:]+)$/.exec(id)
   return match ? { roomId: match[1]!, topicId: match[2]! } : undefined
 }
-function topicTimeSection(updatedAt: number): string {
+function sidebarDate(updatedAt: number): string {
   const timestamp = updatedAt < 10_000_000_000 ? updatedAt * 1000 : updatedAt
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
-  if (timestamp >= today.getTime()) return '今天'
-  if (timestamp >= yesterday.getTime()) return '昨天'
-  return '更早'
+  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(new Date(timestamp))
+}
+function topicSidebarItem(topic: GroupTopicSummary, section?: string): SidebarItem {
+  const room = activeRoomById.value.get(topic.roomId)
+  const roomItem = roomSidebarItems.value.find(item => item.id === topic.roomId)
+  return {
+    id: topicSidebarItemId(topic.roomId, topic.id),
+    title: topic.title,
+    subtitle: `${room?.name || '未知团队'}：${topic.preview || '暂无消息'}`,
+    meta: sidebarDate(topic.updatedAt),
+    unread: topic.unreadCount,
+    pinned: topic.pinned,
+    section,
+    topic: true,
+    avatar: roomItem?.avatar ?? '',
+    avatarMembers: roomItem?.avatarMembers,
+    active: topic.roomId === groups.selectedRoomId && topic.id === groups.selectedTopicId,
+  }
 }
 const sidebarItems = computed<SidebarItem[]>(() => {
-  const room = topicListRoom.value
-  if (!room) return roomSidebarItems.value.map(item => ({ ...item, section: undefined }))
-  const items: SidebarItem[] = [{
-    id: GROUP_LIST_BACK_ID,
-    title: '返回团队列表',
-    icon: 'chevron-left',
-    showMore: false,
-  }, {
-    id: NEW_TOPIC_ID,
-    title: '新建话题',
-    icon: 'plus',
-    showMore: false,
-  }]
-  const roomTopics = groups.topicsForRoom(room.id)
-  items.push(...roomTopics.filter(topic => topic.pinned).map(topic => ({
-    id: topicSidebarItemId(room.id, topic.id),
-    title: topic.title,
-    subtitle: topic.preview || `${topic.messageCount} 条消息`,
-    meta: topic.unreadCount ? `${topic.unreadCount} 未读` : `${topic.messageCount} 条`,
-    unread: topic.unreadCount,
-    pinned: true,
-    section: '话题置顶',
-    icon: 'topic' as const,
-    topic: true,
-    showMore: false,
-    active: topic.id === groups.selectedTopicId,
-  })))
-  items.push(...roomTopics.filter(topic => !topic.pinned).map(topic => ({
-    id: topicSidebarItemId(room.id, topic.id),
-    title: topic.title,
-    subtitle: topic.preview || `${topic.messageCount} 条消息`,
-    meta: topic.unreadCount ? `${topic.unreadCount} 未读` : `${topic.messageCount} 条`,
-    unread: topic.unreadCount,
-    section: topicTimeSection(topic.updatedAt),
-    icon: 'topic' as const,
-    topic: true,
-    showMore: false,
-    active: topic.id === groups.selectedTopicId,
-  })))
-  if (room.id === groups.selectedRoomId && groups.selectedTopicId && !groups.selectedTopic) {
-    items.push({
-      id: topicSidebarItemId(room.id, groups.selectedTopicId),
+  const pinned = allTopics.value.filter(topic => topic.pinned).map(topic => topicSidebarItem(topic, '话题置顶'))
+  const recent = allTopics.value.filter(topic => !topic.pinned).map(topic => topicSidebarItem(topic, '最近话题'))
+  const items = [...pinned, ...recent]
+  if (groups.selectedRoomId && groups.selectedTopicId && !groups.selectedTopic && !items.some(item => item.id === topicSidebarItemId(groups.selectedRoomId!, groups.selectedTopicId!))) {
+    const room = activeRoomById.value.get(groups.selectedRoomId)
+    const roomItem = roomSidebarItems.value.find(item => item.id === groups.selectedRoomId)
+    items.unshift({
+      id: topicSidebarItemId(groups.selectedRoomId, groups.selectedTopicId),
       title: '新话题',
-      subtitle: '发送第一条消息以创建',
-      section: '今天',
-      icon: 'topic',
+      subtitle: `${room?.name || '未知团队'}：发送第一条消息以创建`,
+      section: '最近话题',
       topic: true,
-      showMore: false,
+      avatar: roomItem?.avatar ?? '',
+      avatarMembers: roomItem?.avatarMembers,
       active: true,
     })
   }
   return items
 })
+const groupSearchItems = computed<SidebarItem[]>(() => [
+  ...roomSidebarItems.value.map(item => ({ ...item, id: `${SEARCH_ROOM_PREFIX}${item.id}`, section: '团队', showMore: false })),
+  { id: SEARCH_ARCHIVED_ID, title: '已归档内容', subtitle: '查看已归档团队和话题', section: '已归档', icon: 'archive' as const, showMore: false },
+  ...allTopics.value.map(topic => topicSidebarItem(topic, '话题')),
+])
 const localAgentIdentities = computed(() => new Map(auth.profiles.map(profile => [profile.name, {
   name: profile.agentName || profile.displayName || profile.name,
 }])))
@@ -293,7 +287,6 @@ function stopActiveTopic() {
 async function selectRoom(id: string) {
   try { await groups.selectRoom(id) }
   catch { return }
-  topicListRoomId.value = id
   await router.push(groupRoute())
   quoted.value = null
 }
@@ -307,36 +300,28 @@ async function selectTopic(id: string) {
 }
 
 async function selectSidebarItem(id: string) {
-  if (id === GROUP_LIST_BACK_ID) {
-    topicListRoomId.value = null
-    return
-  }
-  if (id === NEW_TOPIC_ID && topicListRoom.value) {
-    await startTopic(topicListRoom.value.id)
-    return
-  }
   const topic = topicFromSidebarItemId(id)
-  if (topic) {
-    if (topic.roomId !== groups.selectedRoomId) {
-      try { await groups.selectRoom(topic.roomId, topic.topicId) }
-      catch { return }
-      topicListRoomId.value = topic.roomId
-      await router.push(groupRoute())
-      quoted.value = null
-      return
-    }
-    await selectTopic(topic.topicId)
+  if (!topic) return
+  if (topic.roomId !== groups.selectedRoomId) {
+    try { await groups.selectRoom(topic.roomId, topic.topicId) }
+    catch { return }
+    await router.push(groupRoute())
+    quoted.value = null
     return
   }
-  await selectRoom(id)
+  await selectTopic(topic.topicId)
 }
 
-async function openRoomManager(id: string) {
-  if (topicFromSidebarItemId(id)) return
-  await selectRoom(id)
-  managerOpen.value = true
-  try { await groups.refreshNodes() }
-  catch { /* Keep the current node list when refreshing is unavailable. */ }
+async function selectGroupSearchItem(id: string) {
+  if (id === SEARCH_ARCHIVED_ID) {
+    await openArchivedOverlay()
+    return
+  }
+  if (id.startsWith(SEARCH_ROOM_PREFIX)) {
+    await selectRoom(id.slice(SEARCH_ROOM_PREFIX.length))
+    return
+  }
+  await selectSidebarItem(id)
 }
 
 async function openSelectedRoomManager() {
@@ -408,7 +393,6 @@ async function startTopicFromRoomAction() {
 async function startTopic(roomId: string) {
   try {
     await groups.selectRoom(roomId)
-    topicListRoomId.value = roomId
     const topicId = await groups.startNewTopic()
     if (!topicId) return
     await router.push(groupRoute(roomId, topicId))
@@ -416,6 +400,11 @@ async function startTopic(roomId: string) {
     await nextTick()
     composer.value?.focus()
   } catch { /* store publishes the error */ }
+}
+
+async function chooseTopicTeam(roomId: string) {
+  topicTeamPickerOpen.value = false
+  await startTopic(roomId)
 }
 
 async function createRoom(payload: { name: string; avatar?: string; members: Array<GroupProfileOption & { description?: string }>; autoReply: boolean; replyRounds: number; instructions?: string; hostProfile?: string; orchestrationMode?: 'free' | 'host' }) {
@@ -666,12 +655,14 @@ onMounted(async () => {
   void loadPushSubscriptions()
   try {
     await groups.start()
+    if (groups.topicProtocol) {
+      await Promise.all(activeRooms.value.map(room => groups.loadRoomTopics(room.id).catch(() => undefined)))
+    }
     const requested = typeof route.params.roomId === 'string' ? route.params.roomId : ''
     const requestedTopic = typeof route.params.topicId === 'string' ? route.params.topicId : undefined
     if (requested) {
       try {
         await groups.selectRoom(requested, requestedTopic)
-        topicListRoomId.value = requested
       }
       catch {
         if (groups.selectedRoomId) await router.replace(groupRoute())
@@ -694,14 +685,10 @@ onBeforeUnmount(() => {
 watch(() => [route.params.roomId, route.params.topicId] as const, async ([roomValue, topicValue]) => {
   const roomId = typeof roomValue === 'string' ? roomValue : ''
   const topicId = typeof topicValue === 'string' ? topicValue : undefined
-  if (!roomId) {
-    topicListRoomId.value = null
-    return
-  }
+  if (!roomId) return
   if (roomId && (roomId !== groups.selectedRoomId || (groups.topicProtocol && topicId && topicId !== groups.selectedTopicId))) {
     try {
       await groups.selectRoom(roomId, topicId)
-      topicListRoomId.value = roomId
     }
     catch { if (groups.selectedRoomId && route.fullPath !== groupRoute()) await router.replace(groupRoute()) }
   }
@@ -714,39 +701,28 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 </script>
 
 <template>
-  <WorkspaceView sidebar-title="团队" :sidebar-context-title="topicListRoom?.name" :sidebar-subtitle="sidebarSubtitle" :sidebar-focus-mode="!!topicListRoom" :inspector-open="managerOpen && !!room" inspector-close-label="关闭团队管理" @close-inspector="managerOpen = false">
+  <WorkspaceView sidebar-title="话题" :sidebar-subtitle="sidebarSubtitle" :inspector-open="managerOpen && !!room" inspector-close-label="关闭团队管理" @close-inspector="managerOpen = false">
     <template #sidebar-action>
+      <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available' || !groups.topicProtocol || !activeRooms.length" title="新建话题" aria-label="新建话题" @click="topicTeamPickerOpen = true">
+        <AppIcon name="topic" :size="18" />
+        <span>新建话题</span>
+      </button>
       <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" title="新建团队" aria-label="新建团队" @click="openCreateGroup">
         <YaoYaoSidebarIcon name="add" />
         <span>新建团队</span>
       </button>
-      <button class="sidebar-primary-action" type="button" :disabled="groups.availability !== 'available'" @click="openArchivedOverlay">
-        <AppIcon name="archive" :size="15" />
-        <span>已归档</span>
-      </button>
-    </template>
-    <template #sidebar-before-heading>
-      <section v-if="pinnedTopics.length && !topicListRoom" class="pinned-topic-list" aria-label="话题置顶">
-        <header class="pinned-topic-list__heading"><strong>话题置顶</strong><span>{{ pinnedTopics.length }} 个置顶话题</span></header>
-        <button v-for="topic in pinnedTopics" :key="topic.id" class="pinned-topic-list__item" type="button" :class="{ active: topic.id === groups.selectedTopicId }" @click="selectSidebarItem(topicSidebarItemId(topic.roomId, topic.id))" @contextmenu.prevent.stop="openTopicActions(topic.roomId, topic.id, $event)">
-          <AppIcon name="topic" :size="14" />
-          <span>{{ topic.title }}</span>
-          <small>{{ activeRooms.find(room => room.id === topic.roomId)?.name || topic.preview }}</small>
-        </button>
-      </section>
     </template>
     <template #sidebar>
       <ResourceSidebar
-        :class="{ 'group-topic-focus-sidebar': !!topicListRoom }"
         :items="sidebarItems"
-        :active-id="groups.selectedRoomId"
+        :active-id="groups.selectedRoomId && groups.selectedTopicId ? topicSidebarItemId(groups.selectedRoomId, groups.selectedTopicId) : ''"
         :loading="groups.isLoading"
         external-search
-        search-placeholder="搜索团队"
-        empty-title="还没有团队"
-        empty-description="新建团队，邀请 1–8 个 Agent 一起协作。"
+        search-placeholder="搜索话题"
+        empty-title="还没有话题"
+        empty-description="点击新建话题，选择一个团队开始协作。"
         @select="selectSidebarItem"
-        @more="openRoomManager"
+        @more="openRoomActions"
         @context-menu="openRoomActions"
       />
     </template>
@@ -836,7 +812,8 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
     </template>
   </WorkspaceView>
 
-  <FloatingResourceSearch section="groups" label="搜索团队" :items="roomSidebarItems" @select="selectRoom" />
+  <FloatingResourceSearch section="groups" label="搜索话题、团队或归档" :items="groupSearchItems" @select="selectGroupSearchItem" />
+  <TopicTeamPickerDialog :open="topicTeamPickerOpen" :rooms="activeRooms" :current-room-id="groups.selectedRoomId" @close="topicTeamPickerOpen = false" @select="chooseTopicTeam" />
   <CreateGroupDialog :open="createOpen" :profiles="profiles" :avatar-enabled="groups.roomAvatarProtocol" :host-enabled="groups.hostProtocol" :host-flow-enabled="groups.hostFlowProtocol" :room-instructions-enabled="groups.roomInstructionsProtocol" :error="createError" :busy="groups.isLoading || creatingRoom" @close="createOpen = false" @create="createRoom" />
   <PreviewModal v-if="preview" :item="preview" :items="conversationMediaItems" @close="preview = null" @add-to-composer="addPreviewToComposer" @source="preview = null" />
   <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" :can-add="uploadsEnabled" @add="addMediaToComposer" />
@@ -887,15 +864,6 @@ watch(() => auth.activeProfile?.name, profile => { if (profile) restoreShowThink
 .sidebar-primary-action:hover, .sidebar-primary-action:focus-visible { background: var(--surface-hover); outline: 0; }
 .sidebar-primary-action:focus-visible { box-shadow: inset 0 0 0 1px var(--line-strong); }
 .sidebar-primary-action:disabled { cursor: not-allowed; opacity: .35; }
-.pinned-topic-list { max-height: 154px; overflow: auto; padding: 0 10px 4px; border-bottom: 1px solid var(--line); }
-.pinned-topic-list__heading { display: flex; min-height: 35px; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 11px 5px; }
-.pinned-topic-list__heading strong { font-size: 12px; font-weight: 680; }.pinned-topic-list__heading span { overflow: hidden; color: var(--text-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.pinned-topic-list__item { display: flex; width: 100%; min-height: 32px; align-items: center; gap: 7px; padding: 1px 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }.pinned-topic-list__item:hover, .pinned-topic-list__item.active { background: var(--surface-hover); }.pinned-topic-list__item :deep(.app-icon) { flex: 0 0 auto; color: var(--text-muted); }.pinned-topic-list__item > span { min-width: 0; overflow: hidden; font-size: 10.5px; font-weight: 450; text-overflow: ellipsis; white-space: nowrap; }.pinned-topic-list__item small { margin-left: auto; overflow: hidden; color: var(--text-muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
-.group-topic-focus-sidebar :deep(.sidebar-list) { padding: 0 0 14px; }
-.group-topic-focus-sidebar :deep(.sidebar-section-label) { margin-inline: 10px; }
-.group-topic-focus-sidebar :deep(.sidebar-item:not([data-sidebar-id="group-list"])) { width: calc(100% - 20px); margin-inline: 10px; }
-.group-topic-focus-sidebar :deep([data-sidebar-id="group-list"]) { position: sticky; z-index: 3; top: 0; min-height: 58px; padding-inline: 17px; border-bottom: 1px solid var(--line); border-radius: 0; background: var(--surface); }
-.group-topic-focus-sidebar :deep([data-sidebar-id="group-list"]:hover), .group-topic-focus-sidebar :deep([data-sidebar-id="group-list"]:focus-visible) { background: var(--surface-hover); }
 .archived-overlay-backdrop { position: fixed; z-index: 220; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(0,0,0,.36); }.archived-overlay { width: min(460px, 100%); max-height: min(620px, calc(100vh - 40px)); overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-raised); box-shadow: 0 24px 70px rgba(0,0,0,.28); }.archived-overlay header { display: flex; align-items: center; justify-content: space-between; padding: 18px 18px 14px; border-bottom: 1px solid var(--line); }.archived-overlay header small { display: block; color: var(--text-secondary); font-size: 10px; }.archived-overlay header strong { font-size: 15px; }.archived-overlay header button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); cursor: pointer; }.archived-section { display: grid; gap: 8px; padding: 16px 18px; }.archived-section + .archived-section { border-top: 1px solid var(--line); }.archived-section h3 { margin: 0; font-size: 12px; }.archived-section p { margin: 0; color: var(--text-secondary); font-size: 12px; }.archived-section article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; }.archived-section article span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.archived-section article button { border: 0; border-radius: 7px; background: var(--surface-hover); color: var(--text-primary); cursor: pointer; padding: 5px 9px; }
 .group-header-actions { display: flex; align-items: center; gap: 8px; }.group-host-chip { max-width: 150px; overflow: hidden; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line)); border-radius: 999px; background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); font-size: 9px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }.group-push-button.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }.group-avatars { display: flex; align-items: center; }.group-avatars span, .group-avatars em { display: grid; width: 24px; height: 24px; margin-left: -5px; place-items: center; border: 2px solid var(--canvas); border-radius: 8px; font-size: 8px; font-style: normal; font-weight: 650; }.group-avatars span { background: transparent; color: var(--text-secondary); }.group-avatars span:first-child { margin-left: 0; }.group-avatars em { background: var(--surface-hover); color: var(--text-secondary); }
 .group-error { display: flex; width: min(760px, calc(100% - 32px)); margin: 0 auto 4px; align-items: center; gap: 6px; color: var(--danger); font-size: 9px; }

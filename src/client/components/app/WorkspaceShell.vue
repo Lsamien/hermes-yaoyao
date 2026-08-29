@@ -121,7 +121,7 @@ const activeNav = computed(() => {
 
 const contextHeading = computed(() => ({
   chat: '历史记录',
-  groups: '团队列表',
+  groups: '话题列表',
   files: '历史记录',
 })[activeNav.value.key])
 
@@ -368,7 +368,6 @@ onBeforeUnmount(() => {
           </button>
           <button class="sidebar-settings-trigger" type="button" title="设置中心" aria-label="打开设置中心" @click="openSettings('agent-identity', $event)">
             <AppIcon name="settings" :size="17" />
-            <span>设置</span>
           </button>
           <Transition name="menu-fade">
             <div v-if="profileMenuOpen" class="profile-menu" role="listbox" aria-label="切换 Agent" @keydown="handleProfileMenuKeydown">
@@ -475,7 +474,6 @@ onBeforeUnmount(() => {
           </button>
           <button class="sidebar-settings-trigger" type="button" title="设置中心" aria-label="打开设置中心" @click="openSettings('agent-identity', $event)">
             <AppIcon name="settings" :size="17" />
-            <span>设置</span>
           </button>
           <Transition name="menu-fade">
             <div v-if="profileMenuOpen" class="profile-menu" role="listbox" aria-label="切换 Agent" @keydown="handleProfileMenuKeydown">
@@ -603,8 +601,8 @@ onBeforeUnmount(() => {
   color: var(--text-primary);
   cursor: pointer;
   text-align: left;
-  font-size: 13px;
-  font-weight: 580;
+  font-size: 14px;
+  font-weight: 650;
 }
 .sidebar-search-trigger:hover,
 .sidebar-search-trigger[aria-expanded="true"],
@@ -642,8 +640,8 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--text-primary);
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 580;
+  font-size: 14px;
+  font-weight: 650;
 }
 .sidebar-primary-action :deep(button:hover),
 .sidebar-primary-action :deep(button:focus-visible) { background: var(--surface-soft); }
@@ -657,21 +655,19 @@ onBeforeUnmount(() => {
 
 .sidebar-context { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
 .sidebar-context__heading { display: flex; min-height: 35px; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 20px 5px 21px; }
-.sidebar-context__heading strong { font-size: 12px; font-weight: 680; }
-.sidebar-context__heading span { overflow: hidden; color: var(--text-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-context__heading strong { font-size: 13px; font-weight: 680; }
+.sidebar-context__heading span { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-context__body { min-height: 0; flex: 1; overflow: hidden; }
 .sidebar-context:not(.sidebar-context--searching) :deep(.library-search) { display: none; }
 .sidebar-context__body :deep(.library-search) { margin-bottom: 10px; }
 .sidebar-context__body :deep(.sidebar-list) { padding-inline: 10px; }
 .sidebar-context__body :deep(.sidebar-item) { min-height: 42px; padding: 5px 9px; }
 .sidebar-context__body :deep(.sidebar-item.sidebar-item--single-line) { min-height: 31px; padding: 1px 7px; }
-.sidebar-context__body :deep(.sidebar-item--single-line .sidebar-item__row strong) { font-size: 11.5px; font-weight: 450; }
+.sidebar-context__body :deep(.sidebar-item--single-line .sidebar-item__row strong) { font-size: 14px; font-weight: 450; }
 .sidebar-context__body :deep(.sidebar-item__icon) { width: 25px; height: 25px; flex-basis: 25px; border: 0; border-radius: 7px; background: transparent; }
 .sidebar-context__body :deep(.sidebar-item__icon--avatar) { background: var(--surface-soft); color: var(--text-secondary); }
-.sidebar-context__body :deep(.sidebar-item__row strong) { font-size: 12px; }
-.sidebar-context__body :deep(.sidebar-item.sidebar-item--topic) { min-height: 28px; padding-block: 0; }
-.sidebar-context__body :deep(.sidebar-item.sidebar-item--topic .sidebar-item__icon) { width: 17px; height: 17px; flex-basis: 17px; }
-.sidebar-context__body :deep(.sidebar-item.sidebar-item--topic .sidebar-item__row strong) { font-size: 10.5px; font-weight: 450; }
+.sidebar-context__body :deep(.sidebar-item__row strong) { font-size: 13px; }
+.sidebar-context__body :deep(.sidebar-item.sidebar-item--topic .sidebar-item__row strong) { font-size: 14px; font-weight: 450; }
 .sidebar-context__body :deep(.library-sidebar) { padding-top: 1px; }
 .sidebar-context__body :deep(.library-sidebar section) { margin-top: 2px; }
 
@@ -687,21 +683,21 @@ onBeforeUnmount(() => {
 .sidebar-account-switcher { position: relative; z-index: 30; display: flex; min-height: 46px; align-items: center; gap: 6px; padding: 4px 2px; border-top: 1px solid var(--line); }
 .sidebar-account-switcher__main { display: flex; min-width: 0; min-height: 38px; flex: 1; align-items: center; gap: 9px; padding: 4px 1px; border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }
 .sidebar-account-switcher__main:hover { background: var(--surface-soft); }
-.sidebar-settings-trigger { display: flex; min-width: 58px; height: 38px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 5px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; font: 600 11px var(--font-ui); }
+.sidebar-settings-trigger { display: grid; width: 38px; min-width: 38px; height: 38px; flex: 0 0 38px; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .sidebar-settings-trigger:hover { background: var(--surface-soft); color: var(--text-primary); }
 .sidebar-settings-trigger:focus-visible { outline: 0; box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 0 3px var(--focus-ring); }
-.sidebar-account__avatar { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border-radius: 50%; background: #c91e55; color: #fff; font-size: 12px; font-weight: 700; }
+.sidebar-account__avatar { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border-radius: 50%; background: #c91e55; color: #fff; font-size: 13px; font-weight: 700; }
 .sidebar-account-switcher__chevron { flex: 0 0 auto; color: var(--text-muted); }
 .profile-menu { position: absolute; right: 0; bottom: calc(100% + 6px); left: 0; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); box-shadow: var(--shadow-float); }
-.profile-menu__heading { display: block; padding: 8px 8px 5px; color: var(--text-muted); font-size: 10px; font-weight: 650; }
+.profile-menu__heading { display: block; padding: 8px 8px 5px; color: var(--text-muted); font-size: 11px; font-weight: 650; }
 .profile-menu button { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 9px; padding: 5px 8px; border: 0; border-radius: 8px; background: transparent; cursor: pointer; text-align: left; }
 .profile-menu button:hover, .profile-menu button.active { background: var(--surface-hover); }
-.profile-menu button > span:not(.agent-avatar) { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 8px; background: var(--surface-soft); color: var(--text-secondary); font-size: 10px; }
-.profile-menu button strong { flex: 1; overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
+.profile-menu button > span:not(.agent-avatar) { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 8px; background: var(--surface-soft); color: var(--text-secondary); font-size: 11px; }
+.profile-menu button strong { flex: 1; overflow: hidden; font-size: 13px; text-overflow: ellipsis; }
 .account-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 .account-copy strong, .account-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.account-copy strong { font-size: 12px; font-weight: 650; }
-.account-copy span { color: var(--text-muted); font-size: 10px; }
+.account-copy strong { font-size: 13px; font-weight: 650; }
+.account-copy span { color: var(--text-muted); font-size: 11px; }
 
 .desktop-sidebar--collapsed .sidebar-brand-row { padding-inline: 21px; }
 .desktop-sidebar--collapsed .sidebar-brand { width: 26px; flex: 0 0 26px; overflow: hidden; }
@@ -721,7 +717,6 @@ onBeforeUnmount(() => {
 .desktop-sidebar--collapsed .sidebar-account-switcher { width: 42px; flex-direction: column; gap: 3px; padding: 0; border-top: 0; }
 .desktop-sidebar--collapsed .sidebar-account-switcher__main { width: 42px; min-height: 42px; flex: 0 0 42px; justify-content: center; padding: 0; }
 .desktop-sidebar--collapsed .sidebar-settings-trigger { width: 42px; min-width: 42px; height: 42px; padding: 0; }
-.desktop-sidebar--collapsed .sidebar-settings-trigger span { display: none; }
 .desktop-sidebar--collapsed .profile-menu { right: auto; bottom: 0; left: calc(100% + 8px); width: 220px; }
 
 .workspace-main { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: var(--canvas); }

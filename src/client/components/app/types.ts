@@ -13,7 +13,7 @@ export type SidebarItem = {
   expandable?: boolean
   expanded?: boolean
   status?: 'online' | 'working' | 'offline'
-  icon?: 'chat' | 'groups' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'artifacts' | 'branch' | 'topic' | 'chevron-left' | 'plus'
+  icon?: 'chat' | 'groups' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'artifacts' | 'branch' | 'topic' | 'chevron-left' | 'plus' | 'archive'
   avatar?: string
   avatarMembers?: Array<{ name: string; avatar?: string }>
 }
