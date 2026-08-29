@@ -2,6 +2,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import AgentIdentityDialog from '@/components/app/AgentIdentityDialog.vue'
+import AgentIdentityPanel from '@/components/app/AgentIdentityPanel.vue'
+import ModelServicesPanel from '@/components/app/ModelServicesPanel.vue'
 import { deleteModelService, listModelServices, saveDuplexVoiceSettings, saveLegacyModelService, saveModelService, validateModelService } from '@/api/agentManagement'
 
 vi.mock('@/api/agentManagement', () => ({
@@ -110,5 +112,34 @@ describe('Agent management dialog', () => {
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('音色 ID 重复')
     expect(saveDuplexVoiceSettings).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+
+  it('preserves an identity draft across same-profile refreshes and resets only after save acknowledgement', async () => {
+    const wrapper = mount(AgentIdentityPanel, { props: { profile, resetVersion: 0 } })
+    const name = wrapper.get<HTMLInputElement>('input[autocomplete="off"]')
+    await name.setValue('本地未保存名称')
+    await wrapper.setProps({ profile: { ...profile, agentName: '远端刷新名称' } })
+    expect(name.element.value).toBe('本地未保存名称')
+
+    await wrapper.setProps({ resetVersion: 1 })
+    expect(name.element.value).toBe('远端刷新名称')
+  })
+
+  it('does not mark an untouched editor dirty or clear a saved key after typing then erasing', async () => {
+    const wrapper = mount(ModelServicesPanel, { props: { profile: 'default' } })
+    await flushPromises()
+    const legacyCard = wrapper.findAll<HTMLElement>('.service-card').find(card => card.text().includes('custom:tingly'))!
+    await legacyCard.get('button').trigger('click')
+    expect(wrapper.emitted('dirty-change')?.at(-1)).toEqual([false])
+
+    const key = wrapper.get<HTMLInputElement>('.service-editor input[type="password"]')
+    await key.setValue('temporary-key')
+    await key.setValue('')
+    expect(wrapper.emitted('dirty-change')?.at(-1)).toEqual([false])
+    await wrapper.get<HTMLFormElement>('.service-editor').trigger('submit')
+    await flushPromises()
+
+    expect(saveLegacyModelService).toHaveBeenCalledOnce()
+    expect(vi.mocked(saveLegacyModelService).mock.calls[0]?.[2]).not.toHaveProperty('api_key')
   })
 })

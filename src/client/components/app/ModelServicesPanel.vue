@@ -18,6 +18,7 @@ import {
 import { notifyModelCatalogChanged } from '@/utils/modelCatalogEvents'
 
 const props = defineProps<{ profile: string }>()
+const emit = defineEmits<{ 'dirty-change': [dirty: boolean] }>()
 
 interface Draft {
   source: 'managed' | 'legacy'
@@ -44,13 +45,38 @@ const busy = ref(false)
 const error = ref('')
 const notice = ref('')
 const draft = ref<Draft | null>(null)
+const draftBaseline = ref('')
+const query = ref('')
 
 function emptyDraft(): Draft {
   return { source: 'managed', id: '', name: '', baseUrl: '', apiKey: '', apiKeyTouched: false, clearApiKey: false, model: '', modelsText: '', contextLength: '', discoverModels: true, makeDefault: false, hasApiKey: false, canEditApiKey: true }
 }
 
+function draftSnapshot(value: Draft): string {
+  return JSON.stringify(value)
+}
+
+const draftDirty = computed(() => Boolean(draft.value) && draftSnapshot(draft.value!) !== draftBaseline.value)
+
+function replaceDraft(next: Draft): boolean {
+  if (draftDirty.value && !window.confirm('放弃当前模型服务未保存的更改？')) return false
+  draft.value = next
+  draftBaseline.value = draftSnapshot(next)
+  return true
+}
+
+function beginCreate() {
+  replaceDraft(emptyDraft())
+}
+
+function closeEditor() {
+  if (draftDirty.value && !window.confirm('放弃当前模型服务未保存的更改？')) return
+  draft.value = null
+  draftBaseline.value = ''
+}
+
 function edit(service: CustomModelService | LegacyModelService) {
-  draft.value = {
+  const next: Draft = {
     source: service.source === 'legacy' ? 'legacy' : 'managed',
     id: service.id,
     name: service.name,
@@ -66,6 +92,7 @@ function edit(service: CustomModelService | LegacyModelService) {
     hasApiKey: service.has_api_key,
     canEditApiKey: !('can_edit_api_key' in service) || service.can_edit_api_key,
   }
+  if (!replaceDraft(next)) return
   error.value = ''
   notice.value = ''
 }
@@ -107,6 +134,17 @@ const providerGroups = computed(() => {
   return groups
 })
 
+const filteredProviderGroups = computed(() => {
+  const needle = query.value.trim().toLocaleLowerCase()
+  if (!needle) return providerGroups.value
+  return providerGroups.value.filter(group => [
+    group.provider.name,
+    group.provider.slug,
+    group.service?.base_url || '',
+    ...group.models,
+  ].some(value => value.toLocaleLowerCase().includes(needle)))
+})
+
 function inputFor(current: Draft): CustomModelServiceInput {
   const models = [...new Set(current.modelsText.split(/\r?\n|,/).map(value => value.trim()).filter(Boolean))]
   const contextLength = Number(current.contextLength)
@@ -121,7 +159,7 @@ function inputFor(current: Draft): CustomModelServiceInput {
     ...(Number.isInteger(contextLength) && contextLength > 0 ? { context_length: contextLength } : {}),
   }
   if (current.clearApiKey) input.api_key = ''
-  else if (current.apiKeyTouched) input.api_key = current.apiKey.trim()
+  else if (current.apiKeyTouched && current.apiKey.trim()) input.api_key = current.apiKey.trim()
   return input
 }
 
@@ -170,6 +208,7 @@ async function save() {
     if (value.source === 'legacy') await saveLegacyModelService(props.profile, value.id, inputFor(value))
     else await saveModelService(props.profile, inputFor(value))
     draft.value = null
+    draftBaseline.value = ''
     await load()
     notifyModelCatalogChanged(props.profile)
     notice.value = 'Provider 与模型已保存并刷新目录'
@@ -201,6 +240,7 @@ async function remove(service: CustomModelService) {
   try {
     await deleteModelService(props.profile, service.id)
     if (draft.value?.id === service.id) draft.value = null
+    if (!draft.value) draftBaseline.value = ''
     await load()
     notifyModelCatalogChanged(props.profile)
     notice.value = `“${service.name}”已删除`
@@ -211,33 +251,36 @@ async function remove(service: CustomModelService) {
   }
 }
 
-watch(() => props.profile, () => { draft.value = null; void load() })
+watch(() => props.profile, () => { draft.value = null; draftBaseline.value = ''; void load() })
+watch(draftDirty, value => emit('dirty-change', value), { immediate: true })
 onMounted(() => { void load() })
 </script>
 
 <template>
   <section class="management-panel" aria-label="模型服务">
-    <div class="panel-heading"><div><h3>9119 Provider 与模型</h3><p>全部来自当前 Agent：<b>{{ profile }}</b></p></div><button class="primary-button" type="button" :disabled="busy || loading" @click="draft = emptyDraft()"><AppIcon name="plus" :size="14" />新增服务</button></div>
+    <div class="panel-context"><strong>9119 Provider 与模型</strong><span>全部来自当前 Agent：<b>{{ profile }}</b></span></div>
+    <div class="panel-heading"><label class="provider-search"><AppIcon name="search" :size="18" /><input v-model="query" type="search" placeholder="搜索 Provider 或模型" aria-label="搜索 Provider 或模型" /></label><button class="primary-button" type="button" :disabled="busy || loading" @click="beginCreate"><AppIcon name="plus" :size="15" />新增服务</button></div>
     <p v-if="error" class="panel-error" role="alert">{{ error }}</p>
     <p v-else-if="notice" class="panel-notice" role="status">{{ notice }}</p>
     <p v-if="loading" class="panel-empty">正在读取 9119 Provider 与模型…</p>
-    <div v-else-if="providerGroups.length" class="service-list">
-      <article v-for="group in providerGroups" :key="group.provider.slug" class="service-card">
+    <div v-else-if="filteredProviderGroups.length" class="service-list">
+      <article v-for="group in filteredProviderGroups" :key="group.provider.slug" class="service-card">
         <div class="service-main"><div class="service-title"><strong>{{ group.provider.name }}</strong><em v-if="group.provider.isCurrent || group.service?.is_current">当前默认</em><em>{{ group.service ? '可编辑' : '只读' }}</em></div><small>{{ group.provider.slug }}<template v-if="group.service?.base_url"> · {{ group.service.base_url }}</template></small><div class="model-chips"><span v-for="model in group.models" :key="model" :class="{ current: model === group.service?.model }">{{ model }}</span></div></div>
         <div v-if="group.service" class="card-actions"><button type="button" :disabled="busy" @click="edit(group.service)">编辑</button><button v-if="group.service.source !== 'legacy' && !group.service.is_current" type="button" :disabled="busy" @click="activate(group.service)">设为默认</button><button v-if="group.service.source !== 'legacy'" class="danger" type="button" :disabled="busy" @click="remove(group.service)">删除</button></div>
       </article>
     </div>
-    <p v-else-if="!loading" class="panel-empty">9119 当前没有返回可用 Provider 或模型。</p>
+    <p v-else-if="!loading" class="panel-empty">{{ query.trim() ? '没有匹配的 Provider 或模型。' : '9119 当前没有返回可用 Provider 或模型。' }}</p>
+    <p v-if="!loading" class="catalog-note">完整目录来自 Hermes 9119；仅支持的自定义服务可编辑。</p>
 
-    <form v-if="draft" class="service-editor" @submit.prevent="save">
-      <header><strong>{{ draft.id ? `编辑 ${draft.id}` : '新增模型服务' }}</strong><button type="button" aria-label="关闭编辑" :disabled="busy" @click="draft = null"><AppIcon name="close" :size="15" /></button></header>
-      <div class="form-grid"><label>名称<input v-model="draft.name" :disabled="draft.source === 'legacy'" maxlength="100" autocomplete="off" /></label><label>Base URL<input v-model="draft.baseUrl" placeholder="https://example.com/v1" autocomplete="url" /></label></div>
-      <div class="form-grid"><label>默认模型<input v-model="draft.model" placeholder="model-id" autocomplete="off" /></label><label>上下文长度（可选）<input v-model="draft.contextLength" inputmode="numeric" placeholder="例如 131072" /></label></div>
-      <label v-if="draft.canEditApiKey">API Key<input v-model="draft.apiKey" type="password" :placeholder="draft.hasApiKey && !draft.clearApiKey ? '已保存；留空保持不变' : '可选'" autocomplete="new-password" @input="draft.apiKeyTouched = true; draft.clearApiKey = false" /></label>
+    <form v-if="draft" class="service-editor" :aria-busy="busy" @submit.prevent="save">
+      <header><strong>{{ draft.id ? `编辑 ${draft.id}` : '新增模型服务' }}</strong><button type="button" aria-label="关闭编辑" :disabled="busy" @click="closeEditor"><AppIcon name="close" :size="15" /></button></header>
+      <div class="form-grid"><label>名称<input v-model="draft.name" :disabled="busy || draft.source === 'legacy'" maxlength="100" autocomplete="off" /></label><label>Base URL<input v-model="draft.baseUrl" :disabled="busy" placeholder="https://example.com/v1" autocomplete="url" /></label></div>
+      <div class="form-grid"><label>默认模型<input v-model="draft.model" :disabled="busy" placeholder="model-id" autocomplete="off" /></label><label>上下文长度（可选）<input v-model="draft.contextLength" :disabled="busy" inputmode="numeric" placeholder="例如 131072" /></label></div>
+      <label v-if="draft.canEditApiKey">API Key<input v-model="draft.apiKey" type="password" :disabled="busy" :placeholder="draft.hasApiKey && !draft.clearApiKey ? '已保存；留空保持不变' : '可选'" autocomplete="new-password" @input="draft.apiKeyTouched = Boolean(draft.apiKey.trim()); draft.clearApiKey = false" /></label>
       <p v-else class="editor-hint">该 Provider 的密钥不由 9119 环境变量管理，因此这里只编辑 URL 和模型。</p>
-      <button v-if="draft.canEditApiKey && draft.hasApiKey && !draft.clearApiKey" class="text-button danger" type="button" :disabled="busy" @click="draft.apiKey = ''; draft.apiKeyTouched = false; draft.clearApiKey = true">清除已保存密钥</button><button v-else-if="draft.canEditApiKey && draft.clearApiKey" class="text-button" type="button" @click="draft.clearApiKey = false">取消清除密钥</button>
-      <label>模型列表（每行一个）<textarea v-model="draft.modelsText" rows="5" placeholder="连接测试后自动填充，也可手动输入" /></label>
-      <label class="check-row"><input v-model="draft.discoverModels" type="checkbox" />允许 9119 自动发现模型</label><label v-if="draft.source === 'managed'" class="check-row"><input v-model="draft.makeDefault" type="checkbox" />保存后设为当前 Agent 默认服务</label>
+      <button v-if="draft.canEditApiKey && draft.hasApiKey && !draft.clearApiKey" class="text-button danger" type="button" :disabled="busy" @click="draft.apiKey = ''; draft.apiKeyTouched = false; draft.clearApiKey = true">清除已保存密钥</button><button v-else-if="draft.canEditApiKey && draft.clearApiKey" class="text-button" type="button" :disabled="busy" @click="draft.clearApiKey = false">取消清除密钥</button>
+      <label>模型列表（每行一个）<textarea v-model="draft.modelsText" rows="5" :disabled="busy" placeholder="连接测试后自动填充，也可手动输入" /></label>
+      <label class="check-row"><input v-model="draft.discoverModels" type="checkbox" :disabled="busy" />允许 9119 自动发现模型</label><label v-if="draft.source === 'managed'" class="check-row"><input v-model="draft.makeDefault" type="checkbox" :disabled="busy" />保存后设为当前 Agent 默认服务</label>
       <small class="editor-hint">{{ draft.source === 'legacy' ? '保存后模型列表按当前内容更新；当前默认 Provider 会同步新的 URL 与默认模型。' : '9119 会保留服务中已有的模型条目；删除整项服务会一并移除它们。' }}</small>
       <footer><button class="quiet-button" type="button" :disabled="busy" @click="probe">测试连接</button><button class="primary-button" type="submit" :disabled="busy">{{ busy ? '处理中…' : '保存模型服务' }}</button></footer>
     </form>
@@ -245,5 +288,5 @@ onMounted(() => { void load() })
 </template>
 
 <style scoped>
-.management-panel{display:grid;gap:12px}.panel-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.panel-heading h3{margin:0;font-size:13px}.panel-heading p{margin:4px 0 0;color:var(--text-muted);font-size:9px}.primary-button,.quiet-button{display:inline-flex;min-height:32px;align-items:center;justify-content:center;gap:5px;padding:0 10px;border:0;border-radius:8px;cursor:pointer;font-size:10px}.primary-button{background:var(--accent);color:var(--text-on-solid)}.quiet-button{background:var(--surface-hover);color:var(--text-secondary)}button:disabled{cursor:wait;opacity:.5}.panel-error,.panel-notice,.panel-empty{margin:0;padding:9px 10px;border-radius:8px;font-size:10px}.panel-error{background:color-mix(in srgb,var(--danger) 8%,transparent);color:var(--danger)}.panel-notice{background:color-mix(in srgb,var(--success,#21845b) 9%,transparent);color:var(--success,#21845b)}.panel-empty{color:var(--text-muted);background:var(--surface-soft)}.service-list{display:grid;gap:7px}.service-card{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:10px}.service-main{display:grid;min-width:0;flex:1;gap:5px}.service-title{display:flex;align-items:center;gap:5px}.service-card strong{font-size:11px}.service-card small{overflow:hidden;color:var(--text-muted);font:9px var(--font-code);text-overflow:ellipsis;white-space:nowrap}.service-card em{padding:2px 5px;border-radius:4px;background:var(--surface-hover);color:var(--text-muted);font:normal 8px var(--font-ui)}.model-chips{display:flex;flex-wrap:wrap;gap:4px}.model-chips span{max-width:100%;padding:3px 6px;overflow:hidden;border-radius:5px;background:var(--surface-soft);color:var(--text-secondary);font:8px var(--font-code);text-overflow:ellipsis;white-space:nowrap}.model-chips span.current{background:color-mix(in srgb,var(--accent) 9%,var(--surface-soft));color:var(--accent)}.card-actions{display:flex;gap:3px}.card-actions button,.service-editor header button,.text-button{border:0;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:9px}.card-actions .danger,.text-button.danger{color:var(--danger)}.service-editor{display:grid;gap:11px;padding:12px;border:1px solid var(--line-strong);border-radius:11px;background:var(--surface-soft)}.service-editor header{display:flex;align-items:center;justify-content:space-between}.service-editor header button{display:grid;width:28px;height:28px;place-items:center}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.service-editor label{display:grid;gap:5px;color:var(--text-secondary);font-size:9px;font-weight:650}.service-editor input:not([type=checkbox]),.service-editor textarea{width:100%;box-sizing:border-box;padding:8px 9px;border:1px solid var(--line);border-radius:8px;outline:0;background:var(--surface-raised);color:var(--text-primary);font:10px var(--font-ui)}.service-editor input:not([type=checkbox]){height:36px}.service-editor textarea{resize:vertical;font-family:var(--font-code);line-height:1.5}.check-row{display:flex!important;align-items:center;gap:7px!important;font-weight:500!important}.text-button{justify-self:start;padding:0}.editor-hint{margin:0;color:var(--text-muted);font-size:8px}.service-editor footer{display:flex;justify-content:flex-end;gap:7px}@media(max-width:600px){.panel-heading{align-items:stretch;flex-direction:column}.panel-heading .primary-button{align-self:flex-start}.service-card{align-items:flex-start;flex-direction:column}.card-actions{width:100%;justify-content:flex-end}.form-grid{grid-template-columns:1fr}}
+.management-panel{display:grid;gap:16px}.panel-context{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--text-secondary)}.panel-context strong{font-size:14px}.panel-context span{color:var(--text-muted);font-size:12px}.panel-heading{display:flex;align-items:center;justify-content:space-between;gap:40px}.provider-search{display:flex;min-width:0;min-height:44px;flex:1;align-items:center;gap:9px;padding:0 12px;border:1px solid var(--line);border-radius:9px;color:var(--text-muted);background:var(--surface-raised)}.provider-search:focus-within{border-color:var(--line-strong);box-shadow:0 0 0 3px var(--focus-ring)}.provider-search input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:var(--text-primary);font:14px var(--font-ui)}.primary-button,.quiet-button{display:inline-flex;min-height:40px;align-items:center;justify-content:center;gap:7px;padding:0 14px;border:0;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600}.primary-button{background:var(--accent);color:var(--text-on-solid)}.quiet-button{border:1px solid var(--line);background:var(--surface-raised);color:var(--text-secondary)}button:disabled{cursor:wait;opacity:.5}.panel-error,.panel-notice,.panel-empty{margin:0;padding:11px 12px;border-radius:9px;font-size:13px}.panel-error{background:color-mix(in srgb,var(--danger) 8%,transparent);color:var(--danger)}.panel-notice{background:color-mix(in srgb,var(--success,#21845b) 9%,transparent);color:var(--success,#21845b)}.panel-empty{color:var(--text-muted);background:var(--surface-soft)}.service-list{display:grid;border-top:1px solid var(--line)}.service-card{display:flex;align-items:center;gap:14px;padding:18px 12px;border:0;border-bottom:1px solid var(--line)}.service-main{display:grid;min-width:0;flex:1;gap:8px}.service-title{display:flex;flex-wrap:wrap;align-items:center;gap:7px}.service-card strong{font-size:16px}.service-card small{color:var(--text-muted);font:12px var(--font-code);overflow-wrap:anywhere}.service-card em{padding:3px 7px;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--text-muted);font:normal 11px var(--font-ui)}.model-chips{display:flex;flex-wrap:wrap;gap:8px}.model-chips span{max-width:100%;padding:6px 9px;overflow:hidden;border-radius:7px;background:var(--surface-soft);color:var(--text-secondary);font:11px var(--font-code);text-overflow:ellipsis;white-space:nowrap}.model-chips span.current{background:color-mix(in srgb,var(--accent) 9%,var(--surface-soft));color:var(--accent)}.card-actions{display:flex;flex:0 0 auto;gap:7px}.card-actions button,.service-editor header button,.text-button{min-height:32px;padding:0 7px;border:0;border-radius:7px;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:12px}.card-actions button:hover,.text-button:hover{background:var(--surface-soft)}.card-actions .danger,.text-button.danger{color:var(--danger)}.catalog-note{margin:0;color:var(--text-muted);font-size:12px;line-height:1.6}.service-editor{display:grid;gap:14px;padding:18px;border:1px solid var(--line-strong);border-radius:12px;background:var(--surface-soft)}.service-editor header{display:flex;align-items:center;justify-content:space-between}.service-editor header strong{font-size:15px}.service-editor header button{display:grid;width:36px;height:36px;place-items:center}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.service-editor label{display:grid;gap:7px;color:var(--text-secondary);font-size:13px;font-weight:650}.service-editor input:not([type=checkbox]),.service-editor textarea{width:100%;box-sizing:border-box;padding:10px 11px;border:1px solid var(--line);border-radius:9px;outline:0;background:var(--surface-raised);color:var(--text-primary);font:13px var(--font-ui)}.service-editor input:not([type=checkbox]){height:42px}.service-editor input:focus,.service-editor textarea:focus{border-color:var(--line-strong);box-shadow:0 0 0 3px var(--focus-ring)}.service-editor textarea{resize:vertical;font-family:var(--font-code);line-height:1.5}.check-row{display:flex!important;align-items:center;gap:8px!important;font-weight:500!important}.text-button{justify-self:start;padding-inline:0}.editor-hint{margin:0;color:var(--text-muted);font-size:11px}.service-editor footer{display:flex;justify-content:flex-end;gap:9px}@media(max-width:600px){.panel-heading{align-items:stretch;flex-direction:column;gap:10px}.panel-heading .primary-button{width:100%}.panel-context{align-items:flex-start;flex-direction:column}.service-card{align-items:flex-start;flex-direction:column}.card-actions{width:100%;justify-content:flex-end}.form-grid{grid-template-columns:1fr}}
 </style>

@@ -5,10 +5,7 @@ import type { Profile } from '@shared/types'
 import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import AppIcon from '@/components/common/AppIcon.vue'
 import BrandMark from '@/components/common/BrandMark.vue'
-import NodePairingDialog from '@/components/app/NodePairingDialog.vue'
-import SystemUpdateDialog from '@/components/app/SystemUpdateDialog.vue'
-import SystemManagementDialog from '@/components/app/SystemManagementDialog.vue'
-import AccountSecurityDialog from '@/components/app/AccountSecurityDialog.vue'
+import SettingsCenterDialog from '@/components/app/SettingsCenterDialog.vue'
 import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 
 type NavItem = {
@@ -17,6 +14,20 @@ type NavItem = {
   path: string
   icon: 'chat' | 'groups' | 'files'
 }
+
+type SettingsPage =
+  | 'agent-identity'
+  | 'agent-models'
+  | 'account-security'
+  | 'account-mobile'
+  | 'appearance'
+  | 'system-overview'
+  | 'system-users'
+  | 'system-connection'
+  | 'system-push'
+  | 'system-nodes'
+  | 'system-voice'
+  | 'system-update'
 
 const SIDEBAR_COLLAPSED_KEY = 'hermes-yaoyao:sidebar-collapsed'
 const SIDEBAR_SEARCH_EVENT = 'hermes-yaoyao:sidebar-search'
@@ -28,6 +39,7 @@ const props = withDefaults(defineProps<{
   activeProfile?: Profile
   profiles?: Profile[]
   theme?: 'light' | 'dark'
+  themePreference?: 'light' | 'dark' | 'system'
   insecureTransport?: boolean
   sidebarTitle?: string
   sidebarSubtitle?: string
@@ -38,12 +50,16 @@ const props = withDefaults(defineProps<{
   isAdmin?: boolean
   upstreamReady?: boolean
   upstreamError?: string
+  identityBusy?: boolean
+  identityError?: string
+  identityResetVersion?: number
 }>(), {
   userName: '',
   pairingUserName: '',
   activeProfile: undefined,
   profiles: () => [],
   theme: 'light',
+  themePreference: 'system',
   insecureTransport: false,
   sidebarTitle: '',
   sidebarSubtitle: '',
@@ -54,13 +70,17 @@ const props = withDefaults(defineProps<{
   isAdmin: false,
   upstreamReady: false,
   upstreamError: '',
+  identityBusy: false,
+  identityError: '',
+  identityResetVersion: 0,
 })
 
 const emit = defineEmits<{
   logout: []
   toggleTheme: []
+  setTheme: [theme: 'light' | 'dark' | 'system']
   selectProfile: [profile: string]
-  editProfile: []
+  saveIdentity: [input: { title: string; avatarDataURL?: string | null }]
   closeInspector: []
 }>()
 
@@ -68,12 +88,14 @@ const route = useRoute()
 const router = useRouter()
 const mobileDrawerOpen = ref(false)
 const profileMenuOpen = ref(false)
+const settingsOpen = ref(false)
+const settingsPage = ref<SettingsPage>('agent-identity')
+const settingsReturnFocus = ref<HTMLButtonElement>()
+const mobileNavigationTrigger = ref<HTMLButtonElement>()
+const mobileDrawerClose = ref<HTMLButtonElement>()
+const profileMenuTrigger = ref<HTMLButtonElement>()
 const sidebarCollapsed = ref(false)
 const sidebarSearchOpen = ref(false)
-const nodePairingOpen = ref(false)
-const systemUpdateOpen = ref(false)
-const systemManagementOpen = ref(false)
-const accountSecurityOpen = ref(false)
 const desktopSidebarContext = ref<HTMLElement | null>(null)
 const mobileSidebarContext = ref<HTMLElement | null>(null)
 
@@ -110,9 +132,74 @@ async function navigate(path: string) {
   await router.push(path)
 }
 
+function openMobileDrawer() {
+  mobileDrawerOpen.value = true
+  void nextTick(() => mobileDrawerClose.value?.focus())
+}
+
+function closeMobileDrawer() {
+  mobileDrawerOpen.value = false
+  void nextTick(() => mobileNavigationTrigger.value?.focus())
+}
+
 function closeMenus(event: MouseEvent) {
   const target = event.target as HTMLElement
   if (!target.closest('.sidebar-account-switcher')) profileMenuOpen.value = false
+}
+
+function toggleProfileMenu(event: MouseEvent) {
+  const trigger = event.currentTarget
+  if (trigger instanceof HTMLButtonElement) profileMenuTrigger.value = trigger
+  profileMenuOpen.value = !profileMenuOpen.value
+  if (!profileMenuOpen.value) return
+  void nextTick(() => {
+    trigger instanceof HTMLElement
+      && trigger.closest('.sidebar-account-switcher')?.querySelector<HTMLButtonElement>('.profile-menu [role="option"][aria-selected="true"]')?.focus()
+  })
+}
+
+function chooseProfile(name: string) {
+  emit('selectProfile', name)
+  profileMenuOpen.value = false
+  void nextTick(() => profileMenuTrigger.value?.focus())
+}
+
+function handleProfileMenuKeydown(event: KeyboardEvent) {
+  const options = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="option"]')]
+  if (!options.length) return
+  const current = Math.max(0, options.indexOf(document.activeElement as HTMLButtonElement))
+  let next: number | undefined
+  if (event.key === 'ArrowDown') next = (current + 1) % options.length
+  else if (event.key === 'ArrowUp') next = (current - 1 + options.length) % options.length
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = options.length - 1
+  else if (event.key === 'Escape') {
+    event.preventDefault()
+    profileMenuOpen.value = false
+    void nextTick(() => profileMenuTrigger.value?.focus())
+    return
+  }
+  if (next === undefined) return
+  event.preventDefault()
+  options[next]?.focus()
+}
+
+function openSettings(page: SettingsPage = 'agent-identity', event?: MouseEvent) {
+  const trigger = event?.currentTarget
+  if (trigger instanceof HTMLButtonElement) {
+    settingsReturnFocus.value = trigger.closest('.mobile-drawer')
+      ? mobileNavigationTrigger.value
+      : trigger
+  }
+  profileMenuOpen.value = false
+  mobileDrawerOpen.value = false
+  settingsPage.value = page
+  settingsOpen.value = true
+}
+
+function closeSettings() {
+  settingsOpen.value = false
+  void nextTick(() => settingsReturnFocus.value?.focus())
 }
 
 function toggleSidebar() {
@@ -181,9 +268,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="workspace-shell" :class="{ 'workspace-shell--collapsed': sidebarCollapsed, 'workspace-shell--sidebar-focused': sidebarFocusMode }">
-    <header class="mobile-header">
-      <button class="icon-button" type="button" aria-label="打开导航" @click="mobileDrawerOpen = true">
+  <div class="workspace-shell" :class="{ 'workspace-shell--collapsed': sidebarCollapsed, 'workspace-shell--sidebar-focused': sidebarFocusMode }" :inert="settingsOpen">
+    <header class="mobile-header" :inert="mobileDrawerOpen">
+      <button ref="mobileNavigationTrigger" class="icon-button" type="button" aria-label="打开导航" @click="openMobileDrawer">
         <AppIcon name="menu" :size="20" />
       </button>
       <button class="mobile-brand" type="button" aria-label="返回对话" @click="navigate('/chat')">
@@ -271,7 +358,7 @@ onBeforeUnmount(() => {
 
       <div class="sidebar-footer">
         <div class="sidebar-account-switcher">
-          <button class="sidebar-account-switcher__main" type="button" :title="`切换 Agent：${profileTitle(activeProfile)}`" @click="profileMenuOpen = !profileMenuOpen">
+          <button class="sidebar-account-switcher__main" type="button" :title="`切换 Agent：${profileTitle(activeProfile)}`" aria-haspopup="listbox" :aria-expanded="profileMenuOpen" @click="toggleProfileMenu">
             <AgentAvatar :name="profileTitle(activeProfile)" :avatar="activeProfile?.agentAvatar || ''" :size="30" />
             <span class="account-copy">
               <strong>{{ profileTitle(activeProfile) }}</strong>
@@ -279,31 +366,25 @@ onBeforeUnmount(() => {
             </span>
             <AppIcon class="sidebar-account-switcher__chevron" name="chevron-down" :size="14" />
           </button>
-          <button class="sidebar-account__utility" type="button" :title="theme === 'dark' ? '切换浅色主题' : '切换深色主题'" @click="emit('toggleTheme')">
-            <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="17" />
-          </button>
-          <button class="sidebar-account__utility" type="button" title="手机登录与节点" aria-label="手机登录与节点" @click="nodePairingOpen = true">
-            <AppIcon name="users" :size="17" />
+          <button class="sidebar-settings-trigger" type="button" title="设置中心" aria-label="打开设置中心" @click="openSettings('agent-identity', $event)">
+            <AppIcon name="settings" :size="17" />
+            <span>设置</span>
           </button>
           <Transition name="menu-fade">
-            <div v-if="profileMenuOpen" class="profile-menu">
+            <div v-if="profileMenuOpen" class="profile-menu" role="listbox" aria-label="切换 Agent" @keydown="handleProfileMenuKeydown">
+              <strong class="profile-menu__heading">切换 Agent</strong>
               <button
                 v-for="profile in profiles"
                 :key="profile.name"
                 type="button"
+                role="option"
                 :class="{ active: profile.name === activeProfile?.name }"
-                @click="emit('selectProfile', profile.name); profileMenuOpen = false"
+                :aria-selected="profile.name === activeProfile?.name"
+                @click="chooseProfile(profile.name)"
               >
                 <AgentAvatar :name="profileTitle(profile)" :avatar="profile.agentAvatar || ''" :size="24" />
                 <strong>{{ profileTitle(profile) }}</strong>
                 <AppIcon v-if="profile.name === activeProfile?.name" name="check" :size="15" />
-              </button>
-              <button class="profile-menu__edit" type="button" :disabled="!activeProfile" @click="profileMenuOpen = false; emit('editProfile')"><AppIcon name="settings" :size="15" /><strong>Agent 管理</strong></button>
-              <button class="profile-menu__edit" type="button" @click="profileMenuOpen = false; accountSecurityOpen = true"><AppIcon name="settings" :size="15" /><strong>账号安全</strong></button>
-              <button v-if="isAdmin" class="profile-menu__edit" type="button" @click="profileMenuOpen = false; systemManagementOpen = true"><AppIcon name="settings" :size="15" /><strong>系统管理</strong></button>
-              <button v-if="isAdmin" class="profile-menu__update" type="button" @click="profileMenuOpen = false; systemUpdateOpen = true"><AppIcon name="download" :size="15" /><strong>系统更新</strong></button>
-              <button class="profile-menu__logout" type="button" @click="profileMenuOpen = false; emit('logout')">
-                <AppIcon name="logout" :size="15" /><strong>退出登录</strong>
               </button>
             </div>
           </Transition>
@@ -312,7 +393,7 @@ onBeforeUnmount(() => {
     </aside>
 
     <Transition name="drawer-fade">
-      <button v-if="mobileDrawerOpen" class="drawer-scrim" type="button" aria-label="关闭导航" @click="mobileDrawerOpen = false" />
+      <button v-if="mobileDrawerOpen" class="drawer-scrim" type="button" aria-label="关闭导航" @click="closeMobileDrawer" />
     </Transition>
     <aside
       class="mobile-drawer"
@@ -325,7 +406,7 @@ onBeforeUnmount(() => {
         <button class="sidebar-brand" type="button" aria-label="返回对话" @click="navigate('/chat')">
           <BrandMark :size="32" compact />
         </button>
-        <button class="icon-button" type="button" aria-label="关闭导航" @click="mobileDrawerOpen = false">
+        <button ref="mobileDrawerClose" class="icon-button" type="button" aria-label="关闭导航" @click="closeMobileDrawer">
           <AppIcon name="close" />
         </button>
       </div>
@@ -384,7 +465,7 @@ onBeforeUnmount(() => {
 
       <div class="sidebar-footer mobile-drawer__footer">
         <div class="sidebar-account-switcher">
-          <button class="sidebar-account-switcher__main" type="button" :title="`切换 Agent：${profileTitle(activeProfile)}`" @click="profileMenuOpen = !profileMenuOpen">
+          <button class="sidebar-account-switcher__main" type="button" :title="`切换 Agent：${profileTitle(activeProfile)}`" aria-haspopup="listbox" :aria-expanded="profileMenuOpen" @click="toggleProfileMenu">
             <AgentAvatar :name="profileTitle(activeProfile)" :avatar="activeProfile?.agentAvatar || ''" :size="30" />
             <span class="account-copy">
               <strong>{{ profileTitle(activeProfile) }}</strong>
@@ -392,31 +473,25 @@ onBeforeUnmount(() => {
             </span>
             <AppIcon class="sidebar-account-switcher__chevron" name="chevron-down" :size="14" />
           </button>
-          <button class="sidebar-account__utility" type="button" :title="theme === 'dark' ? '切换浅色主题' : '切换深色主题'" @click="emit('toggleTheme')">
-            <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="17" />
-          </button>
-          <button class="sidebar-account__utility" type="button" title="手机登录与节点" aria-label="手机登录与节点" @click="nodePairingOpen = true; mobileDrawerOpen = false">
-            <AppIcon name="users" :size="17" />
+          <button class="sidebar-settings-trigger" type="button" title="设置中心" aria-label="打开设置中心" @click="openSettings('agent-identity', $event)">
+            <AppIcon name="settings" :size="17" />
+            <span>设置</span>
           </button>
           <Transition name="menu-fade">
-            <div v-if="profileMenuOpen" class="profile-menu">
+            <div v-if="profileMenuOpen" class="profile-menu" role="listbox" aria-label="切换 Agent" @keydown="handleProfileMenuKeydown">
+              <strong class="profile-menu__heading">切换 Agent</strong>
               <button
                 v-for="profile in profiles"
                 :key="profile.name"
                 type="button"
+                role="option"
                 :class="{ active: profile.name === activeProfile?.name }"
-                @click="emit('selectProfile', profile.name); profileMenuOpen = false"
+                :aria-selected="profile.name === activeProfile?.name"
+                @click="chooseProfile(profile.name)"
               >
                 <AgentAvatar :name="profileTitle(profile)" :avatar="profile.agentAvatar || ''" :size="24" />
                 <strong>{{ profileTitle(profile) }}</strong>
                 <AppIcon v-if="profile.name === activeProfile?.name" name="check" :size="15" />
-              </button>
-              <button class="profile-menu__edit" type="button" :disabled="!activeProfile" @click="profileMenuOpen = false; emit('editProfile')"><AppIcon name="settings" :size="15" /><strong>Agent 管理</strong></button>
-              <button class="profile-menu__edit" type="button" @click="profileMenuOpen = false; accountSecurityOpen = true; mobileDrawerOpen = false"><AppIcon name="settings" :size="15" /><strong>账号安全</strong></button>
-              <button v-if="isAdmin" class="profile-menu__edit" type="button" @click="profileMenuOpen = false; systemManagementOpen = true; mobileDrawerOpen = false"><AppIcon name="settings" :size="15" /><strong>系统管理</strong></button>
-              <button v-if="isAdmin" class="profile-menu__update" type="button" @click="profileMenuOpen = false; systemUpdateOpen = true; mobileDrawerOpen = false"><AppIcon name="download" :size="15" /><strong>系统更新</strong></button>
-              <button class="profile-menu__logout" type="button" @click="profileMenuOpen = false; emit('logout')">
-                <AppIcon name="logout" :size="15" /><strong>退出登录</strong>
               </button>
             </div>
           </Transition>
@@ -439,10 +514,28 @@ onBeforeUnmount(() => {
       </aside>
     </Transition>
 
-    <NodePairingDialog :open="nodePairingOpen" :insecure-transport="insecureTransport" :user-name="pairingUserName || userName" :is-admin="isAdmin" @close="nodePairingOpen = false" />
-    <SystemUpdateDialog :open="systemUpdateOpen" @close="systemUpdateOpen = false" />
-    <SystemManagementDialog :open="systemManagementOpen" :upstream-ready="upstreamReady" :upstream-error="upstreamError" @close="systemManagementOpen = false" />
-    <AccountSecurityDialog :open="accountSecurityOpen" @close="accountSecurityOpen = false" />
+    <SettingsCenterDialog
+      :open="settingsOpen"
+      :initial-page="settingsPage"
+      :user-name="userName"
+      :pairing-user-name="pairingUserName"
+      :active-profile="activeProfile"
+      :profiles="profiles"
+      :theme="theme"
+      :theme-preference="themePreference"
+      :insecure-transport="insecureTransport"
+      :is-admin="isAdmin"
+      :upstream-ready="upstreamReady"
+      :upstream-error="upstreamError"
+      :identity-busy="identityBusy"
+      :identity-error="identityError"
+      :identity-reset-version="identityResetVersion"
+      @close="closeSettings"
+      @logout="emit('logout')"
+      @select-profile="emit('selectProfile', $event)"
+      @save-identity="emit('saveIdentity', $event)"
+      @set-theme="emit('setTheme', $event)"
+    />
   </div>
 </template>
 
@@ -478,7 +571,7 @@ onBeforeUnmount(() => {
 .sidebar-brand-row { display: flex; min-height: 58px; align-items: center; padding: 9px 20px 7px; }
 .sidebar-brand { display: flex; min-width: 0; align-items: center; padding: 0; border: 0; border-radius: 10px; background: transparent; cursor: pointer; }
 .sidebar-brand:hover { background: transparent; }
-.sidebar-collapse, .sidebar-account__utility {
+.sidebar-collapse {
   display: grid;
   width: 34px;
   height: 34px;
@@ -491,7 +584,7 @@ onBeforeUnmount(() => {
   color: var(--text-muted);
   cursor: pointer;
 }
-.sidebar-collapse:hover, .sidebar-account__utility:hover { background: var(--surface-hover); color: var(--text-primary); }
+.sidebar-collapse:hover { background: var(--surface-hover); color: var(--text-primary); }
 .sidebar-collapse { position: absolute; top: 12px; right: 11px; transition: transform 180ms var(--ease-out), color 140ms ease, background-color 140ms ease; }
 .sidebar-collapse--collapsed { transform: rotate(180deg); }
 
@@ -591,19 +684,20 @@ onBeforeUnmount(() => {
 .workspace-shell--sidebar-focused .desktop-sidebar--collapsed .sidebar-context { display: flex; flex: 1; }
 
 .sidebar-footer { flex: 0 0 auto; padding: 7px 10px 10px; background: var(--surface); }
-.sidebar-account-switcher { position: relative; z-index: 30; display: flex; min-height: 46px; align-items: center; gap: 6px; padding: 4px 7px; border-top: 1px solid var(--line); }
+.sidebar-account-switcher { position: relative; z-index: 30; display: flex; min-height: 46px; align-items: center; gap: 6px; padding: 4px 2px; border-top: 1px solid var(--line); }
 .sidebar-account-switcher__main { display: flex; min-width: 0; min-height: 38px; flex: 1; align-items: center; gap: 9px; padding: 4px 1px; border: 0; border-radius: 8px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }
 .sidebar-account-switcher__main:hover { background: var(--surface-soft); }
+.sidebar-settings-trigger { display: flex; min-width: 58px; height: 38px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 5px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; font: 600 11px var(--font-ui); }
+.sidebar-settings-trigger:hover { background: var(--surface-soft); color: var(--text-primary); }
+.sidebar-settings-trigger:focus-visible { outline: 0; box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 0 3px var(--focus-ring); }
 .sidebar-account__avatar { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border-radius: 50%; background: #c91e55; color: #fff; font-size: 12px; font-weight: 700; }
 .sidebar-account-switcher__chevron { flex: 0 0 auto; color: var(--text-muted); }
 .profile-menu { position: absolute; right: 0; bottom: calc(100% + 6px); left: 0; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); box-shadow: var(--shadow-float); }
+.profile-menu__heading { display: block; padding: 8px 8px 5px; color: var(--text-muted); font-size: 10px; font-weight: 650; }
 .profile-menu button { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 9px; padding: 5px 8px; border: 0; border-radius: 8px; background: transparent; cursor: pointer; text-align: left; }
 .profile-menu button:hover, .profile-menu button.active { background: var(--surface-hover); }
 .profile-menu button > span:not(.agent-avatar) { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 8px; background: var(--surface-soft); color: var(--text-secondary); font-size: 10px; }
 .profile-menu button strong { flex: 1; overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
-.profile-menu__edit { margin-top: 4px; border-top: 1px solid var(--line) !important; color: var(--text-secondary); }
-.profile-menu__update { color: var(--text-secondary); }
-.profile-menu__logout { margin-top: 4px; border-top: 1px solid var(--line) !important; color: var(--danger); }
 .account-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
 .account-copy strong, .account-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-copy strong { font-size: 12px; font-weight: 650; }
@@ -624,9 +718,10 @@ onBeforeUnmount(() => {
 .desktop-sidebar--collapsed .sidebar-account-switcher__chevron,
 .desktop-sidebar--collapsed .account-copy { display: none; }
 .desktop-sidebar--collapsed .sidebar-footer { display: flex; order: 2; margin-top: 0; flex-direction: column; align-items: center; padding: 0 8px 8px; }
-.desktop-sidebar--collapsed .sidebar-account-switcher { width: 42px; flex-direction: column-reverse; gap: 3px; padding: 0; border-top: 0; }
+.desktop-sidebar--collapsed .sidebar-account-switcher { width: 42px; flex-direction: column; gap: 3px; padding: 0; border-top: 0; }
 .desktop-sidebar--collapsed .sidebar-account-switcher__main { width: 42px; min-height: 42px; flex: 0 0 42px; justify-content: center; padding: 0; }
-.desktop-sidebar--collapsed .sidebar-account__utility { display: none; }
+.desktop-sidebar--collapsed .sidebar-settings-trigger { width: 42px; min-width: 42px; height: 42px; padding: 0; }
+.desktop-sidebar--collapsed .sidebar-settings-trigger span { display: none; }
 .desktop-sidebar--collapsed .profile-menu { right: auto; bottom: 0; left: calc(100% + 8px); width: 220px; }
 
 .workspace-main { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: var(--canvas); }

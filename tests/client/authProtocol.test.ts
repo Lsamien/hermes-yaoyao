@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { bootstrap, login } from '@/api/auth'
+import { bootstrap, changeCredentials, login } from '@/api/auth'
 import {
   apiRequest,
   clearApiSecurityContext,
@@ -84,6 +84,25 @@ describe('authentication and CSRF protocol', () => {
         code: 'remote_system_update_disabled',
         message: '系统升级默认只允许在本机执行',
       })
+      expect(expirations).toBe(0)
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it('does not expire the session when the current password is rejected', async () => {
+    let expirations = 0
+    const unsubscribe = onApiUnauthorized(() => { expirations += 1 })
+    setApiCsrfToken('csrf-account')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      message: '当前密码错误',
+      code: 'invalid_current_password',
+    }), { status: 401, headers: { 'content-type': 'application/json' } })))
+    try {
+      await expect(changeCredentials({
+        currentPassword: 'wrong',
+        newPassword: 'new-password',
+      })).rejects.toMatchObject({ status: 401, code: 'invalid_current_password' })
       expect(expirations).toBe(0)
     } finally {
       unsubscribe()

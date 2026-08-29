@@ -1,234 +1,78 @@
-# 侧栏 Design QA
-
-## 对照目标
-
-- Source visual truth: `/tmp/hermes-yaoyao-sidebar-qa/grok-source-desktop.png`
-- Final implementation: `/tmp/hermes-yaoyao-sidebar-qa/implementation-final-1237x788.png`
-- Search state: `/tmp/hermes-yaoyao-sidebar-qa/implementation-final-search-1237x788.png`
-- Collapsed state: `/tmp/hermes-yaoyao-sidebar-qa/implementation-final-collapsed-1237x788.png`
-- Mobile drawer: `/tmp/hermes-yaoyao-sidebar-qa/implementation-final-mobile-390x844.png`
-- Full-view comparison: `/tmp/hermes-yaoyao-sidebar-qa/comparison-full.png`
-- Focused sidebar comparison: `/tmp/hermes-yaoyao-sidebar-qa/comparison-sidebar.png`
-
-## 归一化
-
-- Desktop source and implementation are both 1237 × 788 pixels, CSS viewport 1237 × 788, device scale factor 1.
-- Focused comparison crops the same left 264 × 788 region from both images and appends them side by side without scaling.
-- Mobile implementation is 390 × 844 pixels at CSS viewport 390 × 844 and device scale factor 1. The reference only defines the desktop information hierarchy, so mobile is evaluated as a responsive continuation rather than a pixel clone.
-- State: light theme, authenticated fake-9119 account, chat workspace, two history sessions.
-
-## Full-view comparison
-
-The implementation now keeps the same dominant composition as the source: a restrained light single-column sidebar separated from a large canvas, with the composer remaining the primary main-canvas interaction. Main-canvas copy and controls intentionally follow Hermes YaoYao requirements rather than cloning Grok product content.
-
-## Focused sidebar comparison
-
-- Information order matches: brand/collapse → search → new chat → feature entries → history → account area.
-- Search and new-chat rows use the same 40px full-width rhythm and low-contrast active fill.
-- History is an unboxed, compact list with pinned treatment and date buckets.
-- The footer stays pinned to the bottom. The extra Agent selector is intentional because multi-Profile switching is a product requirement.
-
-## Required fidelity surfaces
-
-- Fonts and typography: system sans-serif, 12–13px navigation hierarchy and compact metadata closely match the source density. Product name and secondary previews are intentional Hermes additions.
-- Spacing and layout rhythm: expanded width 264px, top row 58px, search/new-chat 40px, 10px horizontal inset; search input occupies the exact trigger rectangle at x=10, y=58, width=243, height=40.
-- Colors and tokens: neutral white/gray surfaces, black primary type, quiet dividers and one low-contrast selected row match the source. Existing theme tokens retain dark-theme support.
-- Image quality and assets: the canonical mobile AppIcon source is used at native aspect ratio; no substitute logo or CSS drawing is present.
-- Copy and content: “搜索 / 新建聊天 / 历史记录” match the requested structure. Hermes-only entries remain “群聊 / 文件库 / 产物”.
-
-## Interaction and responsive evidence
-
-- Search opens in place, focuses the input, and Escape clears/restores the trigger.
-- Collapsed width is 68px; search and new-chat remain available as named icon buttons, and collapsed search expands the sidebar before focusing.
-- Collapse state persists across reload.
-- The 390px drawer is 304px wide, reports `aria-hidden=false` while open, and makes the main canvas inert.
-- Browser console error/warning collection was empty for the final desktop/search/collapse/mobile flow.
-
-## Comparison history
-
-### Pass 1 — blocked
-
-- P1: search opened a second input inside the history body instead of replacing the top search row.
-- P1: collapsed mode removed search and new-chat actions.
-- P2: history lacked today/yesterday/earlier scan grouping.
-
-Fixes: positioned the live search input in the top row, synchronized close state across desktop/mobile copies, retained icon-only primary actions in collapsed mode, auto-expanded collapsed search, and added timestamp-derived history buckets.
-
-### Pass 2 — passed
-
-Post-fix screenshots confirm the search trigger and input share the exact rectangle, collapsed actions remain usable, and the history bucket appears without disturbing the fixed footer. No actionable P0/P1/P2 mismatch remains.
-
-## Follow-up polish
-
-- P3: session rows retain a secondary preview line for faster Hermes history scanning.
-
-## Account and collapse annotation pass
-
-- Source visual truth: current browser annotations supplied with the user request, targeting the duplicate Agent/account rows, desktop wordmark, and collapsed control placement.
-- Final expanded implementation: `/tmp/hermes-yaoyao-sidebar-qa/account-merged-expanded.png`
-- Final collapsed implementation: `/tmp/hermes-yaoyao-sidebar-qa/account-merged-collapsed.png`
-
-Findings resolved:
-
-- The Agent selector and account row are now one account switcher: avatar, username, active Agent, Agent menu, theme control, and logout menu live in the same footer surface.
-- Desktop rail uses only the mobile AppIcon; the `夭夭 Web` wordmark is no longer rendered there.
-- In the 68px collapsed rail, the collapse/expand control moves to the bottom directly above the signed-in account. The theme action hides in this compact state and remains available when expanded or on mobile.
-
-No new actionable P0/P1/P2 issue was observed in the expanded or collapsed browser-rendered states.
-
-## New-chat empty-state annotation pass
-
-- Source visual truth: current user-supplied mobile browser annotation requesting a large gray product logo and the copy “聊点什么”.
-- Final browser-rendered implementation: `/tmp/hermes-yaoyao-sidebar-qa/new-chat-empty.png`
-
-The ordinary chat empty state now renders the canonical mobile AppIcon at 150px mobile / 180px desktop with muted gray opacity and a single “聊点什么” prompt. Existing conversation timelines and the group-chat empty state retain their separate message-oriented presentation.
-
-## Transport-warning annotation pass
-
-The trusted-LAN plaintext banner is no longer rendered. The explicit server-side configuration gate for non-loopback HTTP remains unchanged; only the persistent canvas warning was removed as requested.
-
-## Composer dashboard-alignment pass
-
-- Source visual truth: user-supplied Dashboard composer annotations showing the reasoning slider popover, settings dropdown, and context-usage row.
-- Final reasoning implementation: `/tmp/hermes-yaoyao-sidebar-qa/composer-reasoning-popover.png`
-- Final settings implementation: `/tmp/hermes-yaoyao-sidebar-qa/composer-settings-popover.png`
-
-The ordinary-chat composer now exposes an anchored reasoning slider with the same default-to-maximum range and rainbow rail, an anchored settings popover for tool-trace visibility, and a context row showing used, maximum, remaining tokens, and progress. The initial fallback is `0 / 256.0k · 剩余 256.0k`; live 9119 usage replaces it when available.
-
-## Settings-menu annotation pass
-
-- Source visual truth: Dashboard settings dropdown annotation with “显示工具轨迹” and “语音输入设置”.
-- Final browser-rendered implementation: `/tmp/hermes-yaoyao-sidebar-qa/composer-settings-voice-row.png`
-
-The settings popover now matches the two-row structure. Tool trace is functional. Voice input remains outside the current release scope, and choosing its settings row explicitly reports that it is not yet enabled rather than exposing a deceptive microphone control.
-
-## Library preview modal pass
-
-File-library and artifact-grid selection now opens a centered modal rather than a persistent right Inspector. The shared preview surface handles images, video, audio, PDFs, Office documents, spreadsheets, text/code, links, and generic downloadable files. A real current-profile text file was opened successfully in the browser-rendered modal; the focused E2E path opens and closes a PDF modal without console errors.
-
-## Contextual navigation pass
-
-The feature strip now hides the current workspace and the artifact shortcut. In a group room it presents “对话 / 文件库”, preventing a redundant “群聊” destination while retaining direct artifact routes and source links.
-
-## Transparent conversation-header pass
-
-The normal-chat timeline header now renders as a transparent overlay with no horizontal divider or title band. An active stored session exposes a single top-right ellipsis action that opens only rename and delete controls; group-room headers retain their own management controls.
-
-## Product-scope navigation pass
-
-The chat workspace now shows only “群聊 / 文件库” as alternative destinations. The current “对话” item is omitted, and the artifact route redirects to chat with no visible product entry.
-
-## Agent-name source pass
-
-Bootstrap now enriches Hermes profiles from the YaoYao plugin `/profiles` settings endpoint. Session rows use the configured `agentName` at the right edge, falling back only when the plugin does not provide a name. A current browser run verified the plugin-configured name “竹儿” on session entries.
-
-## Pinned-session pass
-
-Pinned sessions are now rendered as their own “已置顶 N” section, with the existing pin glyph retained on each session row and the configured Agent name at the right edge. Server order remains authoritative; the client only supplies the visual grouping.
-
-## Message-surface alignment pass
-
-Chat and group timelines now use the reference cool blue-gray conversation canvas. Tool calls render as compact monospace “› tool_name” traces with expandable details; user attachments lead the right-aligned message bubble as a file card, followed by the user’s text. Thinking rows use the lightweight dashed disclosure treatment, and branch sessions receive a centered “FORK 来源” separator when parent metadata is present.
-
-final result: passed
-
-## Mobile login simplification pass
-
-- Source visual truth: the four user browser annotations attached in the current turn, captured at 542 × 788 and marking the product wordmark, brand block, login copy, and footer note.
-- Browser-rendered implementation: `/tmp/hermes-yaoyao-login-centered-542x788.jpg`, 542 × 788 CSS viewport, light theme, anonymous/error login state.
-- Density normalization: source and implementation use the same CSS viewport; implementation capture is 542 × 788 pixels at density 1.
-- Full-view comparison: the 72px AppIcon is centered over the form, the product wordmark is absent, “登录 Hermes” is centered, and both requested small-copy regions are removed.
-- Focused evidence: DOM measurements report panel center `271px` and Logo center `271px`; heading `text-align: center`; `.brand-mark__name`, `.login-copy p`, and `.login-note` counts are all `0`; no horizontal overflow and no console errors/warnings.
-- Fonts and typography: the existing UI font, 18px/630 login heading, and compact form hierarchy are preserved.
-- Spacing and layout rhythm: the centered brand-to-heading gap is 34px; form alignment and control sizing remain unchanged.
-- Colors and visual tokens: existing neutral canvas, form surfaces, error state, and theme control remain unchanged.
-- Image quality and asset fidelity: the original mobile AppIcon is retained at native proportions with no replacement asset.
-- Copy and content: “夭夭 Web”, the 9119 explanatory subtitle, and the credential-storage footer note are removed exactly as annotated.
-- No actionable P0/P1/P2 findings.
-
-final result: passed
-
-## File-card scale pass
-
-- Source visual truth: current `yaoyao-webui` file-library implementation and user screenshot, using 220px minimum cards, 154px previews, 36px type icons, 13px titles, and 11px metadata.
-- Browser-rendered implementation: `/tmp/hermes-yaoyao-files-large-cards.png`, `/files`, 1280 × 720 CSS viewport, light theme.
-- Measured focused evidence: first live card width `224.5px`, preview height `154px`, title `13px`, metadata `11px`.
-- Typography, spacing, neutral colors, file-type icon scale, Chinese type labels, and real image/video thumbnail behavior now follow the reference proportions. The wider conversation sidebar remains an intentional product difference requested by the user.
-- No actionable P0/P1/P2 findings.
-
-final result: passed
-
-## File-library layout pass
-
-- Source visual truth: user-supplied Hermes Dashboard file-library screenshots (1645 × 899), showing type tags and a dense document grid.
-- Final browser-rendered implementation: `/tmp/hermes-yaoyao-files-current.png` (1280 × 720 CSS viewport, density 1), `/files`, light theme, authenticated 9119 session.
-- Focused evidence: in-app browser DOM confirmed the left context now contains 100 historical conversations, while the main file surface contains top-level `全部 / 图片 / 视频 / 音频 / 文档 / 其他` tags, search, refresh, and file cards. The group workspace exposes only `对话` in its feature strip; `文件库` is absent.
-
-**Findings**
-
-- No actionable P0/P1/P2 differences for the requested layout. The implementation intentionally retains the wider existing session sidebar rather than the reference’s narrow icon rail, because the user explicitly asked for the original conversation list in this location.
-
-**Required fidelity surfaces**
-
-- Fonts and typography: existing Inter/system typography and compact 9–15px hierarchy retained; tag labels and card titles remain single-line and truncate safely.
-- Spacing and layout rhythm: file filters moved from the sidebar into a 46px top tag row; the main grid begins immediately below and session history occupies the prior filter column.
-- Colors and visual tokens: existing neutral white/gray token palette, selected tag surface, borders, and focus treatment retained.
-- Image quality and asset fidelity: real file thumbnails remain native image/video previews; document cards use the existing icon system.
-- Copy and content: all labels are localized and reflect live 9119 counts/status.
-
-**Implementation checklist**
-
-- [x] Move file type filtering and search to the main file-library toolbar.
-- [x] Restore conversation history in the file-library sidebar.
-- [x] Remove file-library navigation from group chat.
-- [x] Verify tag filtering, file grid, session list, and group navigation.
-
-final result: passed
-
-## 团队动物头像 Design QA
-
-- source visual truth path: `/Users/samien/git/hermes-yaoyao/src/client/assets/team-avatars/{fox,whale,owl,rabbit,bear}.png`
-- Web implementation screenshot: `/Users/samien/.codex/visualizations/2026/08/27/01a040a6-d36a-7fb3-bb37-2f181f6fd5e8/team-avatar-web-implementation.png`
-- iOS implementation screenshot: `/Users/samien/.codex/visualizations/2026/08/27/01a040a6-d36a-7fb3-bb37-2f181f6fd5e8/team-avatar-ios-implementation.png`
-- combined comparison evidence: `/Users/samien/.codex/visualizations/2026/08/27/01a040a6-d36a-7fb3-bb37-2f181f6fd5e8/team-avatar-qa-comparison.png`
-- viewport: Web 1035 x 874 CSS px; iPhone 17 simulator 402 x 874 pt
-- pixels and density: source assets 512 x 512 px; Web capture 1035 x 874 px at 1x; iOS capture 1206 x 2622 px at 3x; comparison canvas normalizes both implementations into one 1200 x 1260 px image
-- state: existing legacy team with empty avatar, team list visible, avatar settings visible, light theme
-
-## Full-view comparison evidence
-
-The combined comparison shows the five source animals at full size, the deployed Web team list and settings panel, and the iOS simulator team list and settings picker. Both clients preserve the same silhouette, foreground color, pale background, circular crop, and ordering.
-
-## Focused region comparison evidence
-
-A separate crop was not needed: the combined canvas keeps the Web/iOS avatar-setting rows large enough to inspect all five silhouettes and also retains the small list-avatar state. The original implementation screenshots remain available for pixel-level inspection.
+# 设置中心 Design QA
 
 ## Findings
 
-- No actionable P0/P1/P2 findings.
-- Fonts and typography: existing platform typography and hierarchy are unchanged; new labels remain readable at Web and iOS caption sizes.
-- Spacing and layout rhythm: five circular choices fit without clipping or crowding; preview, picker, random action, and upload action remain visually grouped.
-- Colors and visual tokens: exact flat foreground/background colors from the source assets are retained; selection uses each platform's existing accent token.
-- Image quality and asset fidelity: source raster assets remain sharp at 23–58 px Web sizes and 34–58 pt iOS sizes, with clean circular masks and no composite-avatar seam or gray center.
-- Copy and content: both clients use the same animal labels, “随机一个”, and “上传图片”; legacy empty avatars explicitly explain that the old composite was replaced.
+- 当前没有可执行的 P0、P1 或 P2 差异。
+- P3：补充稿的“模型与 Provider”页包含统一保存栏，而实际 Provider 的新增、编辑、测试、设为默认和删除均是独立即时操作。实现有意不显示一个无真实提交语义的全局“保存更改”，避免误导。
+- P3：账号安全补充稿本身为 `1505 × 1045`，与主设计的桌面比例不一致。实现遵循主设计的固定壳体，并让账号内容仅在右侧区域滚动；固定保存栏始终可见。
 
-## Comparison history
+## Source visual truth
 
-- Initial pass: no P0/P1/P2 mismatch found, so no visual-fix iteration was required.
+- 主视觉：`/Users/samien/.codex/generated_images/01a04b82-a660-7c43-a4d1-5c0a84482b5c/exec-9f6f7523-6cfa-418f-9103-d748e5958d68.png`
+- 模型目录：`/Users/samien/.codex/generated_images/01a04b82-a660-7c43-a4d1-5c0a84482b5c/exec-b44ab548-2154-4432-944f-70b012ca9567.png`
+- 账号安全：`/Users/samien/.codex/generated_images/01a04b82-a660-7c43-a4d1-5c0a84482b5c/exec-73b26de9-b178-48dd-a616-3933f87990f3.png`
+- 系统概览：`/Users/samien/.codex/generated_images/01a04b82-a660-7c43-a4d1-5c0a84482b5c/exec-d8382bf2-4998-4ff8-bfd3-35d297071297.png`
+
+源图像素尺寸依次为 `1717 × 916`、`1683 × 934`、`1505 × 1045`、`1717 × 916`。主视觉、模型和系统概览按相同比例归一到 `1637 × 874`；账号安全只作为内容层级参考，未拉伸为桌面比例。
+
+## Implementation evidence
+
+- 身份与头像：`/Users/samien/.codex/visualizations/2026/08/29/01a04b82-a660-7c43-a4d1-5c0a84482b5c/settings-center-implementation/08-identity-desktop-fixed-footer.png`
+- 模型与 Provider：`/Users/samien/.codex/visualizations/2026/08/29/01a04b82-a660-7c43-a4d1-5c0a84482b5c/settings-center-implementation/11-models-desktop-final.png`
+- 登录与安全：`/Users/samien/.codex/visualizations/2026/08/29/01a04b82-a660-7c43-a4d1-5c0a84482b5c/settings-center-implementation/09-security-desktop-fixed-footer.png`
+- 系统概览：`/Users/samien/.codex/visualizations/2026/08/29/01a04b82-a660-7c43-a4d1-5c0a84482b5c/settings-center-implementation/10-overview-desktop-final.png`
+- 移动端分类：`/Users/samien/.codex/visualizations/2026/08/29/01a04b82-a660-7c43-a4d1-5c0a84482b5c/settings-center-implementation/12-mobile-menu-final.png`
+- 移动端账号页：`/Users/samien/.codex/visualizations/2026/08/29/01a04b82-a660-7c43-a4d1-5c0a84482b5c/settings-center-implementation/07-mobile-security-fixed-footer.png`
+
+桌面实现截图与 CSS 视口均为 `1637 × 874`，`devicePixelRatio = 1`。移动端实现截图与 CSS 视口均为 `390 × 844`，`devicePixelRatio = 1`。
+
+## Comparison evidence
+
+- 身份全景并排：`/Users/samien/.codex/visualizations/2026/08/29/01a04b82-a660-7c43-a4d1-5c0a84482b5c/settings-center-implementation/compare-identity.png`
+- 模型密集内容并排：`/Users/samien/.codex/visualizations/2026/08/29/01a04b82-a660-7c43-a4d1-5c0a84482b5c/settings-center-implementation/compare-models.png`
+- 账号表单并排：`/Users/samien/.codex/visualizations/2026/08/29/01a04b82-a660-7c43-a4d1-5c0a84482b5c/settings-center-implementation/compare-security.png`
+- 系统概览并排：`/Users/samien/.codex/visualizations/2026/08/29/01a04b82-a660-7c43-a4d1-5c0a84482b5c/settings-center-implementation/compare-overview.png`
+
+全景比较用于壳体、分栏、层级和整体密度；模型目录与账号表单比较作为聚焦区域，用于检查 ID、标签、字段、按钮、滚动和固定操作栏。
+
+## Required fidelity surfaces
+
+- 字体与排版：沿用现有 `--font-ui` 系统字体；页面标题 `23px`，导航 `14px`，正文与表单主要为 `13–16px`。标题、分组、标签和帮助文本层级与设计一致，没有截断关键 Provider ID。
+- 间距与布局：桌面壳体实测 `1080 × 780`，标题栏 `64px`、左栏 `292px`、编辑页底栏 `76px`。系统概览右侧 `clientHeight = scrollHeight = 604px`；设置左栏 `clientHeight = scrollHeight = 714px`，全部导航在首屏完整可见。长表单仅滚动右内容区。
+- 颜色与视觉 token：复用现有白色/暖灰表面、`--line`、`--surface-soft`、`--accent`、`--success` 和 `--danger`。选中态用浅灰，键盘焦点用紫色描边；成功与危险状态同时有文字，不只依赖颜色。
+- 图像与资产：继续使用真实 `AgentAvatar` 数据和现有品牌/`AppIcon` 体系；设计没有要求新增位图资产，未使用占位图、CSS 绘图或临时 SVG 替代。
+- 文案与内容：保留完整 Provider/model 目录与完整 `custom:tingly` ID；双流语音明确标记“全局”；账号、Agent 和系统作用域均在页面标题下持续显示。
+- 响应式与可访问性：`390 × 844` 下设置中心为全屏导航栈，页面无横向溢出（`scrollWidth = innerWidth = 390`），分类页 `clientHeight = scrollHeight = 788px`，固定底栏为 `390 × 68`。当前分类使用 `aria-current="page"`；控制行、返回/关闭和底栏按钮命中区域达到约 `40–44px`，表单使用永久标签并保留明显焦点态。关闭后焦点实测返回 `aria-label="打开设置中心"` 的原按钮。
 
 ## Primary interactions tested
 
-- Existing empty avatar renders as a deterministic animal in the Web list and settings preview.
-- Web settings expose five selectable animals, random selection, and image upload.
-- iOS team list renders animal avatars; settings expose the same five choices, random selection, and Photos upload.
-- Browser console checked with no new avatar-related errors.
+- Agent 切换弹层只显示 Agent 列表，独立设置按钮打开统一中心。
+- 桌面设置导航可进入身份、模型、账号安全、系统概览、用户、Hermes 连接、双流语音和更新页面。
+- 管理员系统组与非管理员隐藏逻辑由组件测试覆盖。
+- 未保存内容切页确认、系统升级锁定切页/关闭由组件测试覆盖。
+- 账号登录与节点配对按作用域拆分，定时器与扫码资源清理由组件测试覆盖。
+- 移动抽屉打开后背景 header/main 均不可聚焦，焦点进入“关闭导航”；进入设置详情后焦点移到页面标题，返回后移到当前分类，关闭中心后回到“打开导航”。
+- 两处 Agent 选择器均使用 `listbox / option` 状态，并支持方向键、Home、End 与 Escape；用户行操作的 accessible name 包含目标用户名。
+- 9119 用户名、密码及双流语音 API Key 在浏览器中保持空白；Provider 完整目录与只读/可编辑状态来自真实本地服务。
+- 浏览器控制台最终无 warning/error。
 
-## Implementation checklist
+## Comparison history
 
-- [x] Five source animals render on Web and iOS.
-- [x] Team avatars remain circular at list and settings sizes.
-- [x] Legacy empty/composite state is replaced deterministically.
-- [x] New teams receive a random animal when no explicit choice is made.
-- [x] Uploaded custom images remain supported.
+1. 初次比较发现 P2：身份和账号安全的保存操作位于滚动内容中，未匹配固定底栏。
+2. 修复：为两页增加外部表单 ID 和统一固定 `取消 / 保存更改` 底栏；桌面底栏实测 `786 × 76`，移动端底栏实测 `390 × 68`。
+3. 复核：`08-identity-desktop-fixed-footer.png`、`09-security-desktop-fixed-footer.png` 与 `07-mobile-security-fixed-footer.png` 证明操作栏固定，右内容区仍可独立滚动，无横向溢出。
+4. 独立代码审查发现更新任务恢复/启动锁、Agent 草稿刷新、扫码资源竞态、APNs/FCM 草稿互相覆盖等 P1/P2 风险；实现加入生命周期 token、真实 dirty baseline、分离配置快照、并发锁与业务 401 隔离。
+5. 第二次复核确认 Agent 弹层仅剩 Agent 列表，桌面与移动设置导航首屏完整可见，关闭焦点正确恢复；新增组件测试覆盖 Provider/语音丢稿、更新恢复、摄像头停止、账号 401 和推送并发草稿。
+6. 无障碍浏览器复核补齐移动详情/返回焦点、抽屉背景隔离、Agent 复合控件键盘操作及用户行按钮上下文；`390 × 844` 与 `1637 × 874` 实测焦点位置正确，控制台仍无 warning/error。
+
+## Verification
+
+- `npm run typecheck`：通过。
+- `npm test`：61 个测试文件、317 项测试全部通过。
+- `npm run build`：品牌校验、发布版本校验、客户端与服务端生产构建全部通过。
+- `git diff --check`：通过。
+- 两轮独立最终审查：无剩余 P0、P1 或 P2。
+
+## Final result
 
 final result: passed

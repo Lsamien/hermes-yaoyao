@@ -74,6 +74,24 @@ afterEach(() => {
 })
 
 describe('System management APNs configuration', () => {
+  it('includes the target username in every row action accessible name', async () => {
+    vi.mocked(listUsers).mockResolvedValueOnce([{
+      id: 'user-1',
+      username: 'member',
+      role: 'user',
+      enabled: true,
+      mustChangePassword: false,
+      createdAt: 1,
+      updatedAt: 1,
+    }])
+    const wrapper = await mountOpen()
+
+    expect(document.querySelector('[aria-label="为用户 member 重置密码"]')).not.toBeNull()
+    expect(document.querySelector('[aria-label="禁用用户 member"]')).not.toBeNull()
+    expect(document.querySelector('[aria-label="删除用户 member"]')).not.toBeNull()
+    wrapper.unmount()
+  })
+
   it('validates and saves an FCM service-account path without exposing secret contents', async () => {
     const fcm = {
       configured: false,
@@ -230,6 +248,52 @@ describe('System management APNs configuration', () => {
     await flushPromises()
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('8800 无法读取该密钥文件')
     expect(input('push-key-file').value).toBe('/srv/secrets/AuthKey_TEST.p8')
+    wrapper.unmount()
+  })
+
+  it('preserves an unsaved FCM draft while APNs is saved and locks the sibling form during the request', async () => {
+    const fcm = {
+      configured: true,
+      healthy: true,
+      registrationCount: 0,
+      pendingCount: 0,
+      source: 'file' as const,
+      editable: true,
+      managementAvailable: true,
+      serviceAccountFile: '/srv/secrets/firebase.json',
+      projectId: 'server-project',
+      packageName: 'cn.samien.yaoyao.hermes',
+      warnings: [],
+    }
+    vi.mocked(getPushSystemStatus).mockResolvedValueOnce(pushStatus({
+      source: 'file',
+      keyFile: '/srv/secrets/AuthKey_TEST.p8',
+      keyId: 'KEY123',
+      teamId: 'TEAM123',
+      providers: { fcm },
+    }))
+    let resolveSave: ((status: PushSystemStatus) => void) | undefined
+    vi.mocked(savePushSystemConfig).mockReturnValueOnce(new Promise(resolve => { resolveSave = resolve }))
+    const wrapper = await mountOpen()
+    enter('fcm-project-id', 'local-unsaved-project')
+    await nextTick()
+
+    button('验证并启用')!.click()
+    await nextTick()
+    expect(input('fcm-project-id').readOnly).toBe(true)
+    resolveSave?.(pushStatus({
+      configured: true,
+      healthy: true,
+      source: 'file',
+      keyFile: '/srv/secrets/AuthKey_TEST.p8',
+      keyId: 'KEY123',
+      teamId: 'TEAM123',
+      providers: { fcm: { ...fcm, projectId: 'server-response-project' } },
+    }))
+    await flushPromises()
+
+    expect(input('fcm-project-id').value).toBe('local-unsaved-project')
+    expect(input('fcm-project-id').readOnly).toBe(false)
     wrapper.unmount()
   })
 })

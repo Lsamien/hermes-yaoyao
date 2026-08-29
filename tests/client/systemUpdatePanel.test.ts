@@ -1,0 +1,112 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import SystemUpdatePanel from '@/components/app/SystemUpdatePanel.vue'
+
+const api = vi.hoisted(() => ({
+  applySystemUpdate: vi.fn(),
+  checkSystemUpdate: vi.fn(),
+  rollbackSystemUpdate: vi.fn(),
+  systemUpdateJob: vi.fn(),
+  systemUpdateStatus: vi.fn(),
+}))
+
+vi.mock('@/api/systemUpdate', () => api)
+
+const manifest = {
+  schemaVersion: 1 as const,
+  releaseVersion: '0.2.17',
+  webVersion: '0.2.17',
+  pluginVersion: '1.7.3',
+  gitTag: 'v0.2.17',
+}
+
+const activeJob = {
+  id: 'job-1',
+  operation: 'update' as const,
+  state: 'verifying' as const,
+  message: '正在验证',
+  createdAt: '2026-08-29T00:00:00Z',
+  updatedAt: '2026-08-29T00:00:01Z',
+}
+const doneJob = { ...activeJob, state: 'succeeded' as const, message: '更新完成' }
+const readyStatus = {
+  current: manifest,
+  installedPluginVersion: '1.7.3',
+  versionsMatch: true,
+  installationMode: 'release' as const,
+  latest: manifest,
+  updateAvailable: false,
+  supported: true,
+  canRollback: true,
+}
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  api.systemUpdateStatus.mockReset()
+  api.checkSystemUpdate.mockReset()
+  api.systemUpdateJob.mockReset()
+  api.applySystemUpdate.mockReset()
+  api.rollbackSystemUpdate.mockReset()
+  api.systemUpdateStatus.mockResolvedValue(readyStatus)
+  api.checkSystemUpdate.mockResolvedValue(readyStatus)
+  api.systemUpdateJob.mockResolvedValue(doneJob)
+})
+
+afterEach(() => {
+  document.body.innerHTML = ''
+  vi.clearAllTimers()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
+
+describe('SystemUpdatePanel', () => {
+  it('resumes polling an existing non-terminal job and releases the settings lock', async () => {
+    api.systemUpdateStatus
+      .mockResolvedValueOnce({ ...readyStatus, job: activeJob })
+      .mockResolvedValueOnce({ ...readyStatus, job: doneJob })
+    const wrapper = mount(SystemUpdatePanel, {
+      props: { active: true },
+      global: { stubs: { AppIcon: true } },
+    })
+    await flushPromises()
+    expect(wrapper.emitted('lock-change')?.some(event => event[0] === true)).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await flushPromises()
+    expect(api.systemUpdateJob).toHaveBeenCalledWith('job-1')
+    expect(wrapper.text()).toContain('更新完成')
+    expect(wrapper.emitted('lock-change')?.at(-1)).toEqual([false])
+    expect(api.checkSystemUpdate).not.toHaveBeenCalled()
+  })
+
+  it('locks while an update mutation is starting and ignores a stale response after deactivation', async () => {
+    const updateAvailable = {
+      ...readyStatus,
+      latest: { ...manifest, releaseVersion: '0.2.18', webVersion: '0.2.18', gitTag: 'v0.2.18' },
+      updateAvailable: true,
+    }
+    api.systemUpdateStatus.mockResolvedValue(updateAvailable)
+    api.checkSystemUpdate.mockResolvedValue(updateAvailable)
+    let resolveApply: ((job: typeof activeJob) => void) | undefined
+    api.applySystemUpdate.mockReturnValue(new Promise(resolve => { resolveApply = resolve }))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mount(SystemUpdatePanel, {
+      props: { active: true },
+      global: { stubs: { AppIcon: true } },
+    })
+    await flushPromises()
+
+    const apply = wrapper.findAll<HTMLButtonElement>('button').find(button => button.text().includes('升级配套版本'))!
+    await apply.trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.emitted('lock-change')?.at(-1)).toEqual([true])
+    const check = wrapper.findAll<HTMLButtonElement>('button').find(button => button.text().includes('检查更新'))!
+    expect(check.element.disabled).toBe(true)
+
+    await wrapper.setProps({ active: false })
+    resolveApply?.(activeJob)
+    await flushPromises()
+    expect(api.systemUpdateJob).not.toHaveBeenCalled()
+    expect(wrapper.emitted('lock-change')?.at(-1)).toEqual([false])
+  })
+})

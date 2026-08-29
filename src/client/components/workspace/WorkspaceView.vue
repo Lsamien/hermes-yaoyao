@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import WorkspaceShell from '@/components/app/WorkspaceShell.vue'
-import AgentIdentityDialog from '@/components/app/AgentIdentityDialog.vue'
 import { updateProfileIdentity } from '@/api/profiles'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
@@ -20,9 +19,9 @@ const auth = useAuthStore()
 const theme = useThemeStore()
 
 const userName = computed(() => auth.user?.displayName || auth.user?.username || '')
-const identityOpen = ref(false)
 const identityBusy = ref(false)
 const identityError = ref('')
+const identityResetVersion = ref(0)
 
 async function logout() { await auth.logout() }
 function selectProfile(name: string) { auth.selectProfile(name) }
@@ -35,7 +34,8 @@ async function saveIdentity(input: { title: string; avatarDataURL?: string | nul
     await updateProfileIdentity(profile, input)
     await auth.refreshProfiles()
     await auth.refreshProfileAvatars()
-    identityOpen.value = false
+    identityError.value = ''
+    identityResetVersion.value += 1
   } catch (cause) {
     identityError.value = cause instanceof Error ? cause.message : '保存 Agent 身份失败'
   } finally {
@@ -47,9 +47,6 @@ async function refreshOnFocus() {
   await auth.refreshProfileAvatars()
 }
 function refreshOnWindowFocus() { void refreshOnFocus().catch(() => undefined) }
-function openIdentity() {
-  void auth.refreshProfileAvatars().finally(() => { identityOpen.value = true })
-}
 onMounted(() => {
   window.addEventListener('focus', refreshOnWindowFocus)
   void auth.refreshProfileAvatars().catch(() => undefined)
@@ -64,10 +61,14 @@ onBeforeUnmount(() => window.removeEventListener('focus', refreshOnWindowFocus))
     :active-profile="auth.activeProfile"
     :profiles="auth.profiles"
     :theme="theme.resolvedTheme"
+    :theme-preference="theme.theme"
     :insecure-transport="auth.insecureLan"
     :is-admin="auth.user?.role === 'admin'"
     :upstream-ready="auth.upstreamReady"
     :upstream-error="auth.upstreamError"
+    :identity-busy="identityBusy"
+    :identity-error="identityError"
+    :identity-reset-version="identityResetVersion"
     :sidebar-title="sidebarTitle"
     :sidebar-subtitle="sidebarSubtitle"
     :sidebar-context-title="sidebarContextTitle"
@@ -76,8 +77,9 @@ onBeforeUnmount(() => window.removeEventListener('focus', refreshOnWindowFocus))
     :inspector-close-label="inspectorCloseLabel"
     @logout="logout"
     @toggle-theme="theme.toggle"
+    @set-theme="theme.setTheme"
     @select-profile="selectProfile"
-    @edit-profile="openIdentity"
+    @save-identity="saveIdentity"
     @close-inspector="emit('closeInspector')"
   >
     <template #sidebar-action><slot name="sidebar-action" /></template>
@@ -87,5 +89,4 @@ onBeforeUnmount(() => window.removeEventListener('focus', refreshOnWindowFocus))
     <template #default><slot /></template>
     <template #inspector><slot name="inspector" /></template>
   </WorkspaceShell>
-  <AgentIdentityDialog :open="identityOpen" :profile="auth.activeProfile" :busy="identityBusy" :error="identityError" :is-admin="auth.user?.role === 'admin'" @close="identityOpen = false" @save="saveIdentity" />
 </template>

@@ -72,7 +72,7 @@ export async function changeCredentials(input: {
   username?: string
 }): Promise<CurrentUser> {
   const payload = record(unwrapData(await apiRequest<unknown>('/api/app/account/credentials', {
-    method: 'PUT', body: input as unknown as JsonValue,
+    method: 'PUT', body: input as unknown as JsonValue, notifyUnauthorized: false,
   })))
   return normalizeUser(payload.user ?? payload)
 }
