@@ -88,7 +88,10 @@ describe('APNsProvider', () => {
     await expect(provider.send({
       deviceToken: 'ab'.repeat(16),
       environment: 'development',
-      payload: { aps: { alert: '完成' } },
+      payload: { aps: { alert: {
+        title: '## 完成 ✅',
+        body: '**报告** [下载](https://example.com/private)',
+      } } },
       collapseId: 'chat-1',
     })).resolves.toMatchObject({ disposition: 'success', apnsId: 'returned-id' })
     await provider.send({
@@ -103,7 +106,9 @@ describe('APNsProvider', () => {
     expect(calls[0]!.headers['apns-topic']).toBe(config.topic)
     expect(calls[0]!.headers['apns-push-type']).toBe('alert')
     expect(calls[0]!.headers.authorization).toMatch(/^bearer /)
-    expect(JSON.parse(Buffer.from(calls[0]!.body).toString('utf8'))).toEqual({ aps: { alert: '完成' } })
+    expect(JSON.parse(Buffer.from(calls[0]!.body).toString('utf8'))).toEqual({
+      aps: { alert: { title: '完成 ✅', body: '报告 下载' } },
+    })
   })
 
   it('does not contact APNs for malformed or oversized requests and retries transport failures', async () => {

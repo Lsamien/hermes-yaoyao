@@ -9,6 +9,7 @@ import {
   type PushNotificationCandidate,
 } from './pushEvents.js'
 import { PushCoordinator } from './pushCoordinator.js'
+import { notificationPlainText } from './notificationText.js'
 
 type JsonRecord = Record<string, unknown>
 
@@ -38,9 +39,7 @@ function timestampMilliseconds(value: unknown): number | undefined {
 }
 
 function summary(value: unknown, fallback: string): string {
-  const normalized = text(value).replace(/\s+/g, ' ')
-  if (!normalized) return fallback
-  return Array.from(normalized).length > 180 ? `${Array.from(normalized).slice(0, 179).join('')}…` : normalized
+  return notificationPlainText(value, { fallback, maximum: 180 })
 }
 
 function collapseID(prefix: string, value: string): string {

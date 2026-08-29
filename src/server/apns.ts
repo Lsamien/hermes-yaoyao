@@ -13,6 +13,7 @@ import {
 } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import type { APNsProviderConfig } from './config.js'
+import { notificationPlainText } from './notificationText.js'
 
 export type APNsEnvironment = 'development' | 'production'
 
@@ -72,6 +73,29 @@ const UNREGISTER_REASONS = new Set([
   'DeviceTokenNotForTopic',
   'Unregistered',
 ])
+
+function sanitizedPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const aps = payload.aps
+  if (!aps || typeof aps !== 'object' || Array.isArray(aps)) return payload
+  const alert = (aps as Record<string, unknown>).alert
+  if (!alert || typeof alert !== 'object' || Array.isArray(alert)) return payload
+  const record = alert as Record<string, unknown>
+  return {
+    ...payload,
+    aps: {
+      ...(aps as Record<string, unknown>),
+      alert: {
+        ...record,
+        ...(typeof record.title === 'string' ? {
+          title: notificationPlainText(record.title, { fallback: '新消息', maximum: 120 }),
+        } : {}),
+        ...(typeof record.body === 'string' ? {
+          body: notificationPlainText(record.body, { fallback: '请打开夭夭查看详情', maximum: 180 }),
+        } : {}),
+      },
+    },
+  }
+}
 
 function encodedJSON(value: unknown): string {
   return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url')
@@ -243,7 +267,7 @@ export class APNsProvider {
     if (!TOKEN_RE.test(request.deviceToken)) {
       return { disposition: 'unregister', status: 0, reason: 'BadDeviceToken' }
     }
-    const body = Buffer.from(JSON.stringify(request.payload), 'utf8')
+    const body = Buffer.from(JSON.stringify(sanitizedPayload(request.payload)), 'utf8')
     if (body.length > APNS_MAX_PAYLOAD_BYTES) {
       return { disposition: 'failed', status: 0, reason: 'PayloadTooLarge' }
     }

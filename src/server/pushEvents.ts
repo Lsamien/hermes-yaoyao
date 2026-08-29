@@ -4,6 +4,7 @@ import { isSupportedGroupProtocolVersion } from '../shared/types.js'
 import type { ServerConfig } from './config.js'
 import type { UpstreamServiceSession } from './localAuth.js'
 import type { PushCoordinator as PersistentPushCoordinator } from './pushCoordinator.js'
+import { notificationPlainText } from './notificationText.js'
 
 type MaybePromise<T> = T | Promise<T>
 type JsonRecord = Record<string, unknown>
@@ -187,9 +188,7 @@ function errorMessage(value: unknown): string {
 }
 
 function summary(value: unknown, fallback: string): string {
-  const normalized = string(value).replace(/\s+/g, ' ')
-  if (!normalized) return fallback
-  return normalized.length > 180 ? `${normalized.slice(0, 179)}…` : normalized
+  return notificationPlainText(value, { fallback, maximum: 180 })
 }
 
 function eventTimestamp(value: unknown): number | undefined {
