@@ -36,6 +36,10 @@ import {
   APNsConfigurationManager,
   type APNsConfigurationInput,
 } from './apnsConfiguration.js'
+import {
+  FCMConfigurationManager,
+  type FCMConfigurationInput,
+} from './fcmConfiguration.js'
 
 type JsonObject = Record<string, unknown>
 
@@ -53,6 +57,7 @@ export interface RouteDependencies {
   profileIdentities: UpstreamProfileIdentityService
   push: PushCoordinator
   apnsConfiguration: APNsConfigurationManager
+  fcmConfiguration: FCMConfigurationManager
 }
 
 function body(ctx: Koa.Context): JsonObject {
@@ -367,7 +372,7 @@ function pushSystemStatus(dependencies: RouteDependencies): Record<string, unkno
   const runtime = dependencies.push.status()
   const settings = dependencies.apnsConfiguration.snapshot()
   const input = settings.input
-  return {
+  const apns = {
     ...runtime,
     source: settings.source,
     editable: settings.editable,
@@ -379,6 +384,20 @@ function pushSystemStatus(dependencies: RouteDependencies): Record<string, unkno
     warnings: settings.warnings,
     ...(settings.configurationError ? { configurationError: settings.configurationError } : {}),
   }
+  const fcmRuntime = dependencies.push.fcmStatus()
+  const fcmSettings = dependencies.fcmConfiguration.snapshot()
+  const fcmInput = fcmSettings.input
+  const fcm = {
+    ...fcmRuntime,
+    source: fcmSettings.source,
+    editable: fcmSettings.editable,
+    serviceAccountFile: fcmInput?.serviceAccountFile,
+    projectId: fcmInput?.projectId ?? fcmRuntime.projectId,
+    packageName: fcmInput?.packageName ?? fcmRuntime.packageName,
+    warnings: fcmSettings.warnings,
+    ...(fcmSettings.configurationError ? { configurationError: fcmSettings.configurationError } : {}),
+  }
+  return { ...apns, providers: { apns, fcm } }
 }
 
 function pushRequest<T>(operation: () => T): T {
@@ -1071,21 +1090,35 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   router.put('/api/push/v1/installations/:installationID/accounts/:clientAccountID', (ctx) => {
     const user = dependencies.auth.require(ctx)
     const request = body(ctx)
-    if (request.environment !== 'development' && request.environment !== 'production') {
+    const platform = request.platform === undefined || request.platform === 'ios' ? 'ios'
+      : request.platform === 'android' ? 'android' : undefined
+    if (!platform) {
+      throw new HttpError(400, 'platform must be ios or android', 'invalid_push_request')
+    }
+    if (platform === 'ios' && request.environment !== 'development' && request.environment !== 'production') {
       throw new HttpError(400, 'environment must be development or production', 'invalid_push_request')
     }
-    const environment = request.environment
-    const installation = pushRequest(() => dependencies.push.registerInstallation({
+    const common = {
       userId: user.id,
       installationId: canonicalUUID(ctx.params.installationID, 'installation ID'),
       clientAccountId: canonicalUUID(ctx.params.clientAccountID, 'client account ID'),
-      deviceToken: typeof request.token === 'string'
-        ? request.token
-        : typeof request.deviceToken === 'string' ? request.deviceToken : '',
-      environment,
       appVersion: typeof request.appVersion === 'string' ? request.appVersion : undefined,
       authorizationVersion: dependencies.auth.pushAuthorizationVersion(user.id),
-    }))
+    }
+    const installation = platform === 'android'
+      ? pushRequest(() => dependencies.push.registerInstallation({
+          ...common,
+          platform: 'android',
+          fid: typeof request.fid === 'string' ? request.fid : '',
+        }))
+      : pushRequest(() => dependencies.push.registerInstallation({
+          ...common,
+          platform: 'ios',
+          deviceToken: typeof request.token === 'string'
+            ? request.token
+            : typeof request.deviceToken === 'string' ? request.deviceToken : '',
+          environment: request.environment as 'development' | 'production',
+        }))
     json(ctx, 200, { installation })
   })
   router.delete('/api/push/v1/installations/:installationID/accounts/:clientAccountID', (ctx) => {
@@ -1730,6 +1763,19 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     }
     await dependencies.apnsConfiguration.update(input, async config => {
       await dependencies.push.configureAPNs(config)
+    })
+    json(ctx, 200, pushSystemStatus(dependencies))
+  })
+  router.put('/api/app/system/push-config/fcm', async (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
+    const request = body(ctx)
+    const input: Partial<FCMConfigurationInput> = {
+      serviceAccountFile: typeof request.serviceAccountFile === 'string' ? request.serviceAccountFile : '',
+      projectId: typeof request.projectId === 'string' ? request.projectId : '',
+      packageName: typeof request.packageName === 'string' ? request.packageName : '',
+    }
+    await dependencies.fcmConfiguration.update(input, async config => {
+      await dependencies.push.configureFCM(config)
     })
     json(ctx, 200, pushSystemStatus(dependencies))
   })

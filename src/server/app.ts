@@ -29,6 +29,10 @@ import {
   APNsConfigurationManager,
   type APNsConfigurationSnapshot,
 } from './apnsConfiguration.js'
+import {
+  FCMConfigurationManager,
+  type FCMConfigurationSnapshot,
+} from './fcmConfiguration.js'
 import { PushCoordinatorEventAdapter } from './pushEventAdapter.js'
 import {
   ChatPushJobManager,
@@ -51,6 +55,7 @@ export interface ApplicationOptions {
   profileIdentities?: UpstreamProfileIdentityService
   push?: PushCoordinator
   apnsConfiguration?: APNsConfigurationManager
+  fcmConfiguration?: FCMConfigurationManager
 }
 
 export interface ApplicationRuntime {
@@ -68,6 +73,7 @@ export interface ApplicationRuntime {
   profileIdentities: UpstreamProfileIdentityService
   push: PushCoordinator
   apnsConfiguration: APNsConfigurationManager
+  fcmConfiguration: FCMConfigurationManager
   pushEventCoordinator: PushCoordinatorEventAdapter
   chatPushJobs: ChatPushJobManager
   groupPushEvents: GroupPushEventWatcher
@@ -140,10 +146,21 @@ export function createApplication(options: ApplicationOptions = {}): Application
   }
   const apnsConfiguration = options.apnsConfiguration
     ?? new APNsConfigurationManager(config.home, initialAPNsSettings)
+  const initialFCMSettings: FCMConfigurationSnapshot = config.fcmSettings ?? {
+    source: config.fcm || config.fcmConfigurationError ? 'environment' : 'none',
+    editable: !(config.fcm || config.fcmConfigurationError),
+    ...(config.fcm ? { input: { ...config.fcm }, config: config.fcm } : {}),
+    warnings: [],
+    ...(config.fcmConfigurationError ? { configurationError: config.fcmConfigurationError } : {}),
+  }
+  const fcmConfiguration = options.fcmConfiguration
+    ?? new FCMConfigurationManager(config.home, initialFCMSettings)
   const push = options.push ?? new PushCoordinator({
     home: config.home,
     apns: config.apns,
     apnsConfigurationError: config.apnsConfigurationError,
+    fcm: config.fcm,
+    fcmConfigurationError: config.fcmConfigurationError,
     isUserActive: userID => auth.isUserActive(userID),
     userAuthorizationVersion: userID => auth.pushAuthorizationVersion(userID),
   })
@@ -273,6 +290,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     profileIdentities,
     push,
     apnsConfiguration,
+    fcmConfiguration,
   })
   app.use(router.routes())
   app.use(router.allowedMethods({ throw: false }))
@@ -301,6 +319,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     profileIdentities,
     push,
     apnsConfiguration,
+    fcmConfiguration,
     pushEventCoordinator,
     chatPushJobs,
     groupPushEvents,
@@ -326,7 +345,7 @@ export function createNodeServer(runtime: ApplicationRuntime): NodeServerRuntime
         key: readFileSync(config.tlsKey),
       }, runtime.app.callback())
     : createHttpServer(runtime.app.callback())
-  const synchronizePushObservers = (enabled = runtime.push.capabilities().enabled) => {
+  const synchronizePushObservers = (enabled = runtime.push.isAnyProviderEnabled()) => {
     if (enabled) {
       runtime.chatPushJobs.start()
       runtime.groupPushEvents.start()

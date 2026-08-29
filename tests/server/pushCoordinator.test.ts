@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { APNsRequest, APNsSendResult } from '../../src/server/apns.js'
+import type { FCMRequest } from '../../src/server/fcm.js'
 import { loadServerConfig, type APNsProviderConfig } from '../../src/server/config.js'
 import {
   PushCoordinator,
+  type FCMSender,
   type PushSender,
 } from '../../src/server/pushCoordinator.js'
 
@@ -97,6 +99,137 @@ describe('push configuration', () => {
 })
 
 describe('PushCoordinator durable state and delivery', () => {
+  it('atomically migrates schema 1 APNs state to schema 2 without changing durable recovery data', () => {
+    const home = root()
+    const directory = join(home, 'push')
+    mkdirSync(directory)
+    const statePath = join(directory, 'state.json')
+    writeFileSync(statePath, JSON.stringify({
+      schemaVersion: 1,
+      installations: [{
+        userId: 'user-a', installationId: 'phone-1', clientAccountId: 'account-a',
+        deviceToken: 'ab'.repeat(32), environment: 'development', badge: 2, updatedAt: '2026-01-01T00:00:00.000Z',
+      }],
+      groupSubscriptions: [{
+        userId: 'user-a', roomId: 'room-1', enabled: true, updatedAt: '2026-01-01T00:00:00.000Z',
+      }],
+      outbox: [{
+        id: 'outbox-1', eventId: 'pending-event', userId: 'user-a', installationId: 'phone-1',
+        clientAccountId: 'account-a', kind: 'chat.completed', title: '完成', body: '正文',
+        data: { sessionId: 'session-1' }, createdAt: 1, expiresAt: 4_000_000_000_000,
+        attempts: 2, nextAttemptAt: 2_000_000_000_000,
+      }],
+      processedEvents: { existing: 123 },
+      groupWatch: { epoch: 'epoch-1', cursor: 7 },
+      chatJobs: [],
+      ambiguousChatSessions: { ambiguous: 456 },
+      status: { lastSuccessAt: '2026-01-01T00:00:00.000Z' },
+    }))
+
+    const coordinator = new PushCoordinator({ home, autoFlush: false })
+    const migrated = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, any>
+    expect(migrated).toMatchObject({
+      schemaVersion: 2,
+      installations: [{ platform: 'ios', environment: 'development' }],
+      outbox: [{ platform: 'ios', id: 'outbox-1', attempts: 2 }],
+      processedEvents: { existing: 123 },
+      groupWatch: { epoch: 'epoch-1', cursor: 7 },
+      ambiguousChatSessions: { ambiguous: 456 },
+      providerStatus: { ios: { lastSuccessAt: '2026-01-01T00:00:00.000Z' }, android: {} },
+    })
+    expect(migrated).not.toHaveProperty('status')
+    coordinator.close()
+  })
+
+  it('isolates an unexpected APNs sender exception from the FCM queue and redacts its target', async () => {
+    const deviceToken = 'ab'.repeat(32)
+    const fcmRequests: FCMRequest[] = []
+    const coordinator = new PushCoordinator({
+      home: root(),
+      apns,
+      provider: { send: async () => { throw new Error(`transport leaked ${deviceToken}`) } },
+      fcm: {
+        serviceAccountFile: '/private/not-read-when-provider-is-injected.json',
+        projectId: 'yaoyao-test-project',
+        packageName: 'cn.samien.yaoyao.hermes',
+      },
+      fcmProvider: {
+        send: async request => {
+          fcmRequests.push(request)
+          return { disposition: 'success', status: 200 }
+        },
+      },
+      autoFlush: false,
+    })
+    coordinator.registerInstallation({
+      userId: 'user-a', installationId: 'phone-ios', clientAccountId: 'account-a',
+      deviceToken, environment: 'development',
+    })
+    coordinator.registerInstallation({
+      platform: 'android', userId: 'user-a', installationId: 'phone-android', clientAccountId: 'account-a',
+      fid: 'fcm-registration-id-1234567890',
+    })
+    expect(coordinator.enqueue({
+      eventId: 'dual-provider-event', userId: 'user-a', kind: 'chat.completed', title: '完成', body: '正文',
+    })).toBe(2)
+
+    await expect(coordinator.flushDue()).resolves.toMatchObject({ delivered: 1, retried: 1 })
+    expect(fcmRequests).toHaveLength(1)
+    expect(coordinator.status()).toMatchObject({ pendingCount: 1, healthy: false })
+    expect(coordinator.status().lastError).not.toContain(deviceToken)
+    expect(coordinator.fcmStatus()).toMatchObject({ pendingCount: 0, healthy: true })
+    coordinator.close()
+  })
+
+  it('keeps Android FIDs private and delivers high-priority FCM data independently of APNs', async () => {
+    const requests: FCMRequest[] = []
+    const sender: FCMSender = {
+      send: async request => {
+        requests.push(request)
+        return { disposition: 'success', status: 200 }
+      },
+    }
+    const coordinator = new PushCoordinator({
+      home: root(),
+      fcm: {
+        serviceAccountFile: '/private/not-read-when-provider-is-injected.json',
+        projectId: 'yaoyao-test-project',
+        packageName: 'cn.samien.yaoyao.hermes',
+      },
+      fcmProvider: sender,
+      autoFlush: false,
+    })
+    const fid = 'fcm-registration-id-1234567890'
+    expect(coordinator.registerInstallation({
+      platform: 'android', userId: 'user-a', installationId: 'phone-android', clientAccountId: 'account-a',
+      fid, appVersion: '1.0.0',
+    })).toEqual(expect.objectContaining({ platform: 'android', installationId: 'phone-android' }))
+    expect(coordinator.registerInstallation({
+      platform: 'android', userId: 'user-a', installationId: 'phone-android', clientAccountId: 'account-a', fid,
+    })).not.toHaveProperty('fid')
+    expect(coordinator.capabilities()).toMatchObject({
+      enabled: false,
+      platforms: { ios: { enabled: false }, android: { enabled: true, provider: 'fcm' } },
+    })
+    expect(coordinator.isAnyProviderEnabled()).toBe(true)
+    expect(coordinator.enqueue({
+      eventId: 'android-event', userId: 'user-a', kind: 'chat.completed', title: '完成', body: '正文',
+      collapseId: 'chat:1', data: { sessionId: 'session-1' },
+    })).toBe(1)
+    await expect(coordinator.flushDue()).resolves.toMatchObject({ delivered: 1 })
+    expect(requests).toEqual([expect.objectContaining({
+      fid,
+      priority: 'high',
+      data: expect.objectContaining({
+        eventId: 'android-event', kind: 'chat.completed', title: '完成', body: '正文',
+        collapseId: 'chat:1', sessionId: 'session-1',
+      }),
+    })])
+    expect(coordinator.status()).toMatchObject({ configured: false, registrationCount: 0, pendingCount: 0 })
+    expect(coordinator.fcmStatus()).toMatchObject({ configured: true, healthy: true, registrationCount: 1, pendingCount: 0 })
+    coordinator.close()
+  })
+
   it('hot-swaps during an active flush without closing the in-flight provider early', async () => {
     const home = root()
     let releaseSend!: (value: APNsSendResult) => void

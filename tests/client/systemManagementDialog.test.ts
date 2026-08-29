@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import SystemManagementDialog from '@/components/app/SystemManagementDialog.vue'
 import { listUsers } from '@/api/admin'
-import { getPushSystemStatus, savePushSystemConfig, type PushSystemStatus } from '@/api/push'
+import { getPushSystemStatus, saveFCMPushSystemConfig, savePushSystemConfig, type PushSystemStatus } from '@/api/push'
 
 vi.mock('@/api/admin', () => ({
   createUser: vi.fn(async () => undefined),
@@ -15,6 +15,7 @@ vi.mock('@/api/admin', () => ({
 
 vi.mock('@/api/push', () => ({
   getPushSystemStatus: vi.fn(),
+  saveFCMPushSystemConfig: vi.fn(),
   savePushSystemConfig: vi.fn(),
 }))
 
@@ -64,6 +65,7 @@ beforeEach(() => {
   vi.mocked(listUsers).mockResolvedValue([])
   vi.mocked(getPushSystemStatus).mockResolvedValue(pushStatus())
   vi.mocked(savePushSystemConfig).mockResolvedValue(pushStatus({ configured: true, healthy: true, source: 'file' }))
+  vi.mocked(saveFCMPushSystemConfig).mockResolvedValue(pushStatus())
 })
 
 afterEach(() => {
@@ -72,6 +74,42 @@ afterEach(() => {
 })
 
 describe('System management APNs configuration', () => {
+  it('validates and saves an FCM service-account path without exposing secret contents', async () => {
+    const fcm = {
+      configured: false,
+      healthy: false,
+      registrationCount: 0,
+      pendingCount: 0,
+      source: 'none' as const,
+      editable: true,
+      managementAvailable: true,
+      packageName: 'cn.samien.yaoyao.hermes',
+      warnings: [],
+    }
+    vi.mocked(getPushSystemStatus).mockResolvedValueOnce(pushStatus({ providers: { fcm } }))
+    vi.mocked(saveFCMPushSystemConfig).mockResolvedValueOnce(pushStatus({
+      providers: { fcm: { ...fcm, configured: true, healthy: true, source: 'file' } },
+    }))
+    const wrapper = await mountOpen()
+
+    enter('fcm-service-account-file', '  /srv/secrets/firebase-service-account.json  ')
+    enter('fcm-project-id', ' yaoyao-test-project ')
+    enter('fcm-package-name', ' cn.samien.yaoyao.hermes ')
+    await nextTick()
+    const form = input('fcm-service-account-file').closest('form')!
+    form.dispatchEvent(new Event('submit'))
+    await flushPromises()
+
+    expect(saveFCMPushSystemConfig).toHaveBeenCalledWith({
+      serviceAccountFile: '/srv/secrets/firebase-service-account.json',
+      projectId: 'yaoyao-test-project',
+      packageName: 'cn.samien.yaoyao.hermes',
+    })
+    expect(document.body.textContent).toContain('Firebase 权限与项目验证通过，FCM 已启用')
+    expect(document.body.textContent).toContain('FCM 推送服务正常')
+    wrapper.unmount()
+  })
+
   it('sends a server-local path and both environments through validation and enablement', async () => {
     vi.mocked(getPushSystemStatus).mockResolvedValueOnce(pushStatus({ environments: [] }))
     vi.mocked(savePushSystemConfig).mockResolvedValueOnce(pushStatus({

@@ -49,6 +49,28 @@ Apple，不需要把 8800 暴露到公网；手机访问 8800 仍应优先使用
 宽于 `0600` 只显示安全建议，不会阻止启用。任一 APNs 环境变量存在时仍以环境变量为准，
 Web 界面只读，避免两个配置源互相覆盖。
 
+### Android 后台消息推送
+
+Android 使用 FCM HTTP v1 的高优先级 data-only 消息；通知标题、摘要、去重 `eventId`
+和更新用 `collapseId` 由 App 统一处理。FCM 与 APNs 是两个独立 provider：任一方配置或
+发送失败都不会停用另一方，团队订阅、事件去重和后台任务恢复继续共用同一份持久状态。
+
+在 Firebase 项目中注册包名 `cn.samien.yaoyao.hermes`，为专用服务账号授予发送 FCM
+消息所需的最小权限。把服务账号 JSON 保存在仓库外、权限设为 `0600`，然后配置：
+
+```bash
+export HERMES_YAOYAO_FCM_SERVICE_ACCOUNT_FILE=/absolute/path/to/firebase-service-account.json
+export HERMES_YAOYAO_FCM_PROJECT_ID=your-firebase-project-id
+export HERMES_YAOYAO_FCM_PACKAGE_NAME=cn.samien.yaoyao.hermes
+```
+
+也可以在“系统管理 → Android 消息推送”填写 8800 所在机器上的 JSON 绝对路径、Project
+ID 和包名。浏览器只提交路径和公开元数据；8800 本地校验 RSA 凭据，并通过
+`validate_only` 发送探测确认该账号对目标项目具有消息权限，然后把路径和元数据原子保存到
+`$HERMES_YAOYAO_HOME/push/fcm-config.json`。配置文件不会复制 JSON 私钥或设备 FID。
+任一 `HERMES_YAOYAO_FCM_*` 环境变量存在时，Web 界面保持只读。Docker 部署时需把服务
+账号文件只读挂载到容器，并允许 8800 主动访问 Google OAuth 与 FCM HTTP v1 端点。
+
 仓库同时归档了夭夭的 Hermes Dashboard 插件，位于
 [`hermes-plugins/yaoyao/dashboard`](hermes-plugins/yaoyao/dashboard)。Web 工作台和该插件是两个独立部署单元：前者运行在 `8800`，后者由已运行的 Hermes Dashboard 在 `9119` 加载。
 
@@ -56,7 +78,7 @@ Web 界面只读，避免两个配置源互相覆盖。
 插件安装接口安装。默认源为
 `https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao`。
 
-当前发布版本：**Git `v0.2.15` / 夭夭 Web `0.2.15` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
+当前发布版本：**Git `v0.2.16` / 夭夭 Web `0.2.16` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
 
 需要由自动化 Agent 部署或升级时，请直接使用 [Agent 安装手册](docs/agent-install.md)。其中包含固定版本校验、备份、同步、单一 Dashboard 重载与验证步骤。
 

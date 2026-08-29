@@ -4,6 +4,7 @@ import AppIcon from '@/components/common/AppIcon.vue'
 import { createUser, deleteUser, listUsers, setUpstreamCredentials, updateUser, type ManagedUser } from '@/api/admin'
 import {
   getPushSystemStatus,
+  saveFCMPushSystemConfig,
   savePushSystemConfig,
   type APNsEnvironment,
   type PushSystemStatus,
@@ -28,8 +29,26 @@ const pushKeyId = ref('')
 const pushTeamId = ref('')
 const pushTopic = ref('cn.samien.yaoyao.hermes')
 const pushEnvironments = ref<APNsEnvironment[]>(['development', 'production'])
+const fcmServiceAccountFile = ref('')
+const fcmProjectId = ref('')
+const fcmPackageName = ref('cn.samien.yaoyao.hermes')
+const fcmBusy = ref(false)
+const fcmError = ref('')
+const fcmNotice = ref('')
 
 const pushManagedByEnvironment = computed(() => pushStatus.value?.source === 'environment')
+const fcmStatus = computed(() => pushStatus.value?.providers?.fcm)
+const fcmManagedByEnvironment = computed(() => fcmStatus.value?.source === 'environment')
+const fcmCanSave = computed(() => Boolean(
+  fcmStatus.value?.managementAvailable && fcmStatus.value.editable && !fcmBusy.value,
+))
+const fcmStatusText = computed(() => {
+  if (!fcmStatus.value) return '当前版本未提供 Android 推送状态'
+  if (!fcmStatus.value.configured && fcmStatus.value.lastError) return `FCM 配置无效：${fcmStatus.value.lastError}`
+  if (!fcmStatus.value.configured) return '尚未配置 FCM 服务账号文件'
+  if (fcmStatus.value.healthy) return 'FCM 推送服务正常'
+  return fcmStatus.value.lastError || 'FCM 推送服务异常'
+})
 const pushCanSave = computed(() => Boolean(
   pushStatus.value?.managementAvailable
     && pushStatus.value.editable
@@ -51,6 +70,10 @@ function hydratePushForm(status: PushSystemStatus) {
   pushEnvironments.value = status.environments.length
     ? [...status.environments]
     : ['development', 'production']
+  const fcm = status.providers?.fcm
+  fcmServiceAccountFile.value = fcm?.serviceAccountFile ?? ''
+  fcmProjectId.value = fcm?.projectId ?? ''
+  fcmPackageName.value = fcm?.packageName || 'cn.samien.yaoyao.hermes'
 }
 
 async function refresh(hydratePush = false) {
@@ -130,10 +153,43 @@ async function savePush() {
     pushBusy.value = false
   }
 }
+async function saveFCM() {
+  if (!fcmStatus.value?.editable || fcmManagedByEnvironment.value || fcmBusy.value) return
+  const serviceAccountFile = fcmServiceAccountFile.value.trim()
+  const projectId = fcmProjectId.value.trim()
+  const packageName = fcmPackageName.value.trim()
+  fcmError.value = ''
+  fcmNotice.value = ''
+  if (!serviceAccountFile.startsWith('/')) {
+    fcmError.value = '请输入 8800 所在机器上的服务账号 JSON 文件绝对路径'
+    return
+  }
+  if (!/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(projectId)) {
+    fcmError.value = '请输入有效的 Firebase Project ID'
+    return
+  }
+  if (packageName !== 'cn.samien.yaoyao.hermes') {
+    fcmError.value = 'Android 包名必须是 cn.samien.yaoyao.hermes'
+    return
+  }
+  fcmBusy.value = true
+  try {
+    const next = await saveFCMPushSystemConfig({ serviceAccountFile, projectId, packageName })
+    pushStatus.value = next
+    hydratePushForm(next)
+    fcmNotice.value = 'Firebase 权限与项目验证通过，FCM 已启用'
+  } catch (cause) {
+    fcmError.value = cause instanceof Error ? cause.message : '无法验证并启用 FCM'
+  } finally {
+    fcmBusy.value = false
+  }
+}
 watch(() => props.open, open => {
   if (!open) return
   pushError.value = ''
   pushNotice.value = ''
+  fcmError.value = ''
+  fcmNotice.value = ''
   void refresh(true).catch(cause => { error.value = cause instanceof Error ? cause.message : '读取用户失败' })
 })
 </script>
@@ -173,6 +229,28 @@ watch(() => props.open, open => {
         </form>
       </template>
       <p v-else-if="pushStatus" class="push-managed-note">当前服务版本只提供推送状态，不能在 Web 中修改配置。</p>
+    </div>
+    <div class="block push-block">
+      <h3>Android 消息推送</h3>
+      <p class="push-health" :class="{ ok: fcmStatus?.configured && fcmStatus?.healthy }">{{ fcmStatusText }}</p>
+      <div v-if="fcmStatus" class="push-status"><span><small>Firebase Project</small><b>{{ fcmStatus.projectId || '—' }}</b></span><span><small>注册设备</small><b>{{ fcmStatus.registrationCount }}</b></span><span><small>待发送</small><b>{{ fcmStatus.pendingCount }}</b></span></div>
+
+      <template v-if="fcmStatus?.managementAvailable">
+        <p v-if="fcmManagedByEnvironment" class="push-managed-note">当前 FCM 配置由服务环境变量管理，Web 仅可查看。请修改 LaunchAgent、Docker 或进程环境后重启服务。</p>
+        <p v-else-if="!fcmStatus.editable" class="push-managed-note">当前 FCM 配置为只读，请在 8800 服务端修改后重启服务。</p>
+        <form class="push-config-form" @submit.prevent="saveFCM">
+          <label class="wide"><span>服务账号 JSON 本地路径</span><input v-model="fcmServiceAccountFile" name="fcm-service-account-file" :readonly="!fcmStatus.editable || fcmBusy" autocomplete="off" spellcheck="false" placeholder="/Users/…/firebase-service-account.json" /><small>只填写 8800 所在机器上的绝对路径；JSON 内容和私钥不会经过浏览器，也不会写入夭夭配置。</small></label>
+          <label><span>Firebase Project ID</span><input v-model="fcmProjectId" name="fcm-project-id" :readonly="!fcmStatus.editable || fcmBusy" autocomplete="off" spellcheck="false" /></label>
+          <label><span>Android 包名</span><input v-model="fcmPackageName" name="fcm-package-name" :readonly="!fcmStatus.editable || fcmBusy" autocomplete="off" spellcheck="false" /></label>
+          <div v-if="fcmStatus.warnings.length" class="wide push-warnings" aria-live="polite">
+            <p v-for="warning in fcmStatus.warnings" :key="`${warning.code}:${warning.message}`" class="push-warning" role="status"><AppIcon name="alert" :size="14" />{{ warning.message }}</p>
+          </div>
+          <p v-if="fcmError" class="wide push-error" role="alert">{{ fcmError }}</p>
+          <p v-else-if="fcmNotice" class="wide push-notice" role="status">{{ fcmNotice }}</p>
+          <footer v-if="fcmStatus.editable" class="wide"><button class="solid-button" :disabled="!fcmCanSave">{{ fcmBusy ? '验证中…' : '验证并启用' }}</button></footer>
+        </form>
+      </template>
+      <p v-else-if="fcmStatus" class="push-managed-note">当前服务版本只提供 FCM 状态，不能在 Web 中修改配置。</p>
     </div>
   </section></div></Teleport>
 </template>

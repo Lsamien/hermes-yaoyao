@@ -4,6 +4,7 @@ import { basename, resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
 import type { APNsEnvironment } from './apns.js'
 import { loadAPNsConfiguration, type APNsConfigurationSnapshot } from './apnsConfiguration.js'
+import { loadFCMConfiguration, type FCMConfigurationSnapshot } from './fcmConfiguration.js'
 export { DEFAULT_APNS_TOPIC } from './apnsConfiguration.js'
 
 export interface APNsProviderConfig {
@@ -12,6 +13,12 @@ export interface APNsProviderConfig {
   teamId: string
   topic: string
   environments?: APNsEnvironment[]
+}
+
+export interface FCMProviderConfig {
+  serviceAccountFile: string
+  projectId: string
+  packageName: string
 }
 
 export interface ServerConfig {
@@ -39,6 +46,9 @@ export interface ServerConfig {
   apns?: APNsProviderConfig
   apnsConfigurationError?: string
   apnsSettings?: APNsConfigurationSnapshot
+  fcm?: FCMProviderConfig
+  fcmConfigurationError?: string
+  fcmSettings?: FCMConfigurationSnapshot
 }
 
 export const DEFAULT_YAOYAO_PLUGIN_SOURCE = 'https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao'
@@ -167,6 +177,7 @@ export function loadServerConfig(
   const upstreamPassword = env.HERMES_YAOYAO_UPSTREAM_PASSWORD
     || (upstreamPasswordFile ? readFileSync(resolve(upstreamPasswordFile), 'utf8').replace(/[\r\n]+$/, '') : undefined)
   const apnsSettings = loadAPNsConfiguration(home, env)
+  const fcmSettings = loadFCMConfiguration(home, env)
   const insecureLan = !tlsCert && !isLoopbackHost(host)
   if (production && insecureLan && !allowInsecureLan) {
     throw new Error(
@@ -204,5 +215,8 @@ export function loadServerConfig(
     ...(apnsSettings.config ? { apns: apnsSettings.config } : {}),
     ...(apnsSettings.configurationError ? { apnsConfigurationError: apnsSettings.configurationError } : {}),
     apnsSettings,
+    ...(fcmSettings.config ? { fcm: fcmSettings.config } : {}),
+    ...(fcmSettings.configurationError ? { fcmConfigurationError: fcmSettings.configurationError } : {}),
+    fcmSettings,
   }
 }

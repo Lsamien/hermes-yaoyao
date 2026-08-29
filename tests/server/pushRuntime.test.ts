@@ -60,6 +60,7 @@ describe('dynamic push runtime', () => {
       home,
       autoFlush: false,
       providerFactory: () => ({ send: async () => ({ disposition: 'success', status: 200 }) }),
+      fcmProviderFactory: () => ({ send: async () => ({ disposition: 'success', status: 200 }) }),
     })
     const runtime = createAuthenticatedApplication({ config, push })
     const chatStart = vi.spyOn(runtime.chatPushJobs, 'start').mockImplementation(() => undefined)
@@ -79,6 +80,17 @@ describe('dynamic push runtime', () => {
     await push.configureAPNs()
     expect(chatStop).toHaveBeenCalledTimes(2)
     expect(groupStop).toHaveBeenCalledTimes(2)
+
+    await push.configureFCM({
+      serviceAccountFile: '/private/unused.json',
+      projectId: 'yaoyao-test-project',
+      packageName: 'cn.samien.yaoyao.hermes',
+    })
+    expect(chatStart).toHaveBeenCalledTimes(2)
+    expect(groupStart).toHaveBeenCalledTimes(2)
+    await push.configureFCM()
+    expect(chatStop).toHaveBeenCalledTimes(3)
+    expect(groupStop).toHaveBeenCalledTimes(3)
 
     await node.close()
   })

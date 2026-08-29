@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "releaseVersion": "0.2.15",
-  "webVersion": "0.2.15",
+  "releaseVersion": "0.2.16",
+  "webVersion": "0.2.16",
   "pluginVersion": "1.7.3",
-  "gitTag": "v0.2.15"
+  "gitTag": "v0.2.16"
 }

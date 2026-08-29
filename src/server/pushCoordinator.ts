@@ -18,7 +18,14 @@ import {
   type APNsRequest,
   type APNsSendResult,
 } from './apns.js'
-import { DEFAULT_APNS_TOPIC, type APNsProviderConfig } from './config.js'
+import { FCMProvider, type FCMRequest } from './fcm.js'
+import {
+  DEFAULT_APNS_TOPIC,
+  type APNsProviderConfig,
+  type FCMProviderConfig,
+} from './config.js'
+import { DEFAULT_FCM_PACKAGE_NAME } from './fcmConfiguration.js'
+import { notificationPlainText } from './notificationText.js'
 
 export const PUSH_EVENT_KINDS = [
   'chat.completed',
@@ -31,6 +38,18 @@ export const PUSH_EVENT_KINDS = [
 ] as const
 
 export type PushEventKind = typeof PUSH_EVENT_KINDS[number]
+export type PushPlatform = 'ios' | 'android'
+
+export interface AndroidPushCapabilities {
+  enabled: boolean
+  provider: 'fcm'
+  packageName: string
+  previewMode: 'title-and-summary'
+  events: readonly PushEventKind[]
+  maxSummaryCharacters: 180
+  maximumSummaryCharacters: 180
+  configurationError?: string
+}
 
 export interface PushCapabilities {
   protocolVersion: 1
@@ -42,6 +61,15 @@ export interface PushCapabilities {
   maxSummaryCharacters: 180
   maximumSummaryCharacters: 180
   configurationError?: string
+  platforms: {
+    ios: {
+      enabled: boolean
+      provider: 'apns'
+      topic: string
+      environments: readonly APNsEnvironment[]
+    }
+    android: AndroidPushCapabilities
+  }
 }
 
 export interface PushStatus {
@@ -57,20 +85,38 @@ export interface PushStatus {
   lastErrorAt?: string
 }
 
-export interface InstallationRegistration {
+export interface FCMPushStatus {
+  configured: boolean
+  healthy: boolean
+  provider: 'fcm'
+  packageName: string
+  projectId?: string
+  registrationCount: number
+  pendingCount: number
+  subscriptionCount: number
+  lastSuccessAt?: string
+  lastError?: string
+  lastErrorAt?: string
+}
+
+interface InstallationRegistrationBase {
   userId: string
   installationId: string
   clientAccountId: string
-  deviceToken: string
-  environment: APNsEnvironment
   appVersion?: string
   authorizationVersion?: number
 }
 
+export type InstallationRegistration = InstallationRegistrationBase & (
+  | { platform?: 'ios'; deviceToken: string; environment: APNsEnvironment; fid?: never }
+  | { platform: 'android'; fid: string; deviceToken?: never; environment?: never }
+)
+
 export interface PushInstallation {
   installationId: string
   clientAccountId: string
-  environment: APNsEnvironment
+  platform: PushPlatform
+  environment?: APNsEnvironment
   appVersion?: string
   updatedAt: string
 }
@@ -141,12 +187,21 @@ export interface PushSender {
   close?(): void
 }
 
+export interface FCMSender {
+  send(request: FCMRequest): Promise<APNsSendResult>
+  close?(): void
+}
+
 export interface PushCoordinatorOptions {
   home: string
   apns?: APNsProviderConfig
   apnsConfigurationError?: string
   provider?: PushSender
   providerFactory?: (config: APNsProviderConfig) => PushSender
+  fcm?: FCMProviderConfig
+  fcmConfigurationError?: string
+  fcmProvider?: FCMSender
+  fcmProviderFactory?: (config: FCMProviderConfig) => FCMSender
   now?: () => number
   autoFlush?: boolean
   baseRetryMilliseconds?: number
@@ -156,12 +211,25 @@ export interface PushCoordinatorOptions {
   userAuthorizationVersion?: (userId: string) => number | undefined
 }
 
-interface InstallationRecord extends PushInstallation {
+interface InstallationRecordBase extends PushInstallation {
   userId: string
-  deviceToken: string
   badge: number
   authorizationVersion?: number
 }
+
+interface IOSInstallationRecord extends InstallationRecordBase {
+  platform: 'ios'
+  deviceToken: string
+  environment: APNsEnvironment
+}
+
+interface AndroidInstallationRecord extends InstallationRecordBase {
+  platform: 'android'
+  fid: string
+  environment?: never
+}
+
+type InstallationRecord = IOSInstallationRecord | AndroidInstallationRecord
 
 interface GroupSubscriptionRecord extends PushGroupSubscription {
   userId: string
@@ -173,6 +241,7 @@ interface OutboxRecord {
   userId: string
   installationId: string
   clientAccountId: string
+  platform: PushPlatform
   kind: PushEventKind
   title: string
   body: string
@@ -193,7 +262,7 @@ interface StoredStatus {
 }
 
 interface PushState {
-  schemaVersion: 1
+  schemaVersion: 2
   installations: InstallationRecord[]
   groupSubscriptions: GroupSubscriptionRecord[]
   outbox: OutboxRecord[]
@@ -202,7 +271,7 @@ interface PushState {
   chatJobs: PushChatJob[]
   ambiguousChatSessions: Record<string, number>
   chatRecoveryDisabledUntil?: number
-  status: StoredStatus
+  providerStatus: Record<PushPlatform, StoredStatus>
 }
 
 const MAX_SUMMARY_CHARACTERS = 180
@@ -218,14 +287,14 @@ const DEDUPE_LIFETIME_MS = 90 * 24 * 60 * 60 * 1_000
 
 function emptyState(): PushState {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     installations: [],
     groupSubscriptions: [],
     outbox: [],
     processedEvents: {},
     chatJobs: [],
     ambiguousChatSessions: {},
-    status: {},
+    providerStatus: { ios: {}, android: {} },
   }
 }
 
@@ -236,12 +305,13 @@ function isObject(value: unknown): value is Record<string, unknown> {
 function parseState(raw: string): PushState {
   const value = JSON.parse(raw) as unknown
   if (!isObject(value)
-    || value.schemaVersion !== 1
+    || (value.schemaVersion !== 1 && value.schemaVersion !== 2)
     || !Array.isArray(value.installations)
     || !Array.isArray(value.groupSubscriptions)
     || !Array.isArray(value.outbox)
     || !isObject(value.processedEvents)
-    || !isObject(value.status)) {
+    || (value.schemaVersion === 1 && !isObject(value.status))
+    || (value.schemaVersion === 2 && !isObject(value.providerStatus))) {
     throw new Error('Unsupported or malformed push state')
   }
   if (value.chatJobs !== undefined && !Array.isArray(value.chatJobs)) {
@@ -255,11 +325,37 @@ function parseState(raw: string): PushState {
   const migratedAmbiguous = Object.fromEntries(Object.entries(legacyOwners).flatMap(([sessionID, owners]) => (
     Array.isArray(owners) && new Set(owners.map(String)).size > 1 ? [[sessionID, Date.now()]] : []
   )))
+  const installations = (value.installations as Array<Record<string, unknown>>).map(record => {
+    if (value.schemaVersion === 1) return { ...record, platform: 'ios' }
+    return record
+  }) as unknown as InstallationRecord[]
+  if (installations.some(record => record.platform !== 'ios' && record.platform !== 'android')) {
+    throw new Error('Malformed push installation platform')
+  }
+  if (installations.some(record => record.platform === 'ios'
+    ? typeof record.deviceToken !== 'string'
+      || (record.environment !== 'development' && record.environment !== 'production')
+    : typeof record.fid !== 'string')) {
+    throw new Error('Malformed push installation target')
+  }
+  const outbox = (value.outbox as Array<Record<string, unknown>>).map(record => {
+    if (value.schemaVersion === 1) return { ...record, platform: 'ios' }
+    return record
+  }) as unknown as OutboxRecord[]
+  if (outbox.some(record => record.platform !== 'ios' && record.platform !== 'android')) {
+    throw new Error('Malformed push outbox platform')
+  }
+  const providerStatus = value.schemaVersion === 1
+    ? { ios: value.status as StoredStatus, android: {} }
+    : value.providerStatus as Record<PushPlatform, StoredStatus>
+  if (!isObject(providerStatus.ios) || !isObject(providerStatus.android)) {
+    throw new Error('Malformed push provider status')
+  }
   return {
-    schemaVersion: 1,
-    installations: value.installations as InstallationRecord[],
+    schemaVersion: 2,
+    installations,
     groupSubscriptions: value.groupSubscriptions as GroupSubscriptionRecord[],
-    outbox: value.outbox as OutboxRecord[],
+    outbox,
     processedEvents: value.processedEvents as Record<string, number>,
     ...(isObject(value.groupWatch) ? { groupWatch: value.groupWatch as unknown as PushGroupWatchAnchor } : {}),
     chatJobs: (value.chatJobs ?? []) as PushChatJob[],
@@ -270,7 +366,10 @@ function parseState(raw: string): PushState {
     ...(typeof value.chatRecoveryDisabledUntil === 'number'
       ? { chatRecoveryDisabledUntil: value.chatRecoveryDisabledUntil }
       : {}),
-    status: value.status as StoredStatus,
+    providerStatus: {
+      ios: providerStatus.ios,
+      android: providerStatus.android,
+    },
   }
 }
 
@@ -288,7 +387,10 @@ class PushStateStore {
     if (!existsSync(this.path)) return
     try {
       chmodSync(this.path, 0o600)
-      this.state = parseState(readFileSync(this.path, 'utf8'))
+      const raw = readFileSync(this.path, 'utf8')
+      const parsed = JSON.parse(raw) as { schemaVersion?: unknown }
+      this.state = parseState(raw)
+      if (parsed.schemaVersion === 1) this.write(this.state)
     } catch {
       this.loadError = '推送状态文件无法读取；为避免覆盖现有数据，推送已停用'
     }
@@ -342,6 +444,13 @@ function normalizedToken(value: string): string {
   return normalized
 }
 
+function normalizedFID(value: string): string {
+  const normalized = value.trim()
+  if (normalized.length < 16 || normalized.length > 4_096
+    || !/^[A-Za-z0-9_:.\-]+$/.test(normalized)) throw new Error('fid is invalid')
+  return normalized
+}
+
 function limitedText(value: string, maximum: number, name: string): string {
   const normalized = value.trim()
   if (!normalized) throw new Error(`${name} is required`)
@@ -352,7 +461,8 @@ function publicInstallation(record: InstallationRecord): PushInstallation {
   return {
     installationId: record.installationId,
     clientAccountId: record.clientAccountId,
-    environment: record.environment,
+    platform: record.platform,
+    ...(record.platform === 'ios' ? { environment: record.environment } : {}),
     ...(record.appVersion ? { appVersion: record.appVersion } : {}),
     updatedAt: record.updatedAt,
   }
@@ -367,9 +477,23 @@ function dedupeKey(userId: string, eventId: string): string {
   return `${dedupePrefix(userId)}${digest}`
 }
 
-function safeError(result: APNsSendResult): string {
-  const reason = result.reason || `APNs HTTP ${result.status}`
-  return reason.replace(/(?:[a-fA-F0-9]{2}){16,256}/g, '[device-token]').replace(/[\r\n]+/g, ' ').slice(0, 500)
+function safeError(result: APNsSendResult, platform: PushPlatform = 'ios'): string {
+  const reason = result.reason || `${platform === 'ios' ? 'APNs' : 'FCM'} HTTP ${result.status}`
+  return reason
+    .replace(/(?:[a-fA-F0-9]{2}){16,256}/g, '[device-token]')
+    .replace(/[A-Za-z0-9_:.\-]{80,}/g, '[opaque-token]')
+    .replace(/[\r\n]+/g, ' ')
+    .slice(0, 500)
+}
+
+function safeProviderException(cause: unknown, installation: InstallationRecord): string {
+  const target = installation.platform === 'ios' ? installation.deviceToken : installation.fid
+  return (cause instanceof Error ? cause.message : String(cause))
+    .split(target).join('[push-target]')
+    .replace(/(?:[a-fA-F0-9]{2}){16,256}/g, '[device-token]')
+    .replace(/[A-Za-z0-9_:.-]{80,}/g, '[opaque-token]')
+    .replace(/[\r\n]+/g, ' ')
+    .slice(0, 500) || `${installation.platform === 'ios' ? 'APNs' : 'FCM'} provider failed`
 }
 
 function canonicalGroupWatchAnchor(input: PushGroupWatchAnchor, now: number): PushGroupWatchAnchor {
@@ -417,6 +541,10 @@ export class PushCoordinator {
   private apns?: APNsProviderConfig
   private apnsConfigurationError?: string
   private readonly providerFactory: (config: APNsProviderConfig) => PushSender
+  private fcmProvider?: FCMSender
+  private fcm?: FCMProviderConfig
+  private fcmConfigurationError?: string
+  private readonly fcmProviderFactory: (config: FCMProviderConfig) => FCMSender
   private readonly now: () => number
   private readonly autoFlush: boolean
   private readonly baseRetryMilliseconds: number
@@ -427,9 +555,9 @@ export class PushCoordinator {
   private timer?: NodeJS.Timeout
   private activeFlush?: Promise<PushFlushResult>
   private closed = false
-  private runtimeError?: { message: string; at: string }
-  private flushFailureCount = 0
-  private flushBlockedUntil = 0
+  private readonly runtimeErrors: Partial<Record<PushPlatform, { message: string; at: string }>> = {}
+  private readonly flushFailureCount: Record<PushPlatform, number> = { ios: 0, android: 0 }
+  private readonly flushBlockedUntil: Record<PushPlatform, number> = { ios: 0, android: 0 }
   private correlationSecret?: Buffer
   private correlationError?: string
   private readonly enabledListeners = new Set<(enabled: boolean) => void>()
@@ -442,6 +570,10 @@ export class PushCoordinator {
     this.apnsConfigurationError = options.apnsConfigurationError
     this.providerFactory = options.providerFactory ?? (config => new APNsProvider(config))
     this.provider = options.provider ?? (options.apns ? this.providerFactory(options.apns) : undefined)
+    this.fcm = options.fcm
+    this.fcmConfigurationError = options.fcmConfigurationError
+    this.fcmProviderFactory = options.fcmProviderFactory ?? (config => new FCMProvider(config))
+    this.fcmProvider = options.fcmProvider ?? (options.fcm ? this.fcmProviderFactory(options.fcm) : undefined)
     this.now = options.now ?? Date.now
     this.autoFlush = options.autoFlush ?? true
     this.baseRetryMilliseconds = options.baseRetryMilliseconds ?? 1_000
@@ -449,7 +581,7 @@ export class PushCoordinator {
     this.maxAttempts = options.maxAttempts ?? 36
     this.isUserActive = options.isUserActive ?? (() => true)
     this.userAuthorizationVersion = options.userAuthorizationVersion
-    if (options.apns && this.provider && !options.apnsConfigurationError) {
+    if (this.isAnyProviderEnabled()) {
       try { this.loadCorrelationSecret() } catch (cause) {
         this.correlationError = cause instanceof Error ? cause.message : 'Push correlation key is unavailable'
       }
@@ -465,7 +597,7 @@ export class PushCoordinator {
   }
 
   private async applyAPNsConfiguration(apns?: APNsProviderConfig, configurationError?: string): Promise<void> {
-    const wasEnabled = this.capabilities().enabled
+    const wasEnabled = this.isAnyProviderEnabled()
     const previous = this.provider
     const next = apns && !configurationError ? this.providerFactory(apns) : undefined
     if (this.closed) {
@@ -476,19 +608,19 @@ export class PushCoordinator {
     this.apns = apns
     this.apnsConfigurationError = configurationError
     this.provider = next
-    this.runtimeError = undefined
-    this.flushFailureCount = 0
-    this.flushBlockedUntil = 0
-    this.correlationError = undefined
-    if (apns && next && !configurationError) {
+    delete this.runtimeErrors.ios
+    this.flushFailureCount.ios = 0
+    this.flushBlockedUntil.ios = 0
+    if (this.isAnyProviderEnabled()) {
+      this.correlationError = undefined
       try { this.loadCorrelationSecret() } catch (cause) {
         this.correlationError = cause instanceof Error ? cause.message : 'Push correlation key is unavailable'
       }
     }
     try {
       this.store.mutate(state => {
-        delete state.status.lastError
-        delete state.status.lastErrorAt
+        delete state.providerStatus.ios.lastError
+        delete state.providerStatus.ios.lastErrorAt
       })
     } catch { /* Existing push state errors remain authoritative. */ }
     if (previous && previous !== next) {
@@ -496,12 +628,63 @@ export class PushCoordinator {
       if (this.activeFlush) void this.activeFlush.then(closePrevious, closePrevious)
       else closePrevious()
     }
-    if (!next && this.timer) {
+    if (!this.isAnyProviderEnabled() && this.timer) {
       clearTimeout(this.timer)
       this.timer = undefined
     }
     this.scheduleNextFlush()
-    const enabled = this.capabilities().enabled
+    const enabled = this.isAnyProviderEnabled()
+    if (enabled !== wasEnabled) {
+      for (const listener of this.enabledListeners) {
+        try { listener(enabled) } catch { /* Runtime listeners cannot undo a committed configuration. */ }
+      }
+    }
+  }
+
+  configureFCM(fcm?: FCMProviderConfig, configurationError?: string): Promise<void> {
+    const operation = this.configurationOperation.then(() => this.applyFCMConfiguration(fcm, configurationError))
+    this.configurationOperation = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
+  private async applyFCMConfiguration(fcm?: FCMProviderConfig, configurationError?: string): Promise<void> {
+    const wasEnabled = this.isAnyProviderEnabled()
+    const previous = this.fcmProvider
+    const next = fcm && !configurationError ? this.fcmProviderFactory(fcm) : undefined
+    if (this.closed) {
+      next?.close?.()
+      return
+    }
+    this.providerGeneration += 1
+    this.fcm = fcm
+    this.fcmConfigurationError = configurationError
+    this.fcmProvider = next
+    delete this.runtimeErrors.android
+    this.flushFailureCount.android = 0
+    this.flushBlockedUntil.android = 0
+    if (this.isAnyProviderEnabled()) {
+      this.correlationError = undefined
+      try { this.loadCorrelationSecret() } catch (cause) {
+        this.correlationError = cause instanceof Error ? cause.message : 'Push correlation key is unavailable'
+      }
+    }
+    try {
+      this.store.mutate(state => {
+        delete state.providerStatus.android.lastError
+        delete state.providerStatus.android.lastErrorAt
+      })
+    } catch { /* Existing push state errors remain authoritative. */ }
+    if (previous && previous !== next) {
+      const closePrevious = () => { try { previous.close?.() } catch { /* provider is already detached */ } }
+      if (this.activeFlush) void this.activeFlush.then(closePrevious, closePrevious)
+      else closePrevious()
+    }
+    if (!this.isAnyProviderEnabled() && this.timer) {
+      clearTimeout(this.timer)
+      this.timer = undefined
+    }
+    this.scheduleNextFlush()
+    const enabled = this.isAnyProviderEnabled()
     if (enabled !== wasEnabled) {
       for (const listener of this.enabledListeners) {
         try { listener(enabled) } catch { /* Runtime listeners cannot undo a committed configuration. */ }
@@ -516,9 +699,12 @@ export class PushCoordinator {
 
   capabilities(): PushCapabilities {
     const configurationError = this.apnsConfigurationError ?? this.store.loadError
+    const fcmConfigurationError = this.fcmConfigurationError ?? this.store.loadError
+    const iosEnabled = Boolean(this.apns && this.provider && !configurationError)
+    const androidEnabled = Boolean(this.fcm && this.fcmProvider && !fcmConfigurationError)
     return {
       protocolVersion: 1,
-      enabled: Boolean(this.apns && this.provider && !configurationError),
+      enabled: iosEnabled,
       topic: this.apns?.topic ?? DEFAULT_APNS_TOPIC,
       environments: this.apns?.environments ?? ['development', 'production'],
       previewMode: 'title-and-summary',
@@ -526,29 +712,81 @@ export class PushCoordinator {
       maxSummaryCharacters: MAX_SUMMARY_CHARACTERS,
       maximumSummaryCharacters: MAX_SUMMARY_CHARACTERS,
       ...(configurationError ? { configurationError } : {}),
+      platforms: {
+        ios: {
+          enabled: iosEnabled,
+          provider: 'apns',
+          topic: this.apns?.topic ?? DEFAULT_APNS_TOPIC,
+          environments: this.apns?.environments ?? ['development', 'production'],
+        },
+        android: {
+          enabled: androidEnabled,
+          provider: 'fcm',
+          packageName: this.fcm?.packageName ?? DEFAULT_FCM_PACKAGE_NAME,
+          previewMode: 'title-and-summary',
+          events: PUSH_EVENT_KINDS,
+          maxSummaryCharacters: MAX_SUMMARY_CHARACTERS,
+          maximumSummaryCharacters: MAX_SUMMARY_CHARACTERS,
+          ...(fcmConfigurationError ? { configurationError: fcmConfigurationError } : {}),
+        },
+      },
     }
+  }
+
+  isAnyProviderEnabled(): boolean {
+    const capabilities = this.capabilities()
+    return capabilities.platforms.ios.enabled || capabilities.platforms.android.enabled
   }
 
   status(): PushStatus {
     const state = this.store.snapshot()
     const configurationError = this.apnsConfigurationError ?? this.store.loadError
-    const latestSuccess = state.status.lastSuccessAt ? Date.parse(state.status.lastSuccessAt) : 0
-    const latestError = state.status.lastErrorAt ? Date.parse(state.status.lastErrorAt) : 0
+    const stored = state.providerStatus.ios
+    const runtimeError = this.runtimeErrors.ios
+    const latestSuccess = stored.lastSuccessAt ? Date.parse(stored.lastSuccessAt) : 0
+    const latestError = stored.lastErrorAt ? Date.parse(stored.lastErrorAt) : 0
     const configured = Boolean(this.apns && this.provider && !configurationError)
     return {
       configured,
-      healthy: configured && !this.correlationError && !this.runtimeError && latestSuccess >= latestError,
+      healthy: configured && !this.correlationError && !runtimeError && latestSuccess >= latestError,
       topic: this.apns?.topic ?? DEFAULT_APNS_TOPIC,
       environments: this.apns?.environments ?? ['development', 'production'],
-      registrationCount: state.installations.length,
-      pendingCount: state.outbox.length,
+      registrationCount: state.installations.filter(item => item.platform === 'ios').length,
+      pendingCount: state.outbox.filter(item => item.platform === 'ios').length,
       subscriptionCount: state.groupSubscriptions.filter(item => item.enabled).length,
-      ...(state.status.lastSuccessAt ? { lastSuccessAt: state.status.lastSuccessAt } : {}),
-      ...(configurationError || this.correlationError || this.runtimeError?.message || state.status.lastError
-        ? { lastError: configurationError ?? this.correlationError ?? this.runtimeError?.message ?? state.status.lastError }
+      ...(stored.lastSuccessAt ? { lastSuccessAt: stored.lastSuccessAt } : {}),
+      ...(configurationError || this.correlationError || runtimeError?.message || stored.lastError
+        ? { lastError: configurationError ?? this.correlationError ?? runtimeError?.message ?? stored.lastError }
         : {}),
-      ...(this.runtimeError?.at || state.status.lastErrorAt
-        ? { lastErrorAt: this.runtimeError?.at ?? state.status.lastErrorAt }
+      ...(runtimeError?.at || stored.lastErrorAt
+        ? { lastErrorAt: runtimeError?.at ?? stored.lastErrorAt }
+        : {}),
+    }
+  }
+
+  fcmStatus(): FCMPushStatus {
+    const state = this.store.snapshot()
+    const configurationError = this.fcmConfigurationError ?? this.store.loadError
+    const stored = state.providerStatus.android
+    const runtimeError = this.runtimeErrors.android
+    const latestSuccess = stored.lastSuccessAt ? Date.parse(stored.lastSuccessAt) : 0
+    const latestError = stored.lastErrorAt ? Date.parse(stored.lastErrorAt) : 0
+    const configured = Boolean(this.fcm && this.fcmProvider && !configurationError)
+    return {
+      configured,
+      healthy: configured && !this.correlationError && !runtimeError && latestSuccess >= latestError,
+      provider: 'fcm',
+      packageName: this.fcm?.packageName ?? DEFAULT_FCM_PACKAGE_NAME,
+      ...(this.fcm?.projectId ? { projectId: this.fcm.projectId } : {}),
+      registrationCount: state.installations.filter(item => item.platform === 'android').length,
+      pendingCount: state.outbox.filter(item => item.platform === 'android').length,
+      subscriptionCount: state.groupSubscriptions.filter(item => item.enabled).length,
+      ...(stored.lastSuccessAt ? { lastSuccessAt: stored.lastSuccessAt } : {}),
+      ...(configurationError || this.correlationError || runtimeError?.message || stored.lastError
+        ? { lastError: configurationError ?? this.correlationError ?? runtimeError?.message ?? stored.lastError }
+        : {}),
+      ...(runtimeError?.at || stored.lastErrorAt
+        ? { lastErrorAt: runtimeError?.at ?? stored.lastErrorAt }
         : {}),
     }
   }
@@ -557,9 +795,19 @@ export class PushCoordinator {
     const userId = requiredIdentifier(input.userId, 'userId')
     const installationId = requiredIdentifier(input.installationId, 'installationId')
     const clientAccountId = requiredIdentifier(input.clientAccountId, 'clientAccountId')
-    const deviceToken = normalizedToken(input.deviceToken)
-    if (input.environment !== 'development' && input.environment !== 'production') {
-      throw new Error('environment is invalid')
+    let target: Pick<AndroidInstallationRecord, 'platform' | 'fid'>
+      | Pick<IOSInstallationRecord, 'platform' | 'deviceToken' | 'environment'>
+    if (input.platform === 'android') {
+      target = { platform: 'android', fid: normalizedFID(input.fid) }
+    } else {
+      if (input.environment !== 'development' && input.environment !== 'production') {
+        throw new Error('environment is invalid')
+      }
+      target = {
+        platform: 'ios',
+        deviceToken: normalizedToken(input.deviceToken),
+        environment: input.environment,
+      }
     }
     const appVersion = input.appVersion
       ? requiredIdentifier(input.appVersion, 'appVersion', 64)
@@ -572,33 +820,46 @@ export class PushCoordinator {
     }
     const updatedAt = new Date(this.now()).toISOString()
     const installation = this.store.mutate(state => {
-      const existing = state.installations.find(item => item.userId === userId
+      const existingIndex = state.installations.findIndex(item => item.userId === userId
         && item.installationId === installationId
         && item.clientAccountId === clientAccountId)
-      if (existing) {
-        existing.deviceToken = deviceToken
-        existing.environment = input.environment
-        existing.updatedAt = updatedAt
-        if (authorizationVersion !== undefined) existing.authorizationVersion = authorizationVersion
-        else delete existing.authorizationVersion
-        if (appVersion) existing.appVersion = appVersion
-        else delete existing.appVersion
-        return publicInstallation(existing)
+      if (existingIndex >= 0) {
+        const existing = state.installations[existingIndex]!
+        const base = {
+          userId,
+          installationId,
+          clientAccountId,
+          ...(authorizationVersion !== undefined ? { authorizationVersion } : {}),
+          ...(appVersion ? { appVersion } : {}),
+          badge: existing.badge,
+          updatedAt,
+        }
+        const next: InstallationRecord = target.platform === 'android'
+          ? { ...base, ...target }
+          : { ...base, ...target }
+        state.installations[existingIndex] = next
+        if (existing.platform !== next.platform) {
+          state.outbox = state.outbox.filter(item => !(item.userId === userId
+            && item.installationId === installationId
+            && item.clientAccountId === clientAccountId))
+        }
+        return publicInstallation(next)
       }
       if (state.installations.filter(item => item.userId === userId).length >= MAX_INSTALLATIONS_PER_USER) {
         throw new Error('Push installation limit reached')
       }
-      const record: InstallationRecord = {
+      const base = {
         userId,
         installationId,
         clientAccountId,
-        deviceToken,
-        environment: input.environment,
         ...(authorizationVersion !== undefined ? { authorizationVersion } : {}),
         ...(appVersion ? { appVersion } : {}),
         badge: 0,
         updatedAt,
       }
+      const record: InstallationRecord = target.platform === 'android'
+        ? { ...base, ...target }
+        : { ...base, ...target }
       state.installations.push(record)
       return publicInstallation(record)
     })
@@ -931,7 +1192,7 @@ export class PushCoordinator {
   }
 
   enqueue(input: PushNotification): number {
-    if (!this.capabilities().enabled) return 0
+    if (!this.isAnyProviderEnabled()) return 0
     const eventId = requiredIdentifier(input.eventId, 'eventId', 512)
     const userId = requiredIdentifier(input.userId, 'userId')
     try {
@@ -940,8 +1201,10 @@ export class PushCoordinator {
       return 0
     }
     if (!PUSH_EVENT_KINDS.includes(input.kind)) throw new Error('kind is invalid')
-    const title = limitedText(input.title, 120, 'title')
-    const body = limitedText(input.body, MAX_SUMMARY_CHARACTERS, 'body')
+    const title = notificationPlainText(input.title, { fallback: '新消息', maximum: 120 })
+    const body = notificationPlainText(input.body, {
+      fallback: '请打开夭夭查看详情', maximum: MAX_SUMMARY_CHARACTERS,
+    })
     const clientAccountId = input.clientAccountId
       ? requiredIdentifier(input.clientAccountId, 'clientAccountId')
       : undefined
@@ -958,7 +1221,8 @@ export class PushCoordinator {
     const now = this.now()
     const expiresAt = input.expiresAt ?? now + DEFAULT_EVENT_LIFETIME_MS
     if (!Number.isFinite(expiresAt) || expiresAt <= now) throw new Error('expiresAt must be in the future')
-    const allowedEnvironments = new Set(this.capabilities().environments)
+    const capabilities = this.capabilities()
+    const allowedEnvironments = new Set(capabilities.environments)
     const queued = this.store.mutate(state => {
       for (const [key, processedAt] of Object.entries(state.processedEvents)) {
         if (!Number.isFinite(processedAt) || processedAt < now - DEDUPE_LIFETIME_MS) delete state.processedEvents[key]
@@ -974,7 +1238,9 @@ export class PushCoordinator {
       if (state.processedEvents[key] !== undefined) return 0
       const targets = state.installations.filter(item => item.userId === userId
         && this.registrationIsAuthorized(item)
-        && allowedEnvironments.has(item.environment)
+        && (item.platform === 'ios'
+          ? capabilities.platforms.ios.enabled && allowedEnvironments.has(item.environment)
+          : capabilities.platforms.android.enabled)
         && (!clientAccountId || item.clientAccountId === clientAccountId))
       if (state.outbox.length + targets.length > MAX_OUTBOX_ITEMS) throw new Error('Push outbox limit reached')
       state.processedEvents[key] = now
@@ -986,6 +1252,7 @@ export class PushCoordinator {
           userId,
           installationId: target.installationId,
           clientAccountId: target.clientAccountId,
+          platform: target.platform,
           kind: input.kind,
           title,
           body,
@@ -1007,26 +1274,30 @@ export class PushCoordinator {
 
   flushDue(): Promise<PushFlushResult> {
     if (this.activeFlush) return this.activeFlush
-    if (this.closed || !this.provider || !this.capabilities().enabled) {
+    if (this.closed || !this.isAnyProviderEnabled()) {
       return Promise.resolve({ delivered: 0, retried: 0, removedRegistrations: 0, failed: 0 })
     }
-    const provider = this.provider
     const generation = this.providerGeneration
-    this.activeFlush = this.flushInternal(provider, generation)
+    this.activeFlush = this.flushInternal(generation)
       .then(result => {
         if (generation === this.providerGeneration) {
-          this.flushFailureCount = 0
-          this.flushBlockedUntil = 0
-          this.runtimeError = undefined
+          for (const platform of ['ios', 'android'] as const) {
+            this.flushFailureCount[platform] = 0
+            this.flushBlockedUntil[platform] = 0
+            delete this.runtimeErrors[platform]
+          }
         }
         return result
       })
       .catch(cause => {
         if (generation === this.providerGeneration) {
-          this.flushFailureCount += 1
-          const delay = Math.min(60_000, 1_000 * (2 ** Math.min(this.flushFailureCount - 1, 6)))
-          this.flushBlockedUntil = this.now() + delay
-          this.recordRuntimeError(cause)
+          for (const platform of ['ios', 'android'] as const) {
+            if (!this.platformEnabled(platform)) continue
+            this.flushFailureCount[platform] += 1
+            const delay = Math.min(60_000, 1_000 * (2 ** Math.min(this.flushFailureCount[platform] - 1, 6)))
+            this.flushBlockedUntil[platform] = this.now() + delay
+            this.recordRuntimeError(platform, cause)
+          }
         }
         throw cause
       })
@@ -1037,10 +1308,12 @@ export class PushCoordinator {
     return this.activeFlush
   }
 
-  private async flushInternal(provider: PushSender, generation: number): Promise<PushFlushResult> {
+  private async flushInternal(generation: number): Promise<PushFlushResult> {
     const summary: PushFlushResult = { delivered: 0, retried: 0, removedRegistrations: 0, failed: 0 }
     const due = this.store.snapshot().outbox
-      .filter(item => item.nextAttemptAt <= this.now())
+      .filter(item => item.nextAttemptAt <= this.now()
+        && this.platformEnabled(item.platform)
+        && this.flushBlockedUntil[item.platform] <= this.now())
       .sort((left, right) => left.nextAttemptAt - right.nextAttemptAt)
       .slice(0, 100)
     for (const candidate of due) {
@@ -1075,7 +1348,13 @@ export class PushCoordinator {
         summary.failed += 1
         continue
       }
-      if (installation && !this.capabilities().environments.includes(installation.environment)) {
+      if (installation && installation.platform !== item.platform) {
+        this.store.mutate(current => { current.outbox = current.outbox.filter(entry => entry.id !== item.id) })
+        summary.failed += 1
+        continue
+      }
+      if (installation?.platform === 'ios'
+        && !this.capabilities().environments.includes(installation.environment)) {
         this.store.mutate(current => { current.outbox = current.outbox.filter(entry => entry.id !== item.id) })
         summary.failed += 1
         continue
@@ -1088,33 +1367,51 @@ export class PushCoordinator {
         summary.failed += 1
         continue
       }
-      const payload: Record<string, unknown> = {
-        ...item.data,
-        aps: {
-          alert: { title: item.title, body: item.body },
-          sound: 'default',
-          badge: installation.badge,
-          ...(item.threadId ? { 'thread-id': item.threadId } : {}),
-        },
-        version: 1,
-        eventId: item.eventId,
-        kind: item.kind,
-        clientAccountId: item.clientAccountId,
+      let result: APNsSendResult
+      try {
+        result = installation.platform === 'ios'
+          ? await this.provider!.send({
+              deviceToken: installation.deviceToken,
+              environment: installation.environment,
+              payload: {
+                ...item.data,
+                aps: {
+                  alert: { title: item.title, body: item.body },
+                  sound: 'default',
+                  badge: installation.badge,
+                  ...(item.threadId ? { 'thread-id': item.threadId } : {}),
+                },
+                version: 1,
+                eventId: item.eventId,
+                kind: item.kind,
+                clientAccountId: item.clientAccountId,
+              },
+              apnsId: item.id,
+              ...(item.collapseId ? { collapseId: item.collapseId } : {}),
+              expiration: Math.floor(item.expiresAt / 1_000),
+            })
+          : await this.fcmProvider!.send({
+              fid: installation.fid,
+              data: this.fcmData(item),
+              ttlSeconds: Math.max(0, Math.ceil((item.expiresAt - this.now()) / 1_000)),
+              priority: 'high',
+            })
+      } catch (cause) {
+        // Provider implementations normally return a classified result, but a
+        // programming/runtime exception in one sender must not starve the
+        // other platform's durable queue.
+        result = {
+          disposition: 'retry',
+          status: 0,
+          reason: safeProviderException(cause, installation),
+        }
       }
-      const result = await provider.send({
-        deviceToken: installation.deviceToken,
-        environment: installation.environment,
-        payload,
-        apnsId: item.id,
-        ...(item.collapseId ? { collapseId: item.collapseId } : {}),
-        expiration: Math.floor(item.expiresAt / 1_000),
-      })
       const at = new Date(this.now()).toISOString()
       if (generation !== this.providerGeneration) {
         if (result.disposition === 'success') {
           this.store.mutate(current => {
             current.outbox = current.outbox.filter(entry => entry.id !== item.id)
-            current.status.lastSuccessAt = at
+            current.providerStatus[item.platform].lastSuccessAt = at
           })
           summary.delivered += 1
         } else {
@@ -1129,7 +1426,7 @@ export class PushCoordinator {
       if (result.disposition === 'success') {
         this.store.mutate(current => {
           current.outbox = current.outbox.filter(entry => entry.id !== item.id)
-          current.status.lastSuccessAt = at
+          current.providerStatus[item.platform].lastSuccessAt = at
         })
         summary.delivered += 1
       } else if (result.disposition === 'unregister') {
@@ -1138,10 +1435,7 @@ export class PushCoordinator {
           const latest = current.installations.find(entry => entry.userId === item.userId
             && entry.installationId === item.installationId
             && entry.clientAccountId === item.clientAccountId)
-          registrationRotated = Boolean(latest && (
-            latest.deviceToken !== installation.deviceToken
-              || latest.environment !== installation.environment
-          ))
+          registrationRotated = Boolean(latest && this.registrationIdentity(latest) !== this.registrationIdentity(installation))
           if (registrationRotated) {
             const pending = current.outbox.find(entry => entry.id === item.id)
             if (pending) {
@@ -1175,16 +1469,16 @@ export class PushCoordinator {
               pending.nextAttemptAt = this.now() + delay
             }
           }
-          current.status.lastError = safeError(result)
-          current.status.lastErrorAt = at
+          current.providerStatus[item.platform].lastError = safeError(result, item.platform)
+          current.providerStatus[item.platform].lastErrorAt = at
         })
         if (exhausted) summary.failed += 1
         else summary.retried += 1
       } else {
         this.store.mutate(current => {
           current.outbox = current.outbox.filter(entry => entry.id !== item.id)
-          current.status.lastError = safeError(result)
-          current.status.lastErrorAt = at
+          current.providerStatus[item.platform].lastError = safeError(result, item.platform)
+          current.providerStatus[item.platform].lastErrorAt = at
         })
         summary.failed += 1
       }
@@ -1192,16 +1486,50 @@ export class PushCoordinator {
     return summary
   }
 
+  private platformEnabled(platform: PushPlatform): boolean {
+    const capabilities = this.capabilities()
+    return platform === 'ios' ? capabilities.platforms.ios.enabled : capabilities.platforms.android.enabled
+  }
+
+  private registrationIdentity(installation: InstallationRecord): string {
+    return installation.platform === 'ios'
+      ? `ios:${installation.environment}:${installation.deviceToken}`
+      : `android:${installation.fid}`
+  }
+
+  private fcmData(item: OutboxRecord): Record<string, string> {
+    const data: Record<string, string> = {}
+    for (const [key, value] of Object.entries(item.data)) {
+      if (value === undefined || value === null) continue
+      if (typeof value === 'string') data[key] = value
+      else if (typeof value === 'number' || typeof value === 'boolean') data[key] = String(value)
+      else data[key] = JSON.stringify(value)
+    }
+    return {
+      ...data,
+      version: '1',
+      eventId: item.eventId,
+      kind: item.kind,
+      clientAccountId: item.clientAccountId,
+      title: item.title,
+      body: item.body,
+      ...(item.collapseId ? { collapseId: item.collapseId } : {}),
+      ...(item.threadId ? { threadId: item.threadId } : {}),
+      ...(item.roomId ? { roomId: item.roomId } : {}),
+    }
+  }
+
   private scheduleNextFlush(): void {
-    if (!this.autoFlush || this.closed || !this.provider || !this.capabilities().enabled || this.activeFlush) return
+    if (!this.autoFlush || this.closed || !this.isAnyProviderEnabled() || this.activeFlush) return
     if (this.timer) clearTimeout(this.timer)
     this.timer = undefined
-    const next = this.store.snapshot().outbox.reduce<number | undefined>((earliest, item) => (
-      earliest === undefined || item.nextAttemptAt < earliest ? item.nextAttemptAt : earliest
-    ), undefined)
+    const next = this.store.snapshot().outbox.reduce<number | undefined>((earliest, item) => {
+      if (!this.platformEnabled(item.platform)) return earliest
+      const attemptAt = Math.max(item.nextAttemptAt, this.flushBlockedUntil[item.platform])
+      return earliest === undefined || attemptAt < earliest ? attemptAt : earliest
+    }, undefined)
     if (next === undefined) return
-    const scheduledAt = Math.max(next, this.flushBlockedUntil)
-    const delay = Math.max(0, Math.min(2_147_483_647, scheduledAt - this.now()))
+    const delay = Math.max(0, Math.min(2_147_483_647, next - this.now()))
     this.timer = setTimeout(() => {
       this.timer = undefined
       void this.flushDue().catch(() => undefined)
@@ -1214,21 +1542,22 @@ export class PushCoordinator {
     if (this.timer) clearTimeout(this.timer)
     this.timer = undefined
     this.provider?.close?.()
+    this.fcmProvider?.close?.()
     this.enabledListeners.clear()
   }
 
-  private recordRuntimeError(cause: unknown): void {
+  private recordRuntimeError(platform: PushPlatform, cause: unknown): void {
     const raw = cause instanceof Error ? cause.message : String(cause)
     const message = raw
       .replace(/[a-fA-F0-9]{32,}/g, '[redacted]')
       .replace(/[\r\n]+/g, ' ')
       .slice(0, 500) || '推送后台任务失败'
     const at = new Date(this.now()).toISOString()
-    this.runtimeError = { message, at }
+    this.runtimeErrors[platform] = { message, at }
     try {
       this.store.mutate(state => {
-        state.status.lastError = message
-        state.status.lastErrorAt = at
+        state.providerStatus[platform].lastError = message
+        state.providerStatus[platform].lastErrorAt = at
       })
     } catch {
       // The in-memory status remains available when the push state volume is

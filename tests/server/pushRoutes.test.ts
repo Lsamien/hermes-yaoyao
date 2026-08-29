@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto'
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import request from 'supertest'
@@ -12,6 +12,10 @@ import {
   apnsConfigurationPath,
   validateAPNsConfiguration,
 } from '../../src/server/apnsConfiguration.js'
+import {
+  FCMConfigurationManager,
+  fcmConfigurationPath,
+} from '../../src/server/fcmConfiguration.js'
 import { createAuthenticatedApplication } from './authenticatedApplication.js'
 
 const roots: string[] = []
@@ -23,6 +27,93 @@ afterEach(() => {
 })
 
 describe('iOS push routes', () => {
+  it('configures FCM independently and registers Android FIDs without returning them', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'yaoyao-fcm-web-config-'))
+    roots.push(home)
+    const serviceAccountFile = join(home, 'firebase-service-account.json')
+    const { privateKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    })
+    writeFileSync(serviceAccountFile, JSON.stringify({
+      type: 'service_account',
+      project_id: 'yaoyao-test-project',
+      client_email: 'push@yaoyao-test-project.iam.gserviceaccount.com',
+      private_key: privateKey,
+      token_uri: 'https://oauth2.googleapis.com/token',
+    }), { mode: 0o600 })
+    const config: ServerConfig = {
+      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
+      mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
+    }
+    const push = new PushCoordinator({
+      home,
+      autoFlush: false,
+      fcmProviderFactory: () => ({ send: async () => ({ disposition: 'success', status: 200 }) }),
+    })
+    const fcmConfiguration = new FCMConfigurationManager(
+      home,
+      { source: 'none', editable: true, warnings: [] },
+      { probe: async () => undefined },
+    )
+    const runtime = createAuthenticatedApplication({ config, push, fcmConfiguration })
+    runtimes.push(runtime)
+    const agent = request.agent(runtime.app.callback())
+    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const mutation = () => agent.put('/api/app/system/push-config/fcm')
+      .set('Host', '127.0.0.1:8800')
+      .set('Origin', 'http://127.0.0.1:8800')
+      .send({
+        serviceAccountFile,
+        projectId: 'yaoyao-test-project',
+        packageName: 'cn.samien.yaoyao.hermes',
+      })
+
+    await mutation().expect(403)
+    const saved = await mutation().set('X-CSRF-Token', bootstrap.body.csrfToken).expect(200)
+    expect(saved.body).toMatchObject({
+      configured: false,
+      providers: {
+        apns: { configured: false },
+        fcm: {
+          configured: true,
+          healthy: true,
+          source: 'file',
+          editable: true,
+          serviceAccountFile: realpathSync(serviceAccountFile),
+          projectId: 'yaoyao-test-project',
+          packageName: 'cn.samien.yaoyao.hermes',
+        },
+      },
+    })
+    expect(statSync(fcmConfigurationPath(home)).mode & 0o777).toBe(0o600)
+    expect(readFileSync(fcmConfigurationPath(home), 'utf8')).not.toContain('private_key')
+
+    const installationID = '11111111-1111-4111-8111-111111111111'
+    const accountID = '22222222-2222-4222-8222-222222222222'
+    const fid = 'fcm-registration-id-1234567890'
+    const registered = await agent.put(`/api/push/v1/installations/${installationID}/accounts/${accountID}`)
+      .set('Host', '127.0.0.1:8800')
+      .set('Origin', 'http://127.0.0.1:8800')
+      .send({ platform: 'android', fid, appVersion: '1.0.0' })
+      .expect(200)
+    expect(registered.body.installation).toMatchObject({
+      platform: 'android', installationId: installationID, clientAccountId: accountID,
+    })
+    expect(JSON.stringify(registered.body)).not.toContain(fid)
+    expect(push.fcmStatus()).toMatchObject({ registrationCount: 1 })
+
+    const capabilities = await agent.get('/api/push/v1/capabilities')
+      .set('Host', '127.0.0.1:8800')
+      .expect(200)
+    expect(capabilities.body).toMatchObject({
+      enabled: false,
+      platforms: { ios: { enabled: false }, android: { enabled: true, packageName: 'cn.samien.yaoyao.hermes' } },
+    })
+  })
+
   it('validates and enables a server-local APNs key path without blocking broad permissions', async () => {
     const home = mkdtempSync(join(tmpdir(), 'yaoyao-push-web-config-'))
     roots.push(home)

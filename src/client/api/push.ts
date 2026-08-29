@@ -8,6 +8,14 @@ export interface PushCapabilities {
   previewMode?: string
   events: string[]
   maxSummaryCharacters: number
+  platforms?: {
+    android?: {
+      enabled: boolean
+      provider: 'fcm'
+      packageName: string
+      configurationError?: string
+    }
+  }
 }
 
 export type APNsEnvironment = 'development' | 'production'
@@ -28,6 +36,28 @@ export interface PushSystemConfigInput {
   environments: APNsEnvironment[]
 }
 
+export interface FCMPushSystemConfigInput {
+  serviceAccountFile: string
+  projectId: string
+  packageName: string
+}
+
+export interface FCMPushSystemStatus {
+  configured: boolean
+  healthy: boolean
+  registrationCount: number
+  pendingCount: number
+  lastSuccessAt?: number
+  lastError?: string
+  source: PushConfigSource
+  editable: boolean
+  managementAvailable: boolean
+  serviceAccountFile?: string
+  projectId?: string
+  packageName: string
+  warnings: PushConfigWarning[]
+}
+
 export interface PushSystemStatus {
   configured: boolean
   healthy: boolean
@@ -44,6 +74,7 @@ export interface PushSystemStatus {
   teamId?: string
   environments: APNsEnvironment[]
   warnings: PushConfigWarning[]
+  providers?: { fcm?: FCMPushSystemStatus }
 }
 
 function normalizeEnvironment(value: unknown): APNsEnvironment | undefined {
@@ -61,6 +92,26 @@ function normalizePushSystemStatus(value: unknown): PushSystemStatus {
     .map(normalizeEnvironment)
     .filter((environment): environment is APNsEnvironment => Boolean(environment))
   const warnings = values(payload.warnings).flatMap((value): PushConfigWarning[] => {
+    if (typeof value === 'string' && value.trim()) return [{ code: 'warning', message: value.trim() }]
+    const warning = record(value)
+    const message = string(warning.message).trim()
+    if (!message) return []
+    return [{
+      code: string(warning.code, 'warning'),
+      message,
+      actualMode: string(warning.actualMode ?? warning.actual_mode) || undefined,
+      recommendedMode: string(warning.recommendedMode ?? warning.recommended_mode) || undefined,
+    }]
+  })
+  const providers = record(payload.providers)
+  const rawFCM = record(providers.fcm)
+  const fcmSourceValue = string(rawFCM.source ?? rawFCM.configurationSource ?? rawFCM.configuration_source)
+  const fcmSource: PushConfigSource = fcmSourceValue === 'file' || fcmSourceValue === 'environment'
+    ? fcmSourceValue : 'none'
+  const hasFCMManagementMetadata = ['none', 'file', 'environment'].includes(fcmSourceValue)
+  const fcmManagementAvailable = hasFCMManagementMetadata
+    ? true : bool(rawFCM.managementAvailable ?? rawFCM.management_available, false)
+  const fcmWarnings = values(rawFCM.warnings).flatMap((value): PushConfigWarning[] => {
     if (typeof value === 'string' && value.trim()) return [{ code: 'warning', message: value.trim() }]
     const warning = record(value)
     const message = string(warning.message).trim()
@@ -90,11 +141,33 @@ function normalizePushSystemStatus(value: unknown): PushSystemStatus {
     teamId: string(payload.teamId ?? payload.team_id) || undefined,
     environments,
     warnings,
+    ...(Object.keys(rawFCM).length ? {
+      providers: {
+        fcm: {
+          configured: bool(rawFCM.configured),
+          healthy: bool(rawFCM.healthy),
+          registrationCount: number(rawFCM.registrationCount ?? rawFCM.registration_count),
+          pendingCount: number(rawFCM.pendingCount ?? rawFCM.pending_count),
+          lastSuccessAt: number(rawFCM.lastSuccessAt ?? rawFCM.last_success_at) || undefined,
+          lastError: string(
+            rawFCM.lastError ?? rawFCM.last_error ?? rawFCM.configurationError ?? rawFCM.configuration_error,
+          ) || undefined,
+          source: fcmSource,
+          editable: fcmManagementAvailable && bool(rawFCM.editable),
+          managementAvailable: fcmManagementAvailable,
+          serviceAccountFile: string(rawFCM.serviceAccountFile ?? rawFCM.service_account_file) || undefined,
+          projectId: string(rawFCM.projectId ?? rawFCM.project_id) || undefined,
+          packageName: string(rawFCM.packageName ?? rawFCM.package_name, 'cn.samien.yaoyao.hermes'),
+          warnings: fcmWarnings,
+        },
+      },
+    } : {}),
   }
 }
 
 export async function getPushCapabilities(): Promise<PushCapabilities> {
   const payload = record(await apiRequest<unknown>('/api/app/push/v1/capabilities'))
+  const android = record(record(payload.platforms).android)
   return {
     protocolVersion: number(payload.protocolVersion ?? payload.protocol_version),
     enabled: bool(payload.enabled),
@@ -105,6 +178,16 @@ export async function getPushCapabilities(): Promise<PushCapabilities> {
       payload.maxSummaryCharacters ?? payload.maximumSummaryCharacters ?? payload.max_summary_characters,
       180,
     ),
+    ...(Object.keys(android).length ? {
+      platforms: {
+        android: {
+          enabled: bool(android.enabled),
+          provider: 'fcm',
+          packageName: string(android.packageName ?? android.package_name, 'cn.samien.yaoyao.hermes'),
+          configurationError: string(android.configurationError ?? android.configuration_error) || undefined,
+        },
+      },
+    } : {}),
   }
 }
 
@@ -139,6 +222,18 @@ export async function savePushSystemConfig(input: PushSystemConfigInput): Promis
       teamId: input.teamId,
       topic: input.topic,
       environments: input.environments,
+    },
+    timeoutMs: 45_000,
+  }))
+}
+
+export async function saveFCMPushSystemConfig(input: FCMPushSystemConfigInput): Promise<PushSystemStatus> {
+  return normalizePushSystemStatus(await apiRequest<unknown>('/api/app/system/push-config/fcm', {
+    method: 'PUT',
+    body: {
+      serviceAccountFile: input.serviceAccountFile,
+      projectId: input.projectId,
+      packageName: input.packageName,
     },
     timeoutMs: 45_000,
   }))

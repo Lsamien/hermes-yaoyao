@@ -3,6 +3,7 @@ import {
   getGroupPushSubscriptions,
   getPushCapabilities,
   getPushSystemStatus,
+  saveFCMPushSystemConfig,
   savePushSystemConfig,
   setGroupPushSubscription,
 } from '@/api/push'
@@ -14,6 +15,65 @@ afterEach(() => {
 })
 
 describe('push client protocol', () => {
+  it('normalizes FCM provider status and protects configuration mutations', async () => {
+    const calls: Array<{ path: string; init?: RequestInit }> = []
+    vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+      calls.push({ path, init })
+      return new Response(JSON.stringify({
+        configured: false,
+        healthy: false,
+        registrationCount: 0,
+        pendingCount: 0,
+        source: 'none',
+        editable: true,
+        environments: [],
+        warnings: [],
+        providers: {
+          fcm: {
+            configured: true,
+            healthy: true,
+            registration_count: 2,
+            pending_count: 1,
+            source: 'file',
+            editable: true,
+            service_account_file: '/srv/secrets/firebase-service-account.json',
+            project_id: 'yaoyao-test-project',
+            package_name: 'cn.samien.yaoyao.hermes',
+            warnings: [{ code: 'fcm_service_account_permissions', message: '建议调整为 0600' }],
+          },
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }))
+    setApiCsrfToken('csrf-fcm')
+
+    await expect(getPushSystemStatus()).resolves.toMatchObject({
+      providers: { fcm: {
+        configured: true,
+        registrationCount: 2,
+        pendingCount: 1,
+        serviceAccountFile: '/srv/secrets/firebase-service-account.json',
+        projectId: 'yaoyao-test-project',
+        warnings: [{ code: 'fcm_service_account_permissions' }],
+      } },
+    })
+    await expect(saveFCMPushSystemConfig({
+      serviceAccountFile: '/srv/secrets/firebase-service-account.json',
+      projectId: 'yaoyao-test-project',
+      packageName: 'cn.samien.yaoyao.hermes',
+    })).resolves.toMatchObject({ providers: { fcm: { configured: true } } })
+
+    expect(calls.map(call => call.path)).toEqual([
+      '/api/app/system/push-status',
+      '/api/app/system/push-config/fcm',
+    ])
+    expect(new Headers(calls[1]!.init?.headers).get('X-CSRF-Token')).toBe('csrf-fcm')
+    expect(calls[1]!.init?.body).toBe(JSON.stringify({
+      serviceAccountFile: '/srv/secrets/firebase-service-account.json',
+      projectId: 'yaoyao-test-project',
+      packageName: 'cn.samien.yaoyao.hermes',
+    }))
+  })
+
   it('uses the versioned push API and protects subscription mutations', async () => {
     const calls: Array<{ path: string; init?: RequestInit }> = []
     vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
