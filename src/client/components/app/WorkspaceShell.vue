@@ -650,8 +650,8 @@ onBeforeUnmount(() => {
 .sidebar-primary-action :deep(button > span) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .sidebar-feature-nav { display: flex; flex-direction: column; gap: 1px; padding: 0 0 9px; }
-.sidebar-feature-nav button { margin-block: 0; }
-.sidebar-feature-nav button.active { font-weight: 680; }
+.sidebar-feature-nav button { margin-block: 0; font-weight: 680; }
+.sidebar-feature-nav button.active { font-weight: 740; }
 
 .sidebar-context { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
 .sidebar-context__heading { display: flex; min-height: 35px; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 20px 5px 21px; }
@@ -663,7 +663,7 @@ onBeforeUnmount(() => {
 .sidebar-context__body :deep(.sidebar-list) { padding-inline: 10px; }
 .sidebar-context__body :deep(.sidebar-item) { min-height: 42px; padding: 5px 9px; }
 .sidebar-context__body :deep(.sidebar-item.sidebar-item--single-line) { min-height: 31px; padding: 1px 7px; }
-.sidebar-context__body :deep(.sidebar-item--single-line .sidebar-item__row strong) { font-size: 14px; font-weight: 450; }
+.sidebar-context__body :deep(.sidebar-item--single-line .sidebar-item__row strong) { font-size: 14px; font-weight: 400; }
 .sidebar-context__body :deep(.sidebar-item__icon) { width: 25px; height: 25px; flex-basis: 25px; border: 0; border-radius: 7px; background: transparent; }
 .sidebar-context__body :deep(.sidebar-item__icon--avatar) { background: var(--surface-soft); color: var(--text-secondary); }
 .sidebar-context__body :deep(.sidebar-item__row strong) { font-size: 13px; }

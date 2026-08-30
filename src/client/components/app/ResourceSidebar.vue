@@ -201,7 +201,7 @@ defineExpose({ focusSearch })
 .sidebar-item--single-line { min-height: 31px; padding-block: 1px; }
 .sidebar-item--single-line .sidebar-item__copy { display: block; }
 .sidebar-item--single-line .sidebar-item__row { min-height: 27px; }
-.sidebar-item--single-line .sidebar-item__row strong { font-size: 14px; font-weight: 450; }
+.sidebar-item--single-line .sidebar-item__row strong { font-size: 14px; font-weight: 400; }
 .sidebar-item--single-line .sidebar-item__more { top: 1px; }
 .sidebar-item--nested { min-height: 32px; margin-left: 17px; width: calc(100% - 17px); padding-block: 1px; }
 .sidebar-item--nested .sidebar-item__icon { width: 19px; height: 19px; flex-basis: 19px; border-radius: 6px; color: var(--text-muted); }
