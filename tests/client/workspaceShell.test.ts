@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { defineComponent } from 'vue'
 import type { Profile } from '@shared/types'
@@ -26,6 +26,7 @@ async function mountShell() {
     routes: [
       { path: '/chat', component: { template: '<div></div>' } },
       { path: '/groups', component: { template: '<div></div>' } },
+      { path: '/kanban', component: { template: '<div></div>' } },
       { path: '/files', component: { template: '<div></div>' } },
     ],
   })
@@ -63,6 +64,17 @@ afterEach(() => {
 })
 
 describe('Workspace shell account controls', () => {
+  it('includes the Kanban workspace in desktop and mobile navigation', async () => {
+    const wrapper = await mountShell()
+    expect(wrapper.get('.desktop-sidebar').text()).toContain('看板')
+    expect(wrapper.get('.mobile-drawer').text()).toContain('看板')
+    await wrapper.get('.desktop-sidebar .sidebar-feature-nav button[title="看板"]').trigger('click')
+    await vi.waitFor(() => expect(wrapper.get('.sidebar-context__heading').text()).toContain('看板列表'))
+    expect(wrapper.get('.desktop-sidebar').find('button[aria-label="搜索"]').exists()).toBe(false)
+    expect(wrapper.get('.mobile-drawer').find('button[aria-label="搜索"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('keeps Agent switching focused and opens settings from its independent button', async () => {
     const wrapper = await mountShell()
     const desktop = wrapper.get('.desktop-sidebar')

@@ -7,18 +7,22 @@ import PasswordChangeView from '@/views/PasswordChangeView.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useGroupsStore } from '@/stores/groups'
+import { useKanbanStore } from '@/stores/kanban'
 import { useThemeStore } from '@/stores/theme'
 import { reconcileYaoyaoPlugin } from '@/api/systemUpdate'
 
 const auth = useAuthStore()
 const chat = useChatStore()
 const groups = useGroupsStore()
+const kanban = useKanbanStore()
 const theme = useThemeStore()
 const route = useRoute()
 
 const pageTitle = computed(() => {
   const name = route.path.startsWith('/groups')
     ? groups.selectedRoom?.name || '团队'
+    : route.path.startsWith('/kanban')
+      ? kanban.selectedBoard?.name || kanban.selectedBoardSlug || '看板'
     : route.path.startsWith('/files')
       ? '文件库'
       : chat.activeSession?.title || '对话'

@@ -5,15 +5,17 @@ import {
   AddOutline,
   ChatbubbleOutline,
   FolderOutline,
+  GridOutline,
   PeopleOutline,
   SearchOutline,
 } from '@vicons/ionicons5'
 
-type SidebarIconName = 'add' | 'chat' | 'folder' | 'people' | 'search'
+type SidebarIconName = 'add' | 'board' | 'chat' | 'folder' | 'people' | 'search'
 
 const props = withDefaults(defineProps<{ name: SidebarIconName; size?: number }>(), { size: 20 })
 const component = computed(() => ({
   add: AddOutline,
+  board: GridOutline,
   chat: ChatbubbleOutline,
   folder: FolderOutline,
   people: PeopleOutline,

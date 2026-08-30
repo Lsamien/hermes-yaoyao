@@ -6,6 +6,7 @@ const router = createRouter({
     { path: '/', redirect: '/chat' },
     { path: '/chat/:sessionId?', name: 'chat', component: () => import('@/views/ChatView.vue') },
     { path: '/groups/:roomId?/:topicId?', name: 'groups', component: () => import('@/views/GroupsView.vue') },
+    { path: '/kanban/:boardSlug?', name: 'kanban', component: () => import('@/views/KanbanView.vue') },
     { path: '/files', name: 'files', component: () => import('@/views/FilesView.vue') },
     { path: '/artifacts', redirect: '/chat' },
     { path: '/:pathMatch(.*)*', redirect: '/chat' },

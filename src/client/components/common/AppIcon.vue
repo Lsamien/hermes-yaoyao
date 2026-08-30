@@ -4,6 +4,7 @@ type IconName =
   | 'groups'
   | 'files'
   | 'artifacts'
+  | 'board'
   | 'plus'
   | 'search'
   | 'dots'
@@ -78,6 +79,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 18 })
     <template v-else-if="name === 'artifacts'">
       <path d="M12 3 3 8l9 5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5" />
     </template>
+    <template v-else-if="name === 'board'"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M15 4v16M5.5 8h1M11.5 8h1M17.5 8h1" /></template>
     <template v-else-if="name === 'plus'"><path d="M12 5v14M5 12h14" /></template>
     <template v-else-if="name === 'search'"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></template>
     <template v-else-if="name === 'dots'"><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" /></template>

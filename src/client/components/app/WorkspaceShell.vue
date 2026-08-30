@@ -9,10 +9,10 @@ import SettingsCenterDialog from '@/components/app/SettingsCenterDialog.vue'
 import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 
 type NavItem = {
-  key: 'chat' | 'groups' | 'files'
+  key: 'chat' | 'groups' | 'kanban' | 'files'
   label: string
   path: string
-  icon: 'chat' | 'groups' | 'files'
+  icon: 'chat' | 'groups' | 'board' | 'files'
 }
 
 type SettingsPage =
@@ -106,6 +106,7 @@ function profileTitle(profile?: Profile): string {
 const navItems: NavItem[] = [
   { key: 'chat', label: '对话', path: '/chat', icon: 'chat' },
   { key: 'groups', label: '团队', path: '/groups', icon: 'groups' },
+  { key: 'kanban', label: '看板', path: '/kanban', icon: 'board' },
   { key: 'files', label: '文件库', path: '/files', icon: 'files' },
 ]
 
@@ -122,10 +123,11 @@ const activeNav = computed(() => {
 const contextHeading = computed(() => ({
   chat: '历史记录',
   groups: '话题列表',
+  kanban: '看板列表',
   files: '历史记录',
 })[activeNav.value.key])
 
-const hasPrimaryAction = computed(() => ['chat', 'groups', 'files'].includes(activeNav.value.key))
+const hasPrimaryAction = computed(() => ['chat', 'groups', 'kanban', 'files'].includes(activeNav.value.key))
 
 async function navigate(path: string) {
   mobileDrawerOpen.value = false
@@ -207,8 +209,8 @@ function toggleSidebar() {
   try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0') } catch { /* optional persistence */ }
 }
 
-function navIcon(key: NavItem['key']): 'chat' | 'folder' | 'people' {
-  return key === 'groups' ? 'people' : key === 'files' ? 'folder' : 'chat'
+function navIcon(key: NavItem['key']): 'chat' | 'folder' | 'people' | 'board' {
+  return key === 'groups' ? 'people' : key === 'kanban' ? 'board' : key === 'files' ? 'folder' : 'chat'
 }
 
 async function openSidebarSearch(host: HTMLElement | null) {
@@ -304,7 +306,7 @@ onBeforeUnmount(() => {
       </button>
 
       <button
-        v-if="activeNav.key !== 'files'"
+        v-if="!['files', 'kanban'].includes(activeNav.key)"
         class="sidebar-search-trigger"
         :class="{ 'sidebar-search-trigger--searching': sidebarSearchOpen }"
         type="button"
@@ -411,7 +413,7 @@ onBeforeUnmount(() => {
       </div>
 
       <button
-        v-if="activeNav.key !== 'files'"
+        v-if="!['files', 'kanban'].includes(activeNav.key)"
         class="sidebar-search-trigger"
         :class="{ 'sidebar-search-trigger--searching': sidebarSearchOpen }"
         type="button"

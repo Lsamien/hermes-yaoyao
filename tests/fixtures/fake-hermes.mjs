@@ -14,6 +14,57 @@ const groupClients = new Set()
 let groupConnectionCount = 0
 let groupAvailable = true
 
+const kanbanColumns = ['triage', 'todo', 'scheduled', 'ready', 'running', 'blocked', 'review', 'done']
+const kanbanBoards = [
+  { slug: 'default', name: '产品研发', description: 'Web 与移动端功能', is_current: true, default_workspace_kind: 'scratch' },
+  { slug: 'mobile-release', name: '移动端发布', description: 'iOS 与 Android 发布任务', is_current: false, default_workspace_kind: 'worktree' },
+]
+let kanbanTaskSequence = 3
+let kanbanEventSequence = 3
+const kanbanTasks = [
+  { id: 't_web001', board: 'default', title: '完成 Web 看板验收', body: '覆盖桌面与 390px 响应式布局', status: 'running', assignee: 'yaoyao', tenant: 'web', priority: 3, created_by: 'dashboard', created_at: now() - 1800, started_at: now() - 420, latest_summary: '正在执行浏览器验收', comment_count: 1, link_counts: { parents: 0, children: 1 }, progress: { done: 0, total: 1 } },
+  { id: 't_ios001', board: 'default', title: '核对 iOS 双端口', body: '9119 与 8800 使用同一契约', status: 'ready', assignee: 'yaoer', tenant: 'mobile', priority: 2, created_by: 'dashboard', created_at: now() - 1200, comment_count: 0, link_counts: { parents: 1, children: 0 }, progress: null },
+  { id: 't_done01', board: 'mobile-release', title: '准备发布说明', body: '整理已完成事项', status: 'done', assignee: 'yaoyao', tenant: 'release', priority: 1, created_by: 'dashboard', created_at: now() - 7200, completed_at: now() - 3600, latest_summary: '发布说明已完成', comment_count: 0, link_counts: { parents: 0, children: 0 }, progress: null },
+]
+const kanbanComments = new Map([
+  ['t_web001', [{ id: 1, task_id: 't_web001', author: 'admin', body: '请保留真实浏览器验收证据。', created_at: now() - 600 }]],
+])
+const kanbanEvents = new Map([
+  ['t_web001', [
+    { id: 1, task_id: 't_web001', run_id: null, kind: 'created', payload: { status: 'ready', assignee: 'yaoyao' }, created_at: now() - 1800 },
+    { id: 2, task_id: 't_web001', run_id: 1, kind: 'claimed', payload: { profile: 'yaoyao' }, created_at: now() - 420 },
+  ]],
+  ['t_ios001', [{ id: 3, task_id: 't_ios001', run_id: null, kind: 'created', payload: { status: 'ready', assignee: 'yaoer' }, created_at: now() - 1200 }]],
+])
+const kanbanRuns = new Map([
+  ['t_web001', [{ id: 1, task_id: 't_web001', profile: 'yaoyao', status: 'running', outcome: null, summary: '正在执行浏览器验收', metadata: { verification: ['playwright'] }, worker_pid: 12345, started_at: now() - 420, ended_at: null }]],
+])
+
+function kanbanBoardSlug(url) {
+  return url.searchParams.get('board') || 'default'
+}
+
+function kanbanBoardSnapshot(url) {
+  const slug = kanbanBoardSlug(url)
+  const includeArchived = url.searchParams.get('include_archived') === 'true'
+  const scoped = kanbanTasks.filter(task => task.board === slug && (includeArchived || task.status !== 'archived'))
+  const columns = [...kanbanColumns, ...(includeArchived ? ['archived'] : [])]
+    .map(name => ({ name, tasks: scoped.filter(task => task.status === name) }))
+  return {
+    columns,
+    tenants: [...new Set(scoped.map(task => task.tenant).filter(Boolean))].sort(),
+    assignees: [...new Set(scoped.map(task => task.assignee).filter(Boolean))].sort(),
+    latest_event_id: kanbanEventSequence,
+    now: now(),
+  }
+}
+
+function recordKanbanEvent(task, kind, payload = null, runId = null) {
+  const event = { id: ++kanbanEventSequence, task_id: task.id, run_id: runId, kind, payload, created_at: now() }
+  kanbanEvents.set(task.id, [...(kanbanEvents.get(task.id) || []), event])
+  return event
+}
+
 function broadcastGroup(event, payload) {
   groupCursor += 1
   const frame = JSON.stringify({ type: 'group.event', epoch, cursor: groupCursor, roomId, event, payload })
@@ -116,11 +167,127 @@ const server = createServer(async (request, response) => {
   if (url.pathname === '/api/auth/me') return json(response, 200, { user_id: 'demo-user', display_name: '验收用户', email: 'demo@example.invalid', provider: 'basic' })
   if (url.pathname === '/api/auth/ws-ticket' && request.method === 'POST') return json(response, 200, { ticket: 'fake-ticket' })
   if (url.pathname === '/api/profiles') return json(response, 200, { profiles })
-  if (url.pathname === '/api/dashboard/plugins') return json(response, 200, [{ name: 'yaoyao', version: '1.7.3' }])
+  if (url.pathname === '/api/dashboard/plugins') return json(response, 200, [{ name: 'yaoyao', version: '1.7.3' }, { name: 'kanban', version: '1.0.0' }])
   if (url.pathname === '/api/plugins/yaoyao/profiles') return json(response, 200, { profiles: [
     { name: 'yaoyao', label: '夭夭', botName: '夭夭', agentName: '旧夭夭名称', isDefault: true },
     { name: 'yaoer', label: '瑶儿', botName: '瑶儿', agentName: '旧瑶儿名称', isDefault: false },
   ] })
+  if (url.pathname === '/api/plugins/kanban/boards' && request.method === 'GET') {
+    return json(response, 200, {
+      boards: kanbanBoards.map(board => {
+        const scoped = kanbanTasks.filter(task => task.board === board.slug)
+        const counts = Object.fromEntries(kanbanColumns.map(status => [status, scoped.filter(task => task.status === status).length]))
+        return { ...board, counts, total: scoped.filter(task => task.status !== 'archived').length }
+      }),
+      current: 'default',
+    })
+  }
+  if (url.pathname === '/api/plugins/kanban/boards' && request.method === 'POST') {
+    const input = await body(request)
+    const slug = String(input.slug || '').trim().toLowerCase()
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(slug)) return json(response, 400, { detail: 'invalid board slug' })
+    let board = kanbanBoards.find(item => item.slug === slug)
+    if (!board) {
+      board = { slug, name: String(input.name || slug), description: String(input.description || ''), is_current: false, default_workspace_kind: 'scratch' }
+      kanbanBoards.push(board)
+    }
+    return json(response, 200, { board, current: 'default' })
+  }
+  if (url.pathname === '/api/plugins/kanban/board' && request.method === 'GET') {
+    return json(response, 200, kanbanBoardSnapshot(url))
+  }
+  if (url.pathname === '/api/plugins/kanban/profiles' && request.method === 'GET') {
+    return json(response, 200, { profiles: profiles.map(profile => ({
+      name: profile.name,
+      is_default: profile.is_default,
+      description: profile.description,
+      description_auto: false,
+      model: profile.model,
+      provider: profile.provider,
+    })) })
+  }
+  if (url.pathname === '/api/plugins/kanban/tasks' && request.method === 'POST') {
+    const input = await body(request)
+    if (!String(input.title || '').trim()) return json(response, 400, { detail: 'title is required' })
+    const task = {
+      id: `t_e2e${kanbanTaskSequence++}`,
+      board: kanbanBoardSlug(url),
+      title: String(input.title).trim(),
+      body: input.body == null ? null : String(input.body),
+      status: input.triage === true ? 'triage' : 'ready',
+      assignee: input.assignee == null ? null : String(input.assignee),
+      tenant: input.tenant == null ? null : String(input.tenant),
+      priority: Number(input.priority) || 0,
+      created_by: 'dashboard',
+      created_at: now(),
+      comment_count: 0,
+      link_counts: { parents: Array.isArray(input.parents) ? input.parents.length : 0, children: 0 },
+      progress: null,
+    }
+    kanbanTasks.push(task)
+    recordKanbanEvent(task, 'created', { status: task.status, assignee: task.assignee })
+    return json(response, 200, { task })
+  }
+  const kanbanCommentMatch = /^\/api\/plugins\/kanban\/tasks\/([^/]+)\/comments$/.exec(url.pathname)
+  if (kanbanCommentMatch && request.method === 'POST') {
+    const id = decodeURIComponent(kanbanCommentMatch[1])
+    const task = kanbanTasks.find(item => item.id === id && item.board === kanbanBoardSlug(url))
+    if (!task) return json(response, 404, { detail: 'task not found' })
+    const input = await body(request)
+    if (!String(input.body || '').trim()) return json(response, 400, { detail: 'body is required' })
+    const comments = kanbanComments.get(id) || []
+    comments.push({ id: comments.length + 1, task_id: id, author: String(input.author || 'dashboard'), body: String(input.body).trim(), created_at: now() })
+    kanbanComments.set(id, comments)
+    task.comment_count = comments.length
+    recordKanbanEvent(task, 'commented', { author: input.author || 'dashboard' })
+    return json(response, 200, { ok: true })
+  }
+  const kanbanTaskMatch = /^\/api\/plugins\/kanban\/tasks\/([^/]+)$/.exec(url.pathname)
+  if (kanbanTaskMatch) {
+    const id = decodeURIComponent(kanbanTaskMatch[1])
+    const index = kanbanTasks.findIndex(item => item.id === id && item.board === kanbanBoardSlug(url))
+    const task = kanbanTasks[index]
+    if (!task) return json(response, 404, { detail: 'task not found' })
+    if (request.method === 'PATCH') {
+      const input = await body(request)
+      const previousStatus = task.status
+      for (const key of ['title', 'body', 'assignee', 'priority', 'result']) {
+        if (Object.prototype.hasOwnProperty.call(input, key)) task[key] = input[key]
+      }
+      if (typeof input.status === 'string' && input.status) task.status = input.status
+      if (task.status !== previousStatus) recordKanbanEvent(task, 'status', { status: task.status })
+      else recordKanbanEvent(task, 'edited', null)
+      return json(response, 200, { task })
+    }
+    if (request.method === 'DELETE') {
+      kanbanTasks.splice(index, 1)
+      kanbanComments.delete(id)
+      kanbanEvents.delete(id)
+      kanbanRuns.delete(id)
+      return json(response, 200, { ok: true })
+    }
+    if (request.method === 'GET') {
+      return json(response, 200, {
+        task,
+        comments: kanbanComments.get(id) || [],
+        events: kanbanEvents.get(id) || [],
+        attachments: [],
+        links: { parents: id === 't_ios001' ? ['t_web001'] : [], children: id === 't_web001' ? ['t_ios001'] : [] },
+        child_results: id === 't_web001' ? [{ id: 't_ios001', title: '核对 iOS 双端口', status: 'ready' }] : [],
+        runs: kanbanRuns.get(id) || [],
+      })
+    }
+  }
+  if (url.pathname === '/api/plugins/kanban/dispatch' && request.method === 'POST') {
+    const task = kanbanTasks.find(item => item.board === kanbanBoardSlug(url) && item.status === 'ready' && item.assignee)
+    if (!task) return json(response, 200, { spawned: [] })
+    task.status = 'running'
+    task.started_at = now()
+    const run = { id: kanbanRuns.size + 2, task_id: task.id, profile: task.assignee, status: 'running', outcome: null, summary: null, metadata: null, worker_pid: 12346, started_at: task.started_at, ended_at: null }
+    kanbanRuns.set(task.id, [...(kanbanRuns.get(task.id) || []), run])
+    recordKanbanEvent(task, 'claimed', { profile: task.assignee }, run.id)
+    return json(response, 200, { spawned: [{ task_id: task.id, profile: task.assignee }] })
+  }
   if (url.pathname === '/api/model/options') return json(response, 200, { model: 'gpt-5.6', provider: 'openai', providers: [{ slug: 'openai', name: 'OpenAI', models: ['gpt-5.6', 'gpt-5.5'] }] })
   if (url.pathname === '/api/profiles/sessions' || url.pathname === '/api/sessions') {
     const offset = Math.max(0, Number(url.searchParams.get('offset') || 0))
