@@ -4,17 +4,18 @@ import { nextTick } from 'vue'
 import AgentIdentityDialog from '@/components/app/AgentIdentityDialog.vue'
 import AgentIdentityPanel from '@/components/app/AgentIdentityPanel.vue'
 import ModelServicesPanel from '@/components/app/ModelServicesPanel.vue'
-import { deleteModelService, listModelServices, saveDuplexVoiceSettings, saveLegacyModelService, saveModelService, validateModelService } from '@/api/agentManagement'
+import { deleteModelService, listModelServices, saveDuplexVoiceSettings, saveLegacyModelService, saveModelService, saveProfileDefaultModel, validateModelService } from '@/api/agentManagement'
 
 vi.mock('@/api/agentManagement', () => ({
   listModelServices: vi.fn(async () => ({ endpoints: [], current: {} })),
   listLegacyModelServices: vi.fn(async () => [{ id: 'custom:tingly', name: 'tingly', base_url: 'http://tingly.test/v1', model: 'omni', models: ['omni'], discover_models: true, has_api_key: true, can_edit_api_key: true, is_current: true, source: 'legacy' }]),
   listModelCatalog: vi.fn(async () => [
     { slug: 'opencode-free', name: 'OpenCode Free', models: ['free-a'], isCurrent: false },
-    { slug: 'custom:tingly', name: 'tingly', models: ['omni'], isCurrent: true },
+    { slug: 'custom:tingly', name: 'tingly', models: ['omni', 'omni-2'], isCurrent: true, currentModel: 'omni' },
   ]),
   saveLegacyModelService: vi.fn(async () => undefined),
   saveModelService: vi.fn(async () => ({ endpoints: [], current: {} })),
+  saveProfileDefaultModel: vi.fn(async (_profile, provider, model) => ({ ok: true, provider, model })),
   validateModelService: vi.fn(async () => ({ ok: true, reachable: true, message: '', models: ['model-a', 'model-b'] })),
   activateModelService: vi.fn(async () => undefined),
   deleteModelService: vi.fn(async () => undefined),
@@ -32,6 +33,22 @@ describe('Agent management dialog', () => {
     expect(document.querySelector('[aria-label="Agent 管理"]')?.textContent).toContain('Bots 头像')
     expect(document.querySelector('.management-tabs')).toBeNull()
     expect(document.body.textContent).not.toContain('模型服务')
+    expect(document.body.textContent).toContain('custom:tingly / omni')
+    wrapper.unmount()
+  })
+
+  it('sets any catalog model as the Agent default without switching a session', async () => {
+    const wrapper = mount(AgentIdentityDialog, { attachTo: document.body, props: { open: true, profile, isAdmin: true } })
+    await nextTick()
+    document.querySelectorAll<HTMLButtonElement>('.management-tabs button')[1]!.click(); await flushPromises()
+    const picker = document.querySelector<HTMLSelectElement>('select[aria-label="默认全局模型"]')!
+    picker.value = JSON.stringify(['opencode-free', 'free-a'])
+    picker.dispatchEvent(new Event('change'))
+    await nextTick()
+    document.querySelector<HTMLButtonElement>('.default-model-card button')!.click()
+    await flushPromises()
+    expect(saveProfileDefaultModel).toHaveBeenCalledWith('default', 'opencode-free', 'free-a')
+    expect(document.body.textContent).toContain('仅影响新会话')
     wrapper.unmount()
   })
 

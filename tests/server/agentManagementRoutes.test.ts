@@ -5,7 +5,7 @@ import request from 'supertest'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ApplicationRuntime } from '../../src/server/app.js'
 import type { ServerConfig } from '../../src/server/config.js'
-import { createAuthenticatedApplication } from './authenticatedApplication.js'
+import { createAuthenticatedApplication, createUserAuthenticatedApplication } from './authenticatedApplication.js'
 
 const roots: string[] = []
 const runtimes: ApplicationRuntime[] = []
@@ -15,6 +15,26 @@ afterEach(() => {
 })
 
 describe('Agent management admin routes', () => {
+  it('rejects default-model writes from a regular 8800 user', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'yaoyao-agent-model-user-'))
+    roots.push(home)
+    const config: ServerConfig = {
+      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
+      mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
+    }
+    const runtime = createUserAuthenticatedApplication({ config })
+    runtimes.push(runtime)
+    const agent = request.agent(runtime.app.callback())
+    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    await agent.put('/api/app/admin/profiles/default/model')
+      .set('Host', '127.0.0.1:8800')
+      .set('Origin', 'http://127.0.0.1:8800')
+      .set('X-CSRF-Token', bootstrap.body.csrfToken)
+      .send({ provider: 'opencode-free', model: 'free-a' })
+      .expect(403, /需要管理员权限/)
+  })
+
   it('proxies profile-scoped model services and masked duplex voice settings through 9119', async () => {
     const home = mkdtempSync(join(tmpdir(), 'yaoyao-agent-management-'))
     roots.push(home)
@@ -39,6 +59,7 @@ describe('Agent management admin routes', () => {
       if (url.pathname === '/api/model/options') return Response.json({ provider: 'custom:tingly', model: 'omni', providers: [{ slug: 'custom:tingly', name: 'tingly', models: ['omni', 'old'], is_current: true }] })
       if (url.pathname === '/api/env') return Response.json({ ok: true })
       if (url.pathname === '/api/model/set') return Response.json({ ok: true, provider: 'custom:tingly', model: 'omni-2' })
+      if (url.pathname === '/api/profiles/worker/model' && method === 'PUT') return Response.json({ ok: true, provider: 'opencode-free', model: 'free-a' })
       if (unsupported && url.pathname === '/api/providers/custom-endpoints') return Response.json({ detail: 'missing' }, { status: 404 })
       if (url.pathname === '/api/providers/custom-endpoints/validate') return Response.json({ ok: true, reachable: true, message: '', models: ['model-a'] })
       if (url.pathname === '/api/providers/custom-endpoints') return Response.json({ endpoints: [], current: {}, ok: true })
@@ -60,6 +81,7 @@ describe('Agent management admin routes', () => {
     await headers(agent.post('/api/app/admin/model-services?profile=worker')).send({ name: 'Local', base_url: 'http://127.0.0.1:9000/v1', model: 'model-a', discover_models: true, make_default: false }).expect(200)
     await headers(agent.post('/api/app/admin/model-services/validate')).send({ name: 'Local', base_url: 'http://127.0.0.1:9000/v1', model: 'model-a', discover_models: true, make_default: false }).expect(200)
     await headers(agent.post('/api/app/admin/model-services/local/activate?profile=worker')).send({}).expect(200)
+    await headers(agent.put('/api/app/admin/profiles/worker/model')).send({ provider: 'opencode-free', model: 'free-a' }).expect(200)
     await headers(agent.delete('/api/app/admin/model-services/local?profile=worker')).send({}).expect(200)
     const legacy = await agent.get('/api/app/admin/legacy-model-services?profile=worker').set('Host', '127.0.0.1:8800').expect(200)
     expect(legacy.body.items[0]).toMatchObject({ id: 'custom:tingly', models: ['omni', 'old'], has_api_key: true, can_edit_api_key: true, is_current: true })
@@ -89,6 +111,8 @@ describe('Agent management admin routes', () => {
     const envWrite = calls.find(call => call.url.pathname === '/api/env' && call.method === 'PUT')!
     expect(envWrite.body).toMatchObject({ key: 'TINGLY_API_KEY', value: 'replacement-secret' })
     expect(calls.some(call => call.url.pathname === '/api/model/set' && call.method === 'POST')).toBe(true)
+    expect(calls.find(call => call.url.pathname === '/api/profiles/worker/model' && call.method === 'PUT')?.body)
+      .toEqual({ provider: 'opencode-free', model: 'free-a' })
 
     unsupported = true
     await agent.get('/api/app/admin/model-services?profile=worker').set('Host', '127.0.0.1:8800')

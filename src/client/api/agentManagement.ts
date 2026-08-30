@@ -46,6 +46,7 @@ export interface ModelCatalogProvider {
   name: string
   models: string[]
   isCurrent: boolean
+  currentModel?: string
 }
 
 export interface LegacyModelService extends CustomModelService {
@@ -74,18 +75,41 @@ export function listModelServices(profile: string): Promise<CustomModelServicesR
 }
 
 export async function listModelCatalog(profile: string): Promise<ModelCatalogProvider[]> {
-  const payload = await apiRequest<{ providers?: unknown[] }>(`/api/app/models${profileQuery(profile)}`)
+  const payload = await apiRequest<{ provider?: unknown; model?: unknown; providers?: unknown[] }>(`/api/app/models${profileQuery(profile)}`)
+  const currentProvider = typeof payload.provider === 'string' ? payload.provider.trim() : ''
+  const currentModel = typeof payload.model === 'string' ? payload.model.trim() : ''
   return (payload.providers || []).flatMap(raw => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
     const provider = raw as Record<string, unknown>
     const slug = typeof provider.slug === 'string' ? provider.slug.trim() : ''
     if (!slug) return []
+    const isCurrent = provider.is_current === true
+      || slug.toLocaleLowerCase() === currentProvider.toLocaleLowerCase()
+    const models = Array.isArray(provider.models) ? provider.models.flatMap(rawModel => {
+      if (typeof rawModel === 'string') return rawModel.trim() ? [rawModel.trim()] : []
+      if (!rawModel || typeof rawModel !== 'object' || Array.isArray(rawModel)) return []
+      const item = rawModel as Record<string, unknown>
+      const id = typeof item.id === 'string' ? item.id.trim()
+        : typeof item.model === 'string' ? item.model.trim() : ''
+      return id ? [id] : []
+    }) : []
     return [{
       slug,
       name: typeof provider.name === 'string' && provider.name.trim() ? provider.name.trim() : slug,
-      models: Array.isArray(provider.models) ? provider.models.map(String).map(item => item.trim()).filter(Boolean) : [],
-      isCurrent: provider.is_current === true,
+      models,
+      isCurrent,
+      ...(isCurrent && currentModel ? { currentModel } : {}),
     }]
+  })
+}
+
+export function saveProfileDefaultModel(
+  profile: string,
+  provider: string,
+  model: string,
+): Promise<{ ok: boolean; provider: string; model: string }> {
+  return apiRequest(`/api/app/admin/profiles/${encodeURIComponent(profile)}/model`, {
+    method: 'PUT', body: { provider, model },
   })
 }
 

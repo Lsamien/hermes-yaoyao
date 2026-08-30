@@ -9,6 +9,7 @@ import {
   saveDuplexVoiceSettings,
   saveLegacyModelService,
   saveModelService,
+  saveProfileDefaultModel,
   validateModelService,
 } from '@/api/agentManagement'
 import { setApiCsrfToken } from '@/api/client'
@@ -33,6 +34,7 @@ describe('Agent management client protocol', () => {
     await listLegacyModelServices('worker / 中文')
     await saveModelService('worker / 中文', input)
     await saveLegacyModelService('worker / 中文', 'custom:tingly', input)
+    await saveProfileDefaultModel('worker / 中文', 'custom:tingly', 'omni')
     await validateModelService(input)
     await activateModelService('worker / 中文', 'local/model')
     await deleteModelService('worker / 中文', 'local/model')
@@ -43,13 +45,15 @@ describe('Agent management client protocol', () => {
       '/api/app/admin/legacy-model-services?profile=worker%20%2F%20%E4%B8%AD%E6%96%87',
       '/api/app/admin/model-services?profile=worker%20%2F%20%E4%B8%AD%E6%96%87',
       '/api/app/admin/legacy-model-services/custom%3Atingly?profile=worker%20%2F%20%E4%B8%AD%E6%96%87',
+      '/api/app/admin/profiles/worker%20%2F%20%E4%B8%AD%E6%96%87/model',
       '/api/app/admin/model-services/validate',
       '/api/app/admin/model-services/local%2Fmodel/activate?profile=worker%20%2F%20%E4%B8%AD%E6%96%87',
       '/api/app/admin/model-services/local%2Fmodel?profile=worker%20%2F%20%E4%B8%AD%E6%96%87',
     ])
     expect(JSON.parse(String(calls[3]!.init?.body))).not.toHaveProperty('api_key')
+    expect(JSON.parse(String(calls[5]!.init?.body))).toEqual({ provider: 'custom:tingly', model: 'omni' })
     expect(new Headers(calls[3]!.init?.headers).get('X-CSRF-Token')).toBe('csrf-agent-management')
-    expect(calls[7]!.init?.method).toBe('DELETE')
+    expect(calls[8]!.init?.method).toBe('DELETE')
   })
 
   it('never includes an unchanged duplex API key', async () => {

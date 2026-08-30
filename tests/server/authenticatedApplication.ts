@@ -17,10 +17,22 @@ const TEST_ADMIN: LocalUser = {
   updatedAt: 1,
 }
 
+const TEST_USER: LocalUser = {
+  ...TEST_ADMIN,
+  id: 'test-user',
+  username: 'test-user',
+  role: 'user',
+}
+
 class AuthenticatedTestStore extends LocalAuthStore {
   override current(_ctx: Koa.Context): LocalUser { return TEST_ADMIN }
   override require(_ctx: Koa.Context, _allowPasswordChange = false): LocalUser { return TEST_ADMIN }
   override requireAdmin(_ctx: Koa.Context): LocalUser { return TEST_ADMIN }
+}
+
+class UserAuthenticatedTestStore extends LocalAuthStore {
+  override current(_ctx: Koa.Context): LocalUser { return TEST_USER }
+  override require(_ctx: Koa.Context, _allowPasswordChange = false): LocalUser { return TEST_USER }
 }
 
 export function createAuthenticatedApplication(
@@ -29,5 +41,15 @@ export function createAuthenticatedApplication(
   return createApplication({
     ...options,
     auth: new AuthenticatedTestStore(options.config.home, Boolean(options.config.tlsCert)),
+  })
+}
+
+
+export function createUserAuthenticatedApplication(
+  options: ApplicationOptions & { config: ServerConfig },
+): ApplicationRuntime {
+  return createApplication({
+    ...options,
+    auth: new UserAuthenticatedTestStore(options.config.home, Boolean(options.config.tlsCert)),
   })
 }

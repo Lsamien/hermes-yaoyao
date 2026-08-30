@@ -1588,6 +1588,22 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       search: searchFrom(ctx, ['profile']),
     })
   })
+  router.put('/api/app/admin/profiles/:profileName/model', async (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
+    const profileName = safeIdentifier(ctx.params.profileName, 'profile name')
+    const request = body(ctx)
+    const provider = typeof request.provider === 'string' ? request.provider.trim() : ''
+    const model = typeof request.model === 'string' ? request.model.trim() : ''
+    if (!provider || !model) {
+      throw new HttpError(400, 'Provider 和模型不能为空', 'invalid_profile_model')
+    }
+    await proxyAdminFeature(
+      ctx,
+      dependencies,
+      `/api/profiles/${encodeURIComponent(profileName)}/model`,
+      { method: 'PUT', requestBody: { provider, model } },
+    )
+  })
   router.post('/api/app/admin/model-services', async (ctx) => {
     await proxyAdminFeature(ctx, dependencies, '/api/providers/custom-endpoints', {
       method: 'POST', search: searchFrom(ctx, ['profile']), requestBody: body(ctx),
