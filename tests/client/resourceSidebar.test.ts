@@ -13,8 +13,13 @@ describe('ResourceSidebar', () => {
       },
     })
 
-    const sources = wrapper.findAll<HTMLImageElement>('.team-avatar__image').map(image => image.attributes('src'))
-    expect(sources).toHaveLength(2)
-    expect(new Set(sources).size).toBe(1)
+    const signatures = wrapper.findAll('.team-avatar').map(team => team.findAll('.agent-avatar').map(agent => {
+      const shape = agent.find('.agent-avatar__body').element.firstElementChild?.tagName
+      const color = agent.find('stop[offset="0.5"]').attributes('stop-color')
+      return `${shape}:${color}`
+    }))
+    expect(signatures).toHaveLength(2)
+    expect(signatures[0]).toHaveLength(3)
+    expect(signatures[1]).toEqual(signatures[0])
   })
 })
