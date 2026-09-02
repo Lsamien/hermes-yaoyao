@@ -43,9 +43,10 @@ describe('allowed hosts settings panel', () => {
 
     expect(calls.map(call => call.path)).toEqual([
       '/api/app/system/allowed-hosts',
+      '/api/app/admin/upstream-connection',
       '/api/app/system/allowed-hosts',
     ])
-    expect(calls[1]!.init?.body).toBe(JSON.stringify({
+    expect(calls[2]!.init?.body).toBe(JSON.stringify({
       hosts: ['yaoyao.example.com', '203.0.113.10'],
     }))
     expect(wrapper.text()).toContain('允许的访问地址已保存并立即生效')

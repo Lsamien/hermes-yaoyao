@@ -453,6 +453,8 @@ export class UpstreamServiceSession {
   #validatedUntil = 0
   #credentialFingerprint: string | undefined
   #generation = 0
+  #authMode: 'unknown' | 'loopback-token' | 'loopback-direct' | 'password' = 'unknown'
+  #lastVerifiedAt: number | undefined
   readonly #now: () => number
   readonly #validationTTL: number
 
@@ -466,11 +468,25 @@ export class UpstreamServiceSession {
     client.setReauthenticationHandler(this.#jar, async () => {
       this.#syncCredentials()
       this.#validatedUntil = 0
-      await this.#login(this.#generation)
+      await this.ensure()
     })
   }
 
   get jar(): CookieJar { return this.#jar }
+
+  connectionInfo(): {
+    endpoint: string
+    authMode: 'unknown' | 'loopback-token' | 'loopback-direct' | 'password'
+    networkScope: 'local' | 'network'
+    lastVerifiedAt?: number
+  } {
+    return {
+      endpoint: this.client.baseURL.origin,
+      authMode: this.#authMode,
+      networkScope: this.#isLoopbackUpstream() ? 'local' : 'network',
+      lastVerifiedAt: this.#lastVerifiedAt,
+    }
+  }
 
   async ensure(): Promise<void> {
     this.#syncCredentials()
@@ -479,7 +495,8 @@ export class UpstreamServiceSession {
     const generation = this.#generation
     const task = this.#validate(generation).then(() => {
       this.#checkGeneration(generation)
-      this.#validatedUntil = this.#now() + this.#validationTTL
+      this.#lastVerifiedAt = this.#now()
+      this.#validatedUntil = this.#lastVerifiedAt + this.#validationTTL
     }).finally(() => { if (this.#ensureTask === task) this.#ensureTask = undefined })
     this.#ensureTask = task
     return task
@@ -493,6 +510,7 @@ export class UpstreamServiceSession {
       this.#generation++
       this.#validatedUntil = 0; this.#ensureTask = undefined; this.#loginTask = undefined
       this.#jar.replace(new CookieJar())
+      this.#authMode = 'unknown'
       this.client.invalidateReads()
     }
     this.#credentialFingerprint = fingerprint
@@ -511,10 +529,24 @@ export class UpstreamServiceSession {
     if (status.status < 200 || status.status >= 300) throw new HttpError(502, '9119 状态不可用', 'upstream_unavailable')
     const parsed = JSON.parse(status.body.toString('utf8')) as Record<string, unknown>
     this.#checkGeneration(generation)
-    if (parsed.auth_required !== true && parsed.authRequired !== true) { this.#jar.replace(probe); return }
+    if (parsed.auth_required !== true && parsed.authRequired !== true) {
+      if (!this.#isLoopbackUpstream()) {
+        throw new HttpError(502, '9119 未启用认证，且不是本机回环地址', 'upstream_auth_unsafe')
+      }
+      this.#authMode = await this.#loadLoopbackToken(probe)
+        ? 'loopback-token'
+        : 'loopback-direct'
+      this.#checkGeneration(generation)
+      this.#jar.replace(probe)
+      return
+    }
+    this.#authMode = 'password'
     const me = await this.client.request('/api/auth/me', probe)
     this.#checkGeneration(generation)
-    if (me.status >= 200 && me.status < 300) { this.#jar.replace(probe); return }
+    if (me.status >= 200 && me.status < 300) {
+      this.#jar.replace(probe)
+      return
+    }
     if (me.status !== 401 && me.status !== 403) throw new HttpError(502, '无法验证 9119 服务会话', 'upstream_auth_unavailable')
     await this.#login(generation)
   }
@@ -536,6 +568,7 @@ export class UpstreamServiceSession {
     const task = this.#authenticate({ ...credentials }, jar).then(() => {
       this.#checkGeneration(generation)
       this.#jar.replace(jar)
+      this.#authMode = 'password'
       this.client.invalidateReads()
       this.#validatedUntil = this.#now() + this.#validationTTL
     }).finally(() => { if (this.#loginTask === task) this.#loginTask = undefined })
@@ -553,5 +586,25 @@ export class UpstreamServiceSession {
     if (response.status < 200 || response.status >= 300) {
       throw new HttpError(503, '9119 服务账号验证失败', 'upstream_credentials_invalid')
     }
+  }
+
+  #isLoopbackUpstream(): boolean {
+    const hostname = this.client.baseURL.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
+  }
+
+  async #loadLoopbackToken(jar: CookieJar): Promise<boolean> {
+    const response = await this.client.request('/', jar, {
+      headers: { accept: 'text/html' },
+      maxResponseBytes: 2 * 1_024 * 1_024,
+    })
+    if (response.status < 200 || response.status >= 300) return false
+    const html = response.body.toString('utf8')
+    const match = /window\.__HERMES_SESSION_TOKEN__\s*=\s*("(?:\\.|[^"\\])*")/.exec(html)
+    let token: unknown
+    try { token = match ? JSON.parse(match[1]!) : undefined } catch { token = undefined }
+    if (typeof token !== 'string' || token.length < 16 || token.length > 4_096) return false
+    jar.setSessionToken(token)
+    return true
   }
 }

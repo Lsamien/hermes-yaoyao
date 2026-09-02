@@ -38,6 +38,20 @@ export async function setUpstreamCredentials(username: string, password: string)
   })
 }
 
+export interface UpstreamConnectionStatus {
+  endpoint: string
+  authMode: 'unknown' | 'loopback-token' | 'loopback-direct' | 'password'
+  networkScope: 'local' | 'network'
+  webNetworkScope: 'local' | 'network'
+  ready: boolean
+  error?: string
+  lastVerifiedAt?: number
+}
+
+export function getUpstreamConnectionStatus(): Promise<UpstreamConnectionStatus> {
+  return apiRequest('/api/app/admin/upstream-connection')
+}
+
 export interface AllowedHostsSettings {
   source: 'none' | 'file' | 'environment'
   hosts: string[]

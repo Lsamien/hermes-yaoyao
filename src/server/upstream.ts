@@ -48,6 +48,7 @@ function browserCookie(value: string, publicSecure: boolean): string | null {
 export class CookieJar {
   readonly #values = new Map<string, string>()
   readonly #browserCookies = new Map<string, string>()
+  #sessionToken: string | undefined
 
   constructor(cookieHeader?: string) {
     for (const [name, value] of Object.entries(parse(cookieHeader ?? ''))) {
@@ -72,9 +73,16 @@ export class CookieJar {
     return [...this.#values.entries()].map(([name, value]) => `${name}=${value}`).join('; ')
   }
 
+  get sessionToken(): string | undefined { return this.#sessionToken }
+
+  setSessionToken(value: string | undefined): void {
+    this.#sessionToken = value
+  }
+
   replace(other: CookieJar): void {
     this.#values.clear(); this.#browserCookies.clear()
     for (const [name, value] of other.#values) this.#values.set(name, value)
+    this.#sessionToken = other.#sessionToken
   }
 
   get browserCookies(): string[] {
@@ -213,6 +221,7 @@ export class UpstreamClient {
       if (/^[0-9a-f:.]+$/i.test(clientAddress)) headers.set('x-forwarded-for', clientAddress)
     }
     if (jar.header) headers.set('cookie', jar.header)
+    if (jar.sessionToken) headers.set('x-hermes-session-token', jar.sessionToken)
     let body: BodyInit | undefined
     if (options.rawBody !== undefined) {
       body = options.rawBody

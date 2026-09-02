@@ -2,7 +2,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import SystemManagementDialog from '@/components/app/SystemManagementDialog.vue'
-import { listUsers } from '@/api/admin'
+import { getUpstreamConnectionStatus, listUsers } from '@/api/admin'
 import { getPushSystemStatus, saveFCMPushSystemConfig, savePushSystemConfig, type PushSystemStatus } from '@/api/push'
 
 vi.mock('@/api/admin', () => ({
@@ -10,6 +10,10 @@ vi.mock('@/api/admin', () => ({
   deleteUser: vi.fn(async () => undefined),
   getAllowedHostsSettings: vi.fn(async () => ({
     source: 'none', hosts: [], editableHosts: [], environmentHosts: [],
+  })),
+  getUpstreamConnectionStatus: vi.fn(async () => ({
+    endpoint: 'http://127.0.0.1:9119', authMode: 'loopback-token', networkScope: 'local',
+    webNetworkScope: 'network', ready: true, lastVerifiedAt: 1_788_273_600_000,
   })),
   listUsers: vi.fn(async () => []),
   saveAllowedHostsSettings: vi.fn(async (hosts: string[]) => ({
@@ -80,6 +84,34 @@ afterEach(() => {
 })
 
 describe('System management APNs configuration', () => {
+  it('shows automatic loopback authentication and separate 8800/9119 network boundaries', async () => {
+    const wrapper = await mountOpen()
+
+    expect(document.body.textContent).toContain('本机 Session Token（自动）')
+    expect(document.body.textContent).toContain('http://127.0.0.1:9119')
+    expect(document.body.textContent).toContain('局域网可访问')
+    expect(document.body.textContent).toContain('9119 网络范围')
+    expect(document.body.textContent).toContain('仅本机')
+    expect(input('upstream-username')).toBeNull()
+    expect(document.body.textContent).toContain('Token 不会在设置中显示')
+    wrapper.unmount()
+  })
+
+  it('shows credential controls when 9119 requires password authentication', async () => {
+    vi.mocked(getUpstreamConnectionStatus).mockResolvedValueOnce({
+      endpoint: 'https://hermes.example.test', authMode: 'password', networkScope: 'network',
+      webNetworkScope: 'network', ready: false, error: '9119 服务账号验证失败',
+    })
+    const wrapper = await mountOpen()
+
+    expect(document.body.textContent).toContain('用户名和密码')
+    expect(document.body.textContent).toContain('9119 服务账号验证失败')
+    expect(input('upstream-username')).not.toBeNull()
+    expect(input('upstream-password')).not.toBeNull()
+    expect(button('验证并保存')).not.toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('includes the target username in every row action accessible name', async () => {
     vi.mocked(listUsers).mockResolvedValueOnce([{
       id: 'user-1',

@@ -69,6 +69,16 @@ describe('8800 local authentication routes', () => {
     const ready = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
     expect(ready.body).toMatchObject({ upstreamReady: true, serverKind: 'yaoyao-web' })
     expect(ready.body.profiles).toHaveLength(1)
+    const connection = await agent.get('/api/app/admin/upstream-connection')
+      .set('Host', '127.0.0.1:8800').expect(200)
+    expect(connection.body).toMatchObject({
+      endpoint: 'http://127.0.0.1:9119',
+      authMode: 'password',
+      networkScope: 'local',
+      webNetworkScope: 'local',
+      ready: true,
+    })
+    expect(connection.body.lastVerifiedAt).toEqual(expect.any(Number))
 
     await agent.post('/api/app/admin/users')
       .set('Host', '127.0.0.1:8800').set('Origin', 'http://127.0.0.1:8800')

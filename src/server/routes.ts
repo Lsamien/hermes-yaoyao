@@ -1731,6 +1731,23 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     dependencies.auth.setUpstreamCredentials(admin, { username, password })
     json(ctx, 200, { ok: true })
   })
+  router.get('/api/app/admin/upstream-connection', async (ctx) => {
+    dependencies.auth.requireAdmin(ctx)
+    let ready = false
+    let error: string | undefined
+    try {
+      await dependencies.upstreamSession.ensure()
+      ready = true
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : '9119 不可用'
+    }
+    json(ctx, 200, {
+      ...dependencies.upstreamSession.connectionInfo(),
+      ready,
+      error,
+      webNetworkScope: isLoopbackHost(dependencies.config.host) ? 'local' : 'network',
+    })
+  })
   router.get('/api/app/admin/model-services', async (ctx) => {
     await proxyAdminFeature(ctx, dependencies, '/api/providers/custom-endpoints', {
       search: searchFrom(ctx, ['profile']),

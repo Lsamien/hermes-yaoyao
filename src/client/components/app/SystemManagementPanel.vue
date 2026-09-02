@@ -5,12 +5,14 @@ import {
   createUser,
   deleteUser,
   getAllowedHostsSettings,
+  getUpstreamConnectionStatus,
   listUsers,
   saveAllowedHostsSettings,
   setUpstreamCredentials,
   updateUser,
   type AllowedHostsSettings,
   type ManagedUser,
+  type UpstreamConnectionStatus,
 } from '@/api/admin'
 import {
   getPushSystemStatus,
@@ -41,6 +43,7 @@ const password = ref('')
 const upstreamUsername = ref('')
 const upstreamPassword = ref('')
 const connectionBaseline = ref({ username: '', password: '' })
+const connectionStatus = ref<UpstreamConnectionStatus>()
 const allowedHostsSettings = ref<AllowedHostsSettings>()
 const allowedHostsText = ref('')
 const allowedHostsBaseline = ref('')
@@ -66,6 +69,19 @@ const fcmBusy = ref(false)
 const fcmError = ref('')
 const fcmNotice = ref('')
 const currentAccessHost = window.location.hostname || 'localhost'
+const effectiveUpstreamReady = computed(() => connectionStatus.value?.ready ?? props.upstreamReady)
+const effectiveUpstreamError = computed(() => connectionStatus.value?.error || props.upstreamError)
+const passwordAuthentication = computed(() => !['loopback-token', 'loopback-direct'].includes(connectionStatus.value?.authMode ?? 'unknown'))
+const authModeLabel = computed(() => {
+  if (connectionStatus.value?.authMode === 'loopback-token') return '本机 Session Token（自动）'
+  if (connectionStatus.value?.authMode === 'loopback-direct') return '本机直连（兼容模式）'
+  if (connectionStatus.value?.authMode === 'password') return '用户名和密码'
+  return '等待检测'
+})
+const verifiedAtLabel = computed(() => {
+  const value = connectionStatus.value?.lastVerifiedAt
+  return value === undefined ? '尚未成功验证' : new Date(value).toLocaleString()
+})
 
 interface APNsFormSnapshot {
   keyFile: string
@@ -174,8 +190,12 @@ async function refresh() {
     return
   }
   if (props.section === 'connection') {
-    const settings = await getAllowedHostsSettings()
+    const [settings, status] = await Promise.all([
+      getAllowedHostsSettings(),
+      getUpstreamConnectionStatus(),
+    ])
     allowedHostsSettings.value = settings
+    connectionStatus.value = status
     allowedHostsText.value = settings.editableHosts.join('\n')
     allowedHostsBaseline.value = allowedHostsText.value
     return
@@ -245,7 +265,7 @@ async function saveUpstream() {
     upstreamUsername.value = submittedUsername
     upstreamPassword.value = ''
     connectionBaseline.value = { username: submittedUsername, password: '' }
-  }, false)
+  })
 }
 
 function parsedAllowedHosts(): string[] {
@@ -394,9 +414,18 @@ watch(() => [props.active, props.section] as const, ([active, section]) => {
     </div>
 
     <div v-else-if="section === 'connection'" class="block">
-      <h3>9119 服务账号</h3>
-      <p :class="{ ok: upstreamReady }">{{ upstreamReady ? '上游连接正常' : upstreamError || '尚未验证上游连接' }}</p>
-      <form @submit.prevent="saveUpstream">
+      <h3>Hermes 连接</h3>
+      <p :class="{ ok: effectiveUpstreamReady }">{{ effectiveUpstreamReady ? '9119 连接正常' : effectiveUpstreamError || '尚未验证上游连接' }}</p>
+      <div class="connection-summary" aria-label="Hermes 连接状态">
+        <span><small>9119 地址</small><b>{{ connectionStatus?.endpoint || '等待检测' }}</b></span>
+        <span><small>认证模式</small><b>{{ authModeLabel }}</b></span>
+        <span><small>8800 网络范围</small><b>{{ connectionStatus?.webNetworkScope === 'local' ? '仅本机' : '局域网可访问' }}</b></span>
+        <span><small>9119 网络范围</small><b>{{ connectionStatus?.networkScope === 'network' ? '网络可访问' : '仅本机' }}</b></span>
+        <span class="wide"><small>最近验证</small><b>{{ verifiedAtLabel }}</b></span>
+      </div>
+      <p v-if="connectionStatus?.authMode === 'loopback-token'" class="connection-mode-note">9119 使用本机临时 Token，8800 会自动读取并在 9119 重启后刷新；Token 不会在设置中显示。</p>
+      <p v-else-if="connectionStatus?.authMode === 'loopback-direct'" class="connection-mode-note">当前 9119 允许本机直接访问，不需要账号或 Token；该兼容模式只允许回环地址使用。</p>
+      <form v-if="passwordAuthentication" @submit.prevent="saveUpstream">
         <label><span>9119 用户名</span><input v-model="upstreamUsername" name="upstream-username" autocomplete="off" :disabled="busy" /></label>
         <label><span>9119 密码</span><input v-model="upstreamPassword" name="upstream-password" type="password" autocomplete="new-password" :disabled="busy" /></label>
         <button class="solid-button" :disabled="busy || !upstreamUsername.trim() || !upstreamPassword">验证并保存</button>
@@ -493,6 +522,12 @@ watch(() => [props.active, props.section] as const, ([active, section]) => {
 .block h3 { margin: 0 0 14px; font-size: 16px; }
 .block p { color: var(--danger); font-size: 13px; }
 .block p.ok { color: var(--success, #21845b); }
+.connection-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.connection-summary span { display: flex; min-width: 0; flex-direction: column; gap: 5px; padding: 12px; border-radius: 9px; background: var(--surface-soft); }
+.connection-summary span.wide { grid-column: 1 / -1; }
+.connection-summary small { color: var(--text-muted); font-size: 11px; }
+.connection-summary b { overflow-wrap: anywhere; color: var(--text-primary); font-size: 13px; }
+.connection-mode-note { margin: 12px 0 0; padding: 9px 10px; border-radius: 9px; background: var(--surface-soft); color: var(--text-muted) !important; line-height: 1.55; }
 .network-description { margin: 0; color: var(--text-muted) !important; line-height: 1.6; }
 .network-access-block { margin-top: 26px; padding-top: 24px; border-top: 1px solid var(--line); }
 .network-description code { color: var(--text-secondary); }
@@ -551,5 +586,7 @@ input:not([type="checkbox"]):focus { border-color: var(--line-strong); box-shado
   .push-status { grid-template-columns: 1fr; }
   .push-config-form { grid-template-columns: 1fr; }
   .push-config-form .wide { grid-column: 1; }
+  .connection-summary { grid-template-columns: 1fr; }
+  .connection-summary span.wide { grid-column: 1; }
 }
 </style>

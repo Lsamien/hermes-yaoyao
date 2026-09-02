@@ -10,7 +10,11 @@ describe('upstream service validation lease', () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
       const path = new URL(String(input)).pathname; paths.push(path)
       if (path === '/api/status') return Response.json({ auth_required: true })
-      if (path === '/api/auth/me') return Response.json({ user_id: 'service' })
+      if (path === '/api/auth/me') {
+        return expire && new Headers(init?.headers).get('cookie') === 'session=old'
+          ? Response.json({ detail: 'expired' }, { status: 401 })
+          : Response.json({ user_id: 'service' })
+      }
       if (path === '/api/auth/providers') return Response.json({ providers: [] })
       if (path === '/auth/password-login') return Response.json({ ok: true }, { headers: { 'set-cookie': 'session=new; Path=/' } })
       if (expire && new Headers(init?.headers).get('cookie') === 'session=old') return Response.json({ error: 'expired' }, { status: 401 })
@@ -95,5 +99,83 @@ describe('upstream service validation lease', () => {
     release()
     expect(await old).toMatchObject({ code: 'upstream_credentials_changed' })
     expect(session.jar.header).toBe('session=new')
+  })
+
+  it('uses the injected loopback session token without password login', async () => {
+    const paths: string[] = []
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+      const path = new URL(String(input)).pathname
+      paths.push(path)
+      if (path === '/api/status') return Response.json({ auth_required: false })
+      if (path === '/') {
+        return new Response('<script>window.__HERMES_SESSION_TOKEN__="loopback-token-123456";</script>', {
+          headers: { 'content-type': 'text/html' },
+        })
+      }
+      const token = new Headers(init?.headers).get('x-hermes-session-token')
+      return token === 'loopback-token-123456'
+        ? Response.json({ ok: true })
+        : Response.json({ detail: 'Unauthorized' }, { status: 401 })
+    })
+    const client = new UpstreamClient(new URL('http://127.0.0.1:9119'), fetch)
+    const session = new UpstreamServiceSession(client, () => ({ username: 'unused', password: 'unused' }))
+
+    expect((await session.request('/api/sessions')).status).toBe(200)
+    expect(paths).toEqual(['/api/status', '/', '/api/sessions'])
+    expect(session.connectionInfo()).toMatchObject({
+      endpoint: 'http://127.0.0.1:9119',
+      authMode: 'loopback-token',
+      networkScope: 'local',
+    })
+  })
+
+  it('refreshes a rotated loopback token once and replays parallel reads', async () => {
+    let activeToken = 'loopback-token-first'
+    let pageLoads = 0
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/api/status') return Response.json({ auth_required: false })
+      if (path === '/') {
+        pageLoads += 1
+        return new Response(`<script>window.__HERMES_SESSION_TOKEN__=${JSON.stringify(activeToken)};</script>`)
+      }
+      return new Headers(init?.headers).get('x-hermes-session-token') === activeToken
+        ? Response.json({ ok: true })
+        : Response.json({ detail: 'Unauthorized' }, { status: 401 })
+    })
+    const client = new UpstreamClient(new URL('http://localhost:9119'), fetch)
+    const session = new UpstreamServiceSession(client, () => undefined)
+    await session.ensure()
+    activeToken = 'loopback-token-second'
+
+    const responses = await Promise.all([
+      client.request('/api/sessions/a', session.jar),
+      client.request('/api/sessions/b', session.jar),
+    ])
+    expect(responses.map(response => response.status)).toEqual([200, 200])
+    expect(pageLoads).toBe(2)
+  })
+
+  it('refuses token discovery from a non-loopback upstream', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({ auth_required: false }))
+    const client = new UpstreamClient(new URL('http://192.168.1.20:9119'), fetch)
+    const session = new UpstreamServiceSession(client, () => undefined)
+
+    await expect(session.ensure()).rejects.toMatchObject({ code: 'upstream_auth_unsafe' })
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps older unauthenticated loopback dashboards compatible when no token is injected', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/api/status') return Response.json({ auth_required: false })
+      if (path === '/') return new Response('<html>legacy dashboard</html>')
+      return Response.json({ ok: true })
+    })
+    const client = new UpstreamClient(new URL('http://127.0.0.1:9119'), fetch)
+    const session = new UpstreamServiceSession(client, () => undefined)
+
+    expect((await session.request('/api/sessions')).status).toBe(200)
+    expect(session.connectionInfo().authMode).toBe('loopback-direct')
   })
 })
