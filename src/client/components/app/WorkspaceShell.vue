@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Profile } from '@shared/types'
 import AgentAvatar from '@/components/common/AgentAvatar.vue'
+import type { ProfileIdentityInput } from '@/api/profiles'
 import AppIcon from '@/components/common/AppIcon.vue'
 import BrandMark from '@/components/common/BrandMark.vue'
 import SettingsCenterDialog from '@/components/app/SettingsCenterDialog.vue'
@@ -80,7 +81,7 @@ const emit = defineEmits<{
   toggleTheme: []
   setTheme: [theme: 'light' | 'dark' | 'system']
   selectProfile: [profile: string]
-  saveIdentity: [input: { title: string; avatarDataURL?: string | null }]
+  saveIdentity: [input: ProfileIdentityInput]
   closeInspector: []
 }>()
 

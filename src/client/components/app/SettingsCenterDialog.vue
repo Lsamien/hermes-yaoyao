@@ -10,6 +10,7 @@ import SystemManagementPanel from '@/components/app/SystemManagementPanel.vue'
 import SystemOverviewPanel from '@/components/app/SystemOverviewPanel.vue'
 import SystemUpdatePanel from '@/components/app/SystemUpdatePanel.vue'
 import AgentAvatar from '@/components/common/AgentAvatar.vue'
+import type { ProfileIdentityInput } from '@/api/profiles'
 import AppIcon from '@/components/common/AppIcon.vue'
 
 type SettingsPage =
@@ -72,7 +73,7 @@ const emit = defineEmits<{
   close: []
   logout: []
   'select-profile': [profile: string]
-  'save-identity': [input: { title: string; avatarDataURL?: string | null }]
+  'save-identity': [input: ProfileIdentityInput]
   'set-theme': [theme: ThemePreference]
 }>()
 

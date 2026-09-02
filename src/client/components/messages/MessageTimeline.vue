@@ -84,6 +84,13 @@ let thinkingStartedAt = 0
 
 const formatTime = formatMessageTime
 
+function avatarState(message: UiMessage): 'idle' | 'working' | 'waiting' | 'failure' {
+  if (message.status === 'streaming') return 'working'
+  if (message.status === 'pending' || message.status === 'unknown-receipt') return 'waiting'
+  if (message.status === 'failed') return 'failure'
+  return 'idle'
+}
+
 function delegationSummary(metadata?: Record<string, unknown>): string {
   const total = Number(metadata?.task_count ?? 0)
   const completed = Number(metadata?.completed_count ?? 0)
@@ -259,7 +266,7 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
             'message--assistant-anonymous': message.role === 'assistant' && !showAssistantIdentity,
           }]"
         >
-          <AgentAvatar v-if="message.role !== 'user' && (message.role !== 'assistant' || showAssistantIdentity)" class="message__avatar" :name="message.author || message.profile || (message.role === 'assistant' ? '夭' : '系')" :avatar="message.profile ? agentAvatars[message.profile] || '' : ''" :size="27" />
+          <AgentAvatar v-if="message.role !== 'user' && (message.role !== 'assistant' || showAssistantIdentity)" class="message__avatar" :name="message.author || message.profile || (message.role === 'assistant' ? '夭' : '系')" :avatar="message.profile ? agentAvatars[message.profile] || '' : ''" :size="27" :state="avatarState(message)" />
           <div class="message__body">
             <template v-if="message.timelineKind === 'delegation-complete'">
               <details class="delegation-event">

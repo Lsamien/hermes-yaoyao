@@ -4,6 +4,19 @@ import type { Profile } from '@shared/types'
 import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import AppIcon from '@/components/common/AppIcon.vue'
 import { listModelCatalog } from '@/api/agentManagement'
+import type { ProfileIdentityInput } from '@/api/profiles'
+import {
+  AGENT_MASCOT_COLORS,
+  AGENT_MASCOT_EXPRESSIONS,
+  AGENT_MASCOT_SHAPES,
+  agentIdentityFromProfile,
+  decodeAgentMascotAvatar,
+  defaultAgentIdentity,
+  encodeAgentAvatar,
+  type AgentAvatarMode,
+  type AgentMascotExpression,
+  type AgentMascotShape,
+} from '@shared/agentIdentity'
 
 const props = withDefaults(defineProps<{
   profile: Profile
@@ -22,29 +35,47 @@ const props = withDefaults(defineProps<{
   defaultModelLabel: '',
 })
 const emit = defineEmits<{
-  save: [input: { title: string; avatarDataURL?: string | null }]
+  save: [input: ProfileIdentityInput]
   'dirty-change': [dirty: boolean]
 }>()
 
 const title = ref('')
 const avatarDataURL = ref<string | null>(null)
-const avatarTouched = ref(false)
+const avatarMode = ref<AgentAvatarMode>('mascot')
+const shape = ref<AgentMascotShape>('circle')
+const color = ref('#009957')
+const expression = ref<AgentMascotExpression>('friendly')
 const localError = ref('')
 const fileInput = ref<HTMLInputElement>()
-const baseline = ref<{ title: string; avatarDataURL: string | null }>({ title: '', avatarDataURL: null })
+const baseline = ref('')
 const resolvedDefaultModelLabel = ref('')
 let profileGeneration = 0
 let modelLoadGeneration = 0
+
+function currentFingerprint(): string {
+  return JSON.stringify({
+    title: title.value,
+    avatarMode: avatarMode.value,
+    shape: shape.value,
+    color: color.value,
+    expression: expression.value,
+    avatarDataURL: avatarDataURL.value,
+  })
+}
 
 function resetFromProfile() {
   profileGeneration += 1
   const profile = props.profile
   const nextTitle = profile.agentName || profile.displayName || profile.name || ''
-  const nextAvatarDataURL = profile.agentAvatar || null
+  const mascot = decodeAgentMascotAvatar(profile.agentAvatar)
+  const fallback = defaultAgentIdentity(profile.name, nextTitle)
   title.value = nextTitle
-  avatarDataURL.value = nextAvatarDataURL
-  baseline.value = { title: nextTitle, avatarDataURL: nextAvatarDataURL }
-  avatarTouched.value = false
+  avatarDataURL.value = profile.agentAvatar?.startsWith('data:image/') ? profile.agentAvatar : null
+  avatarMode.value = avatarDataURL.value ? 'image' : 'mascot'
+  shape.value = mascot?.shape ?? fallback.shape
+  color.value = mascot?.color ?? fallback.color
+  expression.value = mascot?.expression ?? fallback.expression
+  baseline.value = currentFingerprint()
   localError.value = ''
 }
 
@@ -63,8 +94,38 @@ watch([() => props.profile.name, () => props.defaultModelLabel], async () => {
   } catch { /* Keep the Profile payload as a read-only fallback. */ }
 }, { immediate: true })
 
-const dirty = computed(() => title.value !== baseline.value.title || avatarDataURL.value !== baseline.value.avatarDataURL)
+const previewAvatar = computed(() => encodeAgentAvatar({
+  ...agentIdentityFromProfile({ name: props.profile.name, display_name: title.value }),
+  displayName: title.value,
+  avatarMode: avatarMode.value,
+  shape: shape.value,
+  color: color.value,
+  expression: expression.value,
+  ...(avatarDataURL.value ? { imageDataURL: avatarDataURL.value } : {}),
+}))
+const identityFingerprint = computed(currentFingerprint)
+const dirty = computed(() => identityFingerprint.value !== baseline.value)
 watch(dirty, value => emit('dirty-change', value), { immediate: true })
+
+const shapeLabel: Record<AgentMascotShape, string> = { circle: '圆形', square: '方形', triangle: '短三角' }
+const expressionLabel: Record<AgentMascotExpression, string> = {
+  friendly: '友好', focused: '专注', curious: '好奇', calm: '沉稳',
+}
+
+function mascotPreview(overrides: Partial<{
+  shape: AgentMascotShape
+  color: string
+  expression: AgentMascotExpression
+}> = {}): string {
+  return encodeAgentAvatar({
+    ...agentIdentityFromProfile({ name: props.profile.name, display_name: title.value }),
+    displayName: title.value,
+    avatarMode: 'mascot',
+    shape: overrides.shape ?? shape.value,
+    color: overrides.color ?? color.value,
+    expression: overrides.expression ?? expression.value,
+  })
+}
 
 function readImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -104,7 +165,7 @@ async function chooseAvatar(event: Event) {
     const nextAvatar = await resizeImage(await readImage(file))
     if (generation !== profileGeneration) return
     avatarDataURL.value = nextAvatar
-    avatarTouched.value = true
+    avatarMode.value = 'image'
     localError.value = ''
   } catch (cause) {
     localError.value = cause instanceof Error ? cause.message : '处理头像失败'
@@ -116,7 +177,14 @@ async function chooseAvatar(event: Event) {
 function submit() {
   const normalized = title.value.trim().replace(/\s+/g, ' ')
   if (!normalized) { localError.value = '请输入 Agent 名称'; return }
-  emit('save', { title: normalized, ...(avatarTouched.value ? { avatarDataURL: avatarDataURL.value } : {}) })
+  emit('save', {
+    title: normalized,
+    avatarMode: avatarMode.value,
+    shape: shape.value,
+    color: color.value,
+    expression: expression.value,
+    avatarDataURL: avatarDataURL.value,
+  })
   title.value = normalized
 }
 </script>
@@ -124,18 +192,45 @@ function submit() {
 <template>
   <form :id="formId" class="identity-form" @submit.prevent="submit">
     <div class="identity-avatar">
-      <AgentAvatar :name="title || profile.name" :avatar="avatarDataURL || ''" :size="104" />
+      <AgentAvatar :name="title || profile.name" :avatar="previewAvatar" :size="112" state="idle" />
       <div>
-        <strong>Bots 头像</strong>
-        <small>会压缩为 256 px，并写入原生 Agent 头像；所有设备同步。</small>
+        <strong>自定义角色</strong>
+        <small>由夭夭独立保存并同步到 Web 与 iOS，不再读取 Bots mode 的头像。</small>
         <p>
-          <button class="quiet-button" type="button" :disabled="busy" @click="fileInput?.click()"><AppIcon name="image" :size="14" />选择图片</button>
-          <button v-if="avatarDataURL" class="quiet-button" type="button" :disabled="busy" @click="avatarDataURL = null; avatarTouched = true">移除</button>
+          <button class="quiet-button" :class="{ active: avatarMode === 'mascot' }" type="button" :disabled="busy" @click="avatarMode = 'mascot'">动态吉祥物</button>
+          <button class="quiet-button" :class="{ active: avatarMode === 'image' }" type="button" :disabled="busy || !avatarDataURL" @click="avatarMode = 'image'">上传图片</button>
         </p>
+        <p><button class="quiet-button" type="button" :disabled="busy" @click="fileInput?.click()"><AppIcon name="image" :size="14" />选择图片</button><button v-if="avatarDataURL" class="quiet-button" type="button" :disabled="busy" @click="avatarDataURL = null; avatarMode = 'mascot'">移除图片</button></p>
       </div>
       <input ref="fileInput" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" @change="chooseAvatar" />
     </div>
     <label>名称<input v-model="title" :disabled="busy" maxlength="100" autocomplete="off" /></label>
+    <section v-if="avatarMode === 'mascot'" class="mascot-controls">
+      <div>
+        <strong>形状</strong>
+        <div class="mascot-grid mascot-grid--shape">
+          <button v-for="candidate in AGENT_MASCOT_SHAPES" :key="candidate" type="button" :class="{ selected: shape === candidate }" :aria-pressed="shape === candidate" @click="shape = candidate">
+            <AgentAvatar :name="title || profile.name" :avatar="mascotPreview({ shape: candidate })" :size="44" />
+            <span>{{ shapeLabel[candidate] }}</span>
+          </button>
+        </div>
+      </div>
+      <div>
+        <strong>基础表情</strong>
+        <div class="mascot-grid mascot-grid--expression">
+          <button v-for="candidate in AGENT_MASCOT_EXPRESSIONS" :key="candidate" type="button" :class="{ selected: expression === candidate }" :aria-pressed="expression === candidate" @click="expression = candidate">
+            <AgentAvatar :name="title || profile.name" :avatar="mascotPreview({ expression: candidate })" :size="38" />
+            <span>{{ expressionLabel[candidate] }}</span>
+          </button>
+        </div>
+      </div>
+      <div>
+        <strong>颜色</strong>
+        <div class="color-grid">
+          <button v-for="candidate in AGENT_MASCOT_COLORS" :key="candidate" type="button" :class="{ selected: color === candidate }" :style="{ backgroundColor: candidate }" :aria-label="`使用颜色 ${candidate}`" :aria-pressed="color === candidate" @click="color = candidate" />
+        </div>
+      </div>
+    </section>
     <div class="identity-default-model">
       <strong>默认全局模型</strong>
       <span>{{ resolvedDefaultModelLabel || '服务器未返回默认模型' }}</span>
@@ -151,7 +246,7 @@ function submit() {
 </template>
 
 <style scoped>
-.identity-form{display:grid;max-width:720px}.identity-avatar{display:flex;align-items:flex-start;gap:24px;margin-bottom:32px;padding:0;background:transparent}.identity-avatar>div{display:grid;gap:7px;padding-top:4px}.identity-avatar strong{font-size:16px}.identity-avatar small{max-width:480px;color:var(--text-muted);font-size:13px;line-height:1.55}.identity-avatar p{display:flex;gap:8px;margin:6px 0 0}.identity-form label{display:grid;max-width:480px;gap:8px;color:var(--text-secondary);font-size:14px;font-weight:650}.identity-form input:not(.sr-only){width:100%;min-height:46px;box-sizing:border-box;padding:0 13px;border:1px solid var(--line);border-radius:9px;outline:0;background:var(--surface-raised);color:var(--text-primary);font:14px var(--font-ui);font-weight:400}.identity-form input:focus{border-color:var(--line-strong);box-shadow:0 0 0 3px var(--focus-ring)}.quiet-button,.primary-button,.identity-actions :slotted(.quiet-button),.identity-actions :slotted(.primary-button){display:inline-flex;min-height:40px;align-items:center;justify-content:center;gap:7px;padding:0 14px;border:0;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600}.quiet-button,.identity-actions :slotted(.quiet-button){border:1px solid var(--line);background:var(--surface-raised);color:var(--text-secondary)}.primary-button,.identity-actions :slotted(.primary-button){min-width:118px;background:var(--accent);color:var(--text-on-solid)}.quiet-button:disabled,.primary-button:disabled,.identity-actions :slotted(.quiet-button:disabled),.identity-actions :slotted(.primary-button:disabled){cursor:wait;opacity:.5}.identity-error{margin:14px 0 0;color:var(--danger);font-size:13px}.identity-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:30px;padding-top:18px;border-top:1px solid var(--line)}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.identity-form{display:grid;max-width:720px}.identity-avatar{display:flex;align-items:flex-start;gap:24px;margin-bottom:32px;padding:0;background:transparent}.identity-avatar>div{display:grid;gap:7px;padding-top:4px}.identity-avatar strong{font-size:16px}.identity-avatar small{max-width:480px;color:var(--text-muted);font-size:13px;line-height:1.55}.identity-avatar p{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 0}.identity-form label{display:grid;max-width:480px;gap:8px;color:var(--text-secondary);font-size:14px;font-weight:650}.identity-form input:not(.sr-only){width:100%;min-height:46px;box-sizing:border-box;padding:0 13px;border:1px solid var(--line);border-radius:9px;outline:0;background:var(--surface-raised);color:var(--text-primary);font:14px var(--font-ui);font-weight:400}.identity-form input:focus{border-color:var(--line-strong);box-shadow:0 0 0 3px var(--focus-ring)}.quiet-button,.primary-button,.identity-actions :slotted(.quiet-button),.identity-actions :slotted(.primary-button){display:inline-flex;min-height:40px;align-items:center;justify-content:center;gap:7px;padding:0 14px;border:0;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600}.quiet-button,.identity-actions :slotted(.quiet-button){border:1px solid var(--line);background:var(--surface-raised);color:var(--text-secondary)}.quiet-button.active{border-color:var(--accent);color:var(--text-primary);box-shadow:0 0 0 2px var(--focus-ring)}.primary-button,.identity-actions :slotted(.primary-button){min-width:118px;background:var(--accent);color:var(--text-on-solid)}.quiet-button:disabled,.primary-button:disabled,.identity-actions :slotted(.quiet-button:disabled),.identity-actions :slotted(.primary-button:disabled){cursor:wait;opacity:.5}.identity-error{margin:14px 0 0;color:var(--danger);font-size:13px}.identity-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:30px;padding-top:18px;border-top:1px solid var(--line)}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.mascot-controls{display:grid;gap:22px;margin-top:24px}.mascot-controls>div{display:grid;gap:10px}.mascot-controls strong{color:var(--text-secondary);font-size:13px}.mascot-grid{display:grid;gap:9px}.mascot-grid--shape{grid-template-columns:repeat(3,minmax(0,1fr))}.mascot-grid--expression{grid-template-columns:repeat(4,minmax(0,1fr))}.mascot-grid button{display:flex;min-height:78px;align-items:center;justify-content:center;gap:9px;padding:8px;border:1px solid var(--line);border-radius:12px;background:var(--surface-soft);color:var(--text-secondary);cursor:pointer}.mascot-grid button.selected{border-color:var(--accent);background:var(--surface-raised);color:var(--text-primary);box-shadow:0 0 0 2px var(--focus-ring)}.mascot-grid button span{font-size:12px;font-weight:650}.color-grid{display:flex;flex-wrap:wrap;gap:11px}.color-grid button{width:38px;height:38px;border:3px solid transparent;border-radius:50%;cursor:pointer;box-shadow:inset 0 0 0 1px rgb(255 255 255 / .2)}.color-grid button.selected{border-color:var(--surface);outline:2px solid var(--accent)}
 @media(max-width:600px){.identity-avatar{align-items:flex-start;flex-direction:column}.identity-form label{max-width:none}}
 .identity-default-model{display:grid;max-width:480px;gap:5px;margin-top:20px;padding:13px;border:1px solid var(--line);border-radius:9px;background:var(--surface-soft)}
 .identity-default-model strong{color:var(--text-secondary);font-size:13px}.identity-default-model span{font:12px var(--font-code);overflow-wrap:anywhere}.identity-default-model small{color:var(--text-muted);font-size:11px}

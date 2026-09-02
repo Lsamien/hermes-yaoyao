@@ -2,6 +2,17 @@ import type { JsonValue, ModelOption, Profile } from '@shared/types'
 import { apiRequest, unwrapData } from './client'
 import { normalizeModel, normalizeProfile, record, values } from '@/utils/normalize'
 import { ChatRpcSocket } from './realtime'
+import {
+  AGENT_MASCOT_EXPRESSIONS,
+  AGENT_MASCOT_SHAPES,
+  YAOYAO_AGENT_IDENTITY_NAMESPACE,
+  agentIdentityFromProfile,
+  agentIdentityMetadata,
+  encodeAgentAvatar,
+  type AgentAvatarMode,
+  type AgentMascotExpression,
+  type AgentMascotShape,
+} from '@shared/agentIdentity'
 
 const MAX_AGENT_NAME_LENGTH = 100
 const MAX_AGENT_AVATAR_LENGTH = 2_800_000
@@ -9,7 +20,10 @@ const avatarDataURLPattern = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+
 
 export type ProfileIdentityInput = {
   title: string
-  /** Undefined means the user did not change the native Desktop avatar. */
+  avatarMode: AgentAvatarMode
+  shape: AgentMascotShape
+  color: string
+  expression: AgentMascotExpression
   avatarDataURL?: string | null
 }
 
@@ -35,13 +49,22 @@ function validateIdentity(input: ProfileIdentityInput): ProfileIdentityInput {
   if (avatarDataURL && (avatarDataURL.length > MAX_AGENT_AVATAR_LENGTH || !avatarDataURLPattern.test(avatarDataURL))) {
     throw new Error('头像必须是小于 2 MB 的 PNG、JPEG 或 WebP 图片')
   }
-  return { title, avatarDataURL }
+  if (!AGENT_MASCOT_SHAPES.includes(input.shape)) throw new Error('请选择有效的头像形状')
+  if (!AGENT_MASCOT_EXPRESSIONS.includes(input.expression)) throw new Error('请选择有效的基础表情')
+  if (!/^#[0-9a-f]{6}$/i.test(input.color)) throw new Error('请选择有效的头像颜色')
+  return {
+    title,
+    avatarMode: input.avatarMode === 'image' && avatarDataURL ? 'image' : 'mascot',
+    shape: input.shape,
+    color: input.color.toLowerCase(),
+    expression: input.expression,
+    avatarDataURL,
+  }
 }
 
 /**
- * Desktop Bots owns both values: its title lives in the Hermes metadata
- * namespace and its avatar is the native profile asset. Reading metadata
- * before writing preserves Bot chat bindings.
+ * Yaoyao owns this identity in a dedicated Hermes metadata namespace. The
+ * native Desktop Bots title/avatar are deliberately left untouched.
  */
 export async function updateProfileIdentity(profile: Profile, input: ProfileIdentityInput): Promise<void> {
   const identity = validateIdentity(input)
@@ -51,46 +74,54 @@ export async function updateProfileIdentity(profile: Profile, input: ProfileIden
     const listed = await control.request('profiles.list', { include_sessions: false })
     const current = readProfileEntries(listed).find(item => String(item.name ?? '') === profile.name)
     if (!current) throw new Error('该 Agent 已不存在，请刷新后重试')
-    const uiMeta = jsonObject(current.ui_meta)
-    const botMeta: Record<string, JsonValue> = { ...jsonObject(uiMeta['hermes-bots']), title: identity.title }
     const revisions = jsonObject(current.ui_meta_revisions)
-    const revision = revisions['hermes-bots']
+    const revision = typeof revisions[YAOYAO_AGENT_IDENTITY_NAMESPACE] === 'number'
+      ? revisions[YAOYAO_AGENT_IDENTITY_NAMESPACE] as number
+      : 0
+    const currentIdentity = agentIdentityFromProfile(current)
+    const nextIdentity = {
+      ...currentIdentity,
+      displayName: identity.title,
+      avatarMode: identity.avatarMode,
+      shape: identity.shape,
+      color: identity.color,
+      expression: identity.expression,
+      ...(identity.avatarDataURL ? { imageDataURL: identity.avatarDataURL } : {}),
+    }
+    if (!identity.avatarDataURL) delete nextIdentity.imageDataURL
     await control.request('profiles.configure', {
       name: profile.name,
-      ui_meta: { 'hermes-bots': botMeta },
-      ...(typeof revision === 'number' ? { ui_meta_expected_revisions: { 'hermes-bots': revision } } : {}),
+      ui_meta: {
+        [YAOYAO_AGENT_IDENTITY_NAMESPACE]: agentIdentityMetadata(nextIdentity) as Record<string, JsonValue>,
+      },
+      ui_meta_expected_revisions: {
+        [YAOYAO_AGENT_IDENTITY_NAMESPACE]: revision,
+      },
     })
-    if (identity.avatarDataURL !== undefined) {
-      await control.request('profiles.set_asset', {
-        name: profile.name,
-        asset: 'avatar',
-        ...(identity.avatarDataURL ? { data: identity.avatarDataURL } : { clear: true }),
-      })
-    }
   } finally {
     control.close()
   }
 }
 
-/** Fetch the native Desktop Bots avatar asset for every profile that has one. */
-export async function getProfileAvatarDataURLs(profiles: Profile[]): Promise<Record<string, string>> {
+/** Fetch Yaoyao-owned identity for every profile. */
+export async function getProfileIdentities(profiles: Profile[]): Promise<Record<string, { displayName: string; avatar: string }>> {
   if (!profiles.length) return {}
   const allowed = new Set(profiles.map(profile => profile.name))
   const control = new ChatRpcSocket()
   await control.connect()
   try {
     const listed = await control.request('profiles.list', { include_sessions: false })
-    const names = readProfileEntries(listed)
-      .filter(item => allowed.has(String(item.name ?? '')) && item.has_avatar === true)
-      .map(item => String(item.name))
-    const entries = await Promise.all(names.map(async name => {
-      const asset = jsonObject(await control.request('profiles.get_asset', { name, asset: 'avatar' }))
-      const data = typeof asset.data === 'string' ? asset.data : ''
-      return data && data.length <= MAX_AGENT_AVATAR_LENGTH && avatarDataURLPattern.test(data)
-        ? [name, data] as const
-        : undefined
-    }))
-    return Object.fromEntries(entries.filter((entry): entry is readonly [string, string] => entry !== undefined))
+    return Object.fromEntries(
+      readProfileEntries(listed)
+        .filter(item => allowed.has(String(item.name ?? '')))
+        .map(item => {
+          const identity = agentIdentityFromProfile(item)
+          return [String(item.name), {
+            displayName: identity.displayName,
+            avatar: encodeAgentAvatar(identity),
+          }]
+        }),
+    )
   } finally {
     control.close()
   }

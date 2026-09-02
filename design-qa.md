@@ -76,3 +76,23 @@
 ## Final result
 
 final result: passed
+
+---
+
+# 自有动态 Agent 角色 Design QA（2026-09-02）
+
+## Evidence
+
+- Source visual language: `/Users/samien/git/OpenMausBot/docs/screenshots/agent-profile-desktop.png`.
+- Implementation screenshot: `/Users/samien/.codex/visualizations/2026/09/02/01a05f7c-9ccc-76f2-99f3-116cd8ca64cb/agent-identity/web-desktop.jpg`.
+- Browser viewport: `1440 × 1024`; fixture: `/?fixture=agent-identity`.
+
+## Review
+
+- OpenMausBot 的渐变、白色眼睛、极简嘴型与状态动效语言得到保留；原细长指针轮廓未复制。
+- 圆形、圆角方形和短三角使用统一视觉面积；短三角接近 1:1 包围盒，尖端未超出同组卡片的光学边界。
+- `working` 的实时 transform 在采样间变化；`notifying` 首屏截图可见提醒光环；页面控制台无 warning/error。
+- 角色名称、三种形状、工作、新消息和等待操作均有可访问名称；减少动态效果由 CSS media query 覆盖。
+- 无剩余 P0、P1 或 P2 视觉问题。
+
+final result: passed

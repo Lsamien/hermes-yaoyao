@@ -3,11 +3,12 @@ import { ref, watch } from 'vue'
 import type { Profile } from '@shared/types'
 import AppIcon from '@/components/common/AppIcon.vue'
 import AgentIdentityPanel from './AgentIdentityPanel.vue'
+import type { ProfileIdentityInput } from '@/api/profiles'
 import ModelServicesPanel from './ModelServicesPanel.vue'
 import DuplexVoicePanel from './DuplexVoicePanel.vue'
 
 const props = defineProps<{ open: boolean; profile?: Profile; busy?: boolean; error?: string; isAdmin?: boolean }>()
-const emit = defineEmits<{ close: []; save: [input: { title: string; avatarDataURL?: string | null }] }>()
+const emit = defineEmits<{ close: []; save: [input: ProfileIdentityInput] }>()
 
 const activeTab = ref<'identity' | 'models' | 'voice'>('identity')
 

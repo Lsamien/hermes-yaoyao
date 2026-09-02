@@ -13,12 +13,26 @@ describe('AgentAvatar', () => {
     expect(wrapper.find('img').attributes('src')).toBe(transparentPng)
   })
 
-  it('keeps the caller background available for the text fallback', () => {
+  it('renders a stable animated mascot when no image is configured', () => {
     const wrapper = mount(AgentAvatar, { props: { name: '丫头' } })
 
     expect(wrapper.classes()).not.toContain('agent-avatar--image')
     expect(wrapper.find('img').exists()).toBe(false)
-    expect(wrapper.text()).toBe('丫')
+    expect(wrapper.find('svg').exists()).toBe(true)
+    expect(wrapper.findAll('.agent-avatar__eye')).toHaveLength(2)
+  })
+
+  it('uses the compact triangle and exposes the notifying motion state', () => {
+    const wrapper = mount(AgentAvatar, {
+      props: {
+        name: 'Scout',
+        avatar: 'yaoyao-mascot:v1:triangle:0ea5c6:curious',
+        state: 'notifying',
+      },
+    })
+
+    expect(wrapper.classes()).toContain('agent-avatar--notifying')
+    expect(wrapper.find('svg path[fill^="url"]').exists()).toBe(true)
   })
 
   it('keeps a group-message image transparent when MessageTimeline adds its fallback class', () => {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import WorkspaceShell from '@/components/app/WorkspaceShell.vue'
-import { updateProfileIdentity } from '@/api/profiles'
+import { updateProfileIdentity, type ProfileIdentityInput } from '@/api/profiles'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 
@@ -25,7 +25,7 @@ const identityResetVersion = ref(0)
 
 async function logout() { await auth.logout() }
 function selectProfile(name: string) { auth.selectProfile(name) }
-async function saveIdentity(input: { title: string; avatarDataURL?: string | null }) {
+async function saveIdentity(input: ProfileIdentityInput) {
   const profile = auth.activeProfile
   if (!profile) return
   identityBusy.value = true

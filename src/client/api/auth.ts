@@ -1,7 +1,7 @@
 import type { BootstrapResponse, CurrentUser, JsonValue, Profile } from '@shared/types'
 import { apiRequest, setApiCsrfToken, unwrapData } from './client'
 import { bool, normalizeProfile, normalizeUser, record, string, values } from '@/utils/normalize'
-import { getProfileAvatarDataURLs } from './profiles'
+import { getProfileIdentities } from './profiles'
 
 function normalizeBootstrap(payload: unknown): BootstrapResponse {
   const root = record(unwrapData(payload as never))
@@ -57,8 +57,8 @@ export async function fetchProfiles(): Promise<Profile[]> {
   return values(payload.profiles ?? payload.items ?? payload).map(normalizeProfile)
 }
 
-export async function fetchProfileAvatars(profiles: Profile[]): Promise<Record<string, string>> {
-  return getProfileAvatarDataURLs(profiles)
+export async function fetchProfileIdentities(profiles: Profile[]): Promise<Record<string, { displayName: string; avatar: string }>> {
+  return getProfileIdentities(profiles)
 }
 
 export async function fetchCurrentUser(): Promise<CurrentUser | undefined> {

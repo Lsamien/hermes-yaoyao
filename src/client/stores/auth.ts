@@ -105,10 +105,13 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function refreshProfileAvatars(): Promise<void> {
-    const avatars = await authApi.fetchProfileAvatars(profiles.value)
+    const identities = await authApi.fetchProfileIdentities(profiles.value)
     profiles.value = profiles.value.map(profile => ({
       ...profile,
-      ...(avatars[profile.name] ? { agentAvatar: avatars[profile.name] } : {}),
+      ...(identities[profile.name] ? {
+        agentName: identities[profile.name]!.displayName,
+        agentAvatar: identities[profile.name]!.avatar,
+      } : {}),
     }))
   }
 

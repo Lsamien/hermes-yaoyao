@@ -10,6 +10,7 @@ import { useGroupsStore } from '@/stores/groups'
 import { useKanbanStore } from '@/stores/kanban'
 import { useThemeStore } from '@/stores/theme'
 import { reconcileYaoyaoPlugin } from '@/api/systemUpdate'
+import AgentIdentityFixture from '@/components/app/AgentIdentityFixture.vue'
 
 const auth = useAuthStore()
 const chat = useChatStore()
@@ -17,6 +18,8 @@ const groups = useGroupsStore()
 const kanban = useKanbanStore()
 const theme = useThemeStore()
 const route = useRoute()
+const agentIdentityFixture = import.meta.env.DEV
+  && new URLSearchParams(window.location.search).get('fixture') === 'agent-identity'
 
 const pageTitle = computed(() => {
   const name = route.path.startsWith('/groups')
@@ -44,11 +47,14 @@ watch(() => auth.isAuthenticated, authenticated => {
   }
 })
 
-onMounted(() => auth.bootstrap())
+onMounted(() => {
+  if (!agentIdentityFixture) void auth.bootstrap()
+})
 </script>
 
 <template>
-  <LoadingScreen v-if="auth.status === 'checking'" />
+  <AgentIdentityFixture v-if="agentIdentityFixture" />
+  <LoadingScreen v-else-if="auth.status === 'checking'" />
   <LoginView v-else-if="!auth.isAuthenticated" />
   <PasswordChangeView v-else-if="auth.user?.mustChangePassword" />
   <RouterView v-else />

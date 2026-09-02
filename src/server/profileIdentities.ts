@@ -2,6 +2,10 @@ import WebSocket from 'ws'
 import type { ServerConfig } from './config.js'
 import { HttpError } from './errors.js'
 import type { UpstreamServiceSession } from './localAuth.js'
+import {
+  agentIdentityFromProfile,
+  encodeAgentAvatar,
+} from '../shared/agentIdentity.js'
 
 export interface RemoteProfileIdentity {
   name: string
@@ -50,7 +54,6 @@ export class UpstreamProfileIdentityService {
         maxPayload: 36 * 1_024 * 1_024,
       })
       const identities = new Map<string, RemoteProfileIdentity>()
-      const avatarRequests = new Map<string, string>()
       let requestedProfiles = false
       let finished = false
       const timeout = setTimeout(() => finishError(new Error('profile identity request timed out')), 30_000)
@@ -93,38 +96,19 @@ export class UpstreamProfileIdentityService {
               ? object(outer.profile) : outer
             const name = typeof profile.name === 'string' ? profile.name.trim() : ''
             if (!name) continue
-            const meta = object(object(profile.ui_meta)['hermes-bots'])
-            const title = [meta.title, profile.display_name, profile.description, name]
-              .find(value => typeof value === 'string' && value.trim()) as string
+            const agentIdentity = agentIdentityFromProfile(profile)
             const identity: RemoteProfileIdentity = {
               name,
-              displayName: title.trim(),
+              displayName: agentIdentity.displayName,
               model: typeof profile.model === 'string' ? profile.model : '',
-              ...(typeof meta.color === 'string' && /^#[0-9a-f]{6}$/i.test(meta.color)
-                ? { color: meta.color } : {}),
+              color: agentIdentity.color,
+              avatar: encodeAgentAvatar(agentIdentity),
             }
             identities.set(name, identity)
-            if (profile.has_avatar === true) {
-              const id = `avatar-${avatarRequests.size}`
-              avatarRequests.set(id, name)
-              send(id, 'profiles.get_asset', { name, asset: 'avatar' })
-            }
           }
-          if (avatarRequests.size === 0) finish()
+          finish()
           return
         }
-        const id = String(frame.id ?? '')
-        const name = avatarRequests.get(id)
-        if (!name) return
-        avatarRequests.delete(id)
-        const data = object(frame.result).data
-        if (typeof data === 'string'
-          && data.length <= 2_800_000
-          && /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/i.test(data)) {
-          const identity = identities.get(name)
-          if (identity) identity.avatar = data
-        }
-        if (avatarRequests.size === 0) finish()
       })
       socket.once('error', finishError)
       socket.once('unexpected-response', () => finishError(new Error('Hermes rejected identity socket')))
