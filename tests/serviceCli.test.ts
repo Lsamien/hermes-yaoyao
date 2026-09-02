@@ -15,7 +15,7 @@ describe('hermes-yaoyao LaunchAgent plist', () => {
     expect(launchAgentPlist()).toContain('<key>HERMES_YAOYAO_SUPERVISE_DASHBOARD</key>')
   })
 
-  it('binds managed Web and Dashboard services to the trusted LAN by default', () => {
+  it('binds managed Web to the trusted LAN and enables local Dashboard supervision by default', () => {
     const plist = launchAgentPlist({ environment: {} })
 
     expect(plist).toContain('<key>HERMES_YAOYAO_HOST</key>\n      <string>0.0.0.0</string>')

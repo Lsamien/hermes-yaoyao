@@ -20,6 +20,7 @@ import { parse, serialize } from 'cookie'
 import { HttpError } from './errors.js'
 import { appendSetCookies } from './security.js'
 import { CookieJar, type UpstreamRequestOptions, type UpstreamResponse, UpstreamClient } from './upstream.js'
+import { allowsLocalAuthorization, isLocalAuthorizationTarget, localSessionToken } from './loopbackAuthorization.js'
 
 const SESSION_COOKIE = 'hermes_yaoyao_session'
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
@@ -302,17 +303,6 @@ export class LocalAuthStore {
     this.#writeUpstreamCredentials(credentials)
   }
 
-  ensureUpstreamCredentials(): UpstreamCredentials {
-    const existing = this.upstreamCredentials()
-    if (existing) return existing
-    const credentials = {
-      username: 'yaoyao-service',
-      password: randomBytes(32).toString('base64url'),
-    }
-    this.#writeUpstreamCredentials(credentials)
-    return credentials
-  }
-
   #writeUpstreamCredentials(credentials: UpstreamCredentials): void {
     const username = canonicalUsername(credentials.username)
     const password = validatePassword(credentials.password, true)
@@ -455,6 +445,7 @@ export class UpstreamServiceSession {
   #generation = 0
   #authMode: 'unknown' | 'loopback-token' | 'loopback-direct' | 'password' = 'unknown'
   #lastVerifiedAt: number | undefined
+  #localAuthorization = false
   readonly #now: () => number
   readonly #validationTTL: number
 
@@ -468,11 +459,40 @@ export class UpstreamServiceSession {
     client.setReauthenticationHandler(this.#jar, async () => {
       this.#syncCredentials()
       this.#validatedUntil = 0
-      await this.ensure()
+      await this.#renewAuthorization(this.#generation)
     })
   }
 
   get jar(): CookieJar { return this.#jar }
+  get authorizationMode(): 'local' | 'account' { return this.#localAuthorization ? 'local' : 'account' }
+
+  async webSocketCredential(): Promise<{ name: 'token' | 'ticket'; value: string }> {
+    await this.ensure()
+    if (this.#localAuthorization) {
+      if (!this.#jar.sessionToken) await this.#renewAuthorization(this.#generation)
+      else {
+        // A restarted Hermes rotates its process token even within our REST
+        // validation lease. Validate before a new socket; a 401 renews once.
+        const check = await this.client.request('/api/profiles', this.#jar, { cache: 'reload' })
+        if (check.status !== 200) throw new HttpError(502, 'Hermes 本机会话令牌验证失败', 'local_authorization_rejected')
+      }
+      if (this.#localAuthorization && this.#jar.sessionToken) return { name: 'token', value: this.#jar.sessionToken }
+    }
+    let response = await this.request('/api/auth/ws-ticket', { method: 'POST' })
+    // Auth endpoints are excluded from generic request retries. Repair an
+    // expired account cookie or a restarted upstream's changed auth mode here.
+    if (response.status === 401) {
+      await this.#renewAuthorization(this.#generation)
+      if (this.#localAuthorization && this.#jar.sessionToken) return { name: 'token', value: this.#jar.sessionToken }
+      response = await this.request('/api/auth/ws-ticket', { method: 'POST' })
+    }
+    if (this.#localAuthorization && this.#jar.sessionToken) return { name: 'token', value: this.#jar.sessionToken }
+    if (response.status < 200 || response.status >= 300) throw new HttpError(502, 'Hermes 未签发实时连接凭据', 'upstream_auth_failed')
+    let value: unknown
+    try { value = JSON.parse(response.body.toString()).ticket } catch { /* fail closed */ }
+    if (typeof value !== 'string' || !value.trim()) throw new HttpError(502, 'Hermes 返回了空实时连接凭据', 'invalid_ticket')
+    return { name: 'ticket', value: value.trim() }
+  }
 
   connectionInfo(): {
     endpoint: string
@@ -511,6 +531,8 @@ export class UpstreamServiceSession {
       this.#validatedUntil = 0; this.#ensureTask = undefined; this.#loginTask = undefined
       this.#jar.replace(new CookieJar())
       this.#authMode = 'unknown'
+      this.#localAuthorization = false
+      this.#lastVerifiedAt = undefined
       this.client.invalidateReads()
     }
     this.#credentialFingerprint = fingerprint
@@ -525,22 +547,25 @@ export class UpstreamServiceSession {
     // Probe into a temporary jar. A delayed old probe must not overwrite freshly
     // rotated service credentials/cookies in the live jar.
     const probe = new CookieJar(this.#jar.header)
+    probe.setSessionToken(this.#jar.sessionToken)
     const status = await this.client.request('/api/status', probe)
     if (status.status < 200 || status.status >= 300) throw new HttpError(502, '9119 状态不可用', 'upstream_unavailable')
     const parsed = JSON.parse(status.body.toString('utf8')) as Record<string, unknown>
     this.#checkGeneration(generation)
-    if (parsed.auth_required !== true && parsed.authRequired !== true) {
-      if (!this.#isLoopbackUpstream()) {
-        throw new HttpError(502, '9119 未启用认证，且不是本机回环地址', 'upstream_auth_unsafe')
-      }
-      this.#authMode = await this.#loadLoopbackToken(probe)
+    if (allowsLocalAuthorization(parsed)) {
+      this.#requireLocalTarget()
+      const authMode = await this.#loadLoopbackToken(probe)
         ? 'loopback-token'
         : 'loopback-direct'
       this.#checkGeneration(generation)
+      this.#authMode = authMode
+      this.#localAuthorization = true
       this.#jar.replace(probe)
       return
     }
     this.#authMode = 'password'
+    this.#localAuthorization = false
+    probe.setSessionToken(undefined)
     const me = await this.client.request('/api/auth/me', probe)
     this.#checkGeneration(generation)
     if (me.status >= 200 && me.status < 300) {
@@ -563,15 +588,50 @@ export class UpstreamServiceSession {
   async #login(generation: number): Promise<void> {
     if (this.#loginTask) return this.#loginTask
     const credentials = this.credentials()
-    if (!credentials) throw new HttpError(503, '尚未配置 9119 服务账号', 'upstream_credentials_required')
+    if (!credentials) throw new HttpError(503, '9119 当前启用了账号鉴权，请配置服务账号；本机授权需由回环 9119 明确启用', 'upstream_credentials_required')
     const jar = new CookieJar()
     const task = this.#authenticate({ ...credentials }, jar).then(() => {
       this.#checkGeneration(generation)
       this.#jar.replace(jar)
       this.#authMode = 'password'
+      this.#localAuthorization = false
       this.client.invalidateReads()
-      this.#validatedUntil = this.#now() + this.#validationTTL
+      this.#lastVerifiedAt = this.#now()
+      this.#validatedUntil = this.#lastVerifiedAt + this.#validationTTL
     }).finally(() => { if (this.#loginTask === task) this.#loginTask = undefined })
+    this.#loginTask = task
+    return task
+  }
+
+  #requireLocalTarget(): void {
+    if (!isLocalAuthorizationTarget(this.client.baseURL)) throw new HttpError(403, '免账号本机授权仅支持直连 127.0.0.1 或 ::1；远程上游必须启用鉴权', 'loopback_auth_required')
+  }
+
+  async #renewAuthorization(generation: number): Promise<void> {
+    if (this.#loginTask) return this.#loginTask
+    const probe = new CookieJar()
+    const status = await this.client.request('/api/status', probe)
+    if (status.status !== 200) throw new HttpError(502, '无法检查 9119 授权模式', 'upstream_auth_unavailable')
+    const mode = JSON.parse(status.body.toString()) as Record<string, unknown>
+    this.#checkGeneration(generation)
+    if (this.#loginTask) return this.#loginTask
+    if (!allowsLocalAuthorization(mode)) return this.#login(generation)
+    this.#requireLocalTarget()
+    const task = (async () => {
+      const page = await this.client.request('/', probe, { maxResponseBytes: 2 * 1024 * 1024, cache: 'reload' })
+      if (page.status !== 200) throw new HttpError(502, 'Hermes 本机授权入口不可用', 'local_authorization_unavailable')
+      const token = localSessionToken(page.body.toString('utf8'))
+      if (!token) throw new HttpError(502, 'Hermes 未提供本机会话令牌；不会降级或自动修改账号配置', 'local_authorization_unavailable')
+      probe.setSessionToken(token)
+      const check = await this.client.request('/api/profiles', probe, { cache: 'reload' })
+      if (check.status !== 200) throw new HttpError(502, 'Hermes 本机会话令牌验证失败', 'local_authorization_rejected')
+      this.#checkGeneration(generation)
+      this.#jar.replace(probe); this.#localAuthorization = true
+      this.#authMode = 'loopback-token'
+      this.client.invalidateReads()
+      this.#lastVerifiedAt = this.#now()
+      this.#validatedUntil = this.#lastVerifiedAt + this.#validationTTL
+    })().finally(() => { if (this.#loginTask === task) this.#loginTask = undefined })
     this.#loginTask = task
     return task
   }
@@ -594,17 +654,19 @@ export class UpstreamServiceSession {
   }
 
   async #loadLoopbackToken(jar: CookieJar): Promise<boolean> {
+    this.#requireLocalTarget()
+    jar.setSessionToken(undefined)
     const response = await this.client.request('/', jar, {
       headers: { accept: 'text/html' },
       maxResponseBytes: 2 * 1_024 * 1_024,
+      cache: 'reload',
     })
     if (response.status < 200 || response.status >= 300) return false
-    const html = response.body.toString('utf8')
-    const match = /window\.__HERMES_SESSION_TOKEN__\s*=\s*("(?:\\.|[^"\\])*")/.exec(html)
-    let token: unknown
-    try { token = match ? JSON.parse(match[1]!) : undefined } catch { token = undefined }
-    if (typeof token !== 'string' || token.length < 16 || token.length > 4_096) return false
+    const token = localSessionToken(response.body.toString('utf8'))
+    if (!token) return false
     jar.setSessionToken(token)
+    const check = await this.client.request('/api/profiles', jar, { cache: 'reload' })
+    if (check.status !== 200) throw new HttpError(502, 'Hermes 本机会话令牌验证失败', 'local_authorization_rejected')
     return true
   }
 }

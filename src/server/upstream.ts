@@ -1,6 +1,7 @@
 import type Koa from 'koa'
 import { createHash } from 'node:crypto'
 import { readCacheContext, readPolicy, mutationTags, UpstreamReadCache } from './upstreamReadCache.js'
+import { isLocalAuthorizationTarget, LoopbackTransport } from './loopbackAuthorization.js'
 import { parse } from 'cookie'
 import { HttpError } from './errors.js'
 import { appendSetCookies, CSRF_COOKIE } from './security.js'
@@ -115,6 +116,7 @@ export interface UpstreamRequestOptions {
 
 export class UpstreamClient {
   readonly readCache: UpstreamReadCache
+  private loopback = new LoopbackTransport()
   private reauthentication = new WeakMap<CookieJar, () => Promise<void>>()
   constructor(
     readonly baseURL: URL,
@@ -122,6 +124,8 @@ export class UpstreamClient {
     readonly publicSecure = false,
     now: () => number = Date.now,
   ) { this.readCache = new UpstreamReadCache(now) }
+  get directAgent() { return isLocalAuthorizationTarget(this.baseURL) ? this.loopback.agent(this.baseURL) : undefined }
+  close(): void { this.readCache.close(); this.loopback.close() }
 
   withReadScope<T>(scope: string, fresh: boolean, run: () => T): T {
     return readCacheContext.run({ scope, fresh }, run)
@@ -155,14 +159,14 @@ export class UpstreamClient {
     const forcedTags = method === 'GET' && (context?.fresh || options.cache === 'reload') ? readPolicy(path, options.search)?.tags : undefined
     if (forcedTags) this.invalidateReads(forcedTags)
     const load = async () => {
-      const sentCookies = jar.header
+      const sentCredentials = JSON.stringify([jar.header, jar.sessionToken])
       let response = await this.fetchResponse(path, jar, options)
       if (response.status === 401 || response.status === 403) this.invalidateReads()
       const renew = this.reauthentication.get(jar)
       if (response.status === 401 && renew && !path.startsWith('/api/auth/') && !path.startsWith('/auth/')) {
         // A parallel request may already have rotated the service cookies. Never replay
         // a whole route handler (it may have performed several writes); repair this one 401 only.
-        if (jar.header === sentCookies) await renew()
+        if (JSON.stringify([jar.header, jar.sessionToken]) === sentCredentials) await renew()
         response = await this.fetchResponse(path, jar, options)
       }
       return response
@@ -176,7 +180,7 @@ export class UpstreamClient {
       if (policy && context) {
         const search = new URLSearchParams(options.search); search.sort()
         const key = createHash('sha256').update(JSON.stringify([
-          context.scope, this.baseURL.href, path, search.toString(), jar.header ?? '',
+          context.scope, this.baseURL.href, path, search.toString(), jar.header ?? '', jar.sessionToken ?? '',
           [...headers.entries()].sort(([a], [b]) => a.localeCompare(b)), options.clientAddress ?? '', options.maxResponseBytes ?? null,
         ])).digest('hex')
         response = await this.readCache.read(key, policy, load)
@@ -221,7 +225,10 @@ export class UpstreamClient {
       if (/^[0-9a-f:.]+$/i.test(clientAddress)) headers.set('x-forwarded-for', clientAddress)
     }
     if (jar.header) headers.set('cookie', jar.header)
-    if (jar.sessionToken) headers.set('x-hermes-session-token', jar.sessionToken)
+    if (jar.sessionToken) {
+      if (!isLocalAuthorizationTarget(this.baseURL)) throw new HttpError(403, 'Local authorization cannot be sent to a remote upstream', 'loopback_auth_required')
+      headers.set('X-Hermes-Session-Token', jar.sessionToken)
+    }
     let body: BodyInit | undefined
     if (options.rawBody !== undefined) {
       body = options.rawBody
@@ -232,16 +239,18 @@ export class UpstreamClient {
 
     let response: Response
     let timeout: ReturnType<typeof setTimeout> | undefined
+    const controller = new AbortController()
     try {
       response = await Promise.race([
-        this.fetchImpl(url, {
+        (isLocalAuthorizationTarget(url) && this.fetchImpl === globalThis.fetch ? this.loopback.fetch.bind(this.loopback) : this.fetchImpl)(url, {
           method: options.method ?? 'GET',
           headers,
           body,
           redirect: 'manual',
+          signal: controller.signal,
         }),
         new Promise<never>((_resolve, reject) => {
-          timeout = setTimeout(() => reject(new Error('request timed out')), 30_000)
+          timeout = setTimeout(() => { controller.abort(); reject(new Error('request timed out')) }, 30_000)
           timeout.unref()
         }),
       ])
@@ -258,10 +267,34 @@ export class UpstreamClient {
       await response.body?.cancel()
       throw new HttpError(502, 'Hermes response exceeded the configured limit', 'upstream_too_large')
     }
-    const bodyBuffer = Buffer.from(await response.arrayBuffer())
-    if (bodyBuffer.byteLength > limit) {
-      throw new HttpError(502, 'Hermes response exceeded the configured limit', 'upstream_too_large')
+    // Enforce limits while reading, including chunked native-token pages without
+    // Content-Length. Do not buffer an unbounded response before checking it.
+    const chunks: Buffer[] = []
+    let bytes = 0
+    const reader = response.body?.getReader()
+    if (reader) {
+      let bodyTimeout: ReturnType<typeof setTimeout> | undefined
+      try {
+        const expired = new Promise<never>((_resolve, reject) => {
+          bodyTimeout = setTimeout(() => {
+            reject(new HttpError(502, 'Hermes response timed out', 'upstream_unavailable'))
+            void reader.cancel().catch(() => {})
+          }, 30_000)
+          bodyTimeout.unref()
+        })
+        while (true) {
+          const part = await Promise.race([reader.read(), expired])
+          if (part.done) break
+          bytes += part.value.byteLength
+          if (bytes > limit) {
+            void reader.cancel().catch(() => {})
+            throw new HttpError(502, 'Hermes response exceeded the configured limit', 'upstream_too_large')
+          }
+          chunks.push(Buffer.from(part.value))
+        }
+      } finally { if (bodyTimeout) clearTimeout(bodyTimeout); reader.releaseLock() }
     }
+    const bodyBuffer = Buffer.concat(chunks, bytes)
     return { status: response.status, headers: response.headers, body: bodyBuffer }
   }
 

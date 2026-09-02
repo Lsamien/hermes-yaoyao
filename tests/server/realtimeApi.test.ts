@@ -15,9 +15,19 @@ import type { ServerConfig } from '../../src/server/config.js'
 const closers: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close() })
 
-async function setup() {
-  const server = createServer()
-  const wss = new WebSocketServer({ server })
+async function setup(local = false) {
+  const localToken = 'fixture_native_loopback_token_123456'
+  const server = createServer((req, res) => {
+    if (req.url === '/api/status') { res.end(JSON.stringify({ auth_required: false })); return }
+    if (req.url === '/') { res.end(`<script>window.__HERMES_SESSION_TOKEN__=${JSON.stringify(localToken)};</script>`); return }
+    if (req.headers['x-hermes-session-token'] !== localToken) { res.writeHead(401); res.end('{}'); return }
+    res.end(JSON.stringify({ profiles: [] }))
+  })
+  const wss = new WebSocketServer({ server, verifyClient: ({ req }) => {
+    const url = new URL(req.url!, 'http://127.0.0.1')
+    return local ? url.searchParams.get('token') === localToken && !url.searchParams.has('ticket')
+      : url.searchParams.get('ticket') === 'upstream-secret'
+  } })
   const peers = new Set<WebSocket>(), commands: any[] = []
   let connectionCount = 0, sequence = 0
   wss.on('connection', peer => {
@@ -36,10 +46,10 @@ async function setup() {
     upstream: new URL(`http://127.0.0.1:${(server.address() as AddressInfo).port}`), allowedHosts: new Set(),
     home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home, mediaOwner: 'test',
     allowInsecureLan: false, insecureLan: false, production: false }
-  const runtime = createAuthenticatedApplication({ config, fetchImpl: (async input => {
+  const runtime = createAuthenticatedApplication({ config, fetchImpl: local ? undefined : (async input => {
     const path = new URL(String(input)).pathname
     if (path === '/api/auth/ws-ticket') return Response.json({ ticket: 'upstream-secret' })
-    if (path === '/api/status') return Response.json({ auth_required: false })
+    if (path === '/api/status') return Response.json({ auth_required: true })
     return Response.json({ user_id: 'service', profiles: [] })
   }) as typeof fetch })
   const node = createNodeServer(runtime)
@@ -70,6 +80,15 @@ async function setup() {
 }
 
 describe('HTTP/SSE realtime API', () => {
+  it('connects to native loopback Hermes without an account for REST and realtime', async () => {
+    const f = await setup(true)
+    const c = await f.create()
+    const result = await f.command(c, 'local-resume', 'session.resume', { session_id: 'stored', profile: 'default' })
+    expect(result.receipt).toMatchObject({ state: 'confirmed', response: { result: { session_id: 'runtime' } } })
+    const invalid = await fetch(`${f.origin}/api/realtime/channels`, { method: 'POST', headers: { ...f.headers, 'X-CSRF-Token': 'bad' }, body: '{"channel":"chat"}' })
+    expect(invalid.status).toBe(403)
+    expect(f.count()).toBe(1)
+  })
   it('enforces CSRF and returns upstream-confirmed receipts', async () => {
     const f = await setup()
     const invalid = await fetch(`${f.origin}/api/realtime/channels`, { method: 'POST', headers: { ...f.headers, 'X-CSRF-Token': 'bad' }, body: '{"channel":"chat"}' })

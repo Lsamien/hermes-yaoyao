@@ -121,7 +121,7 @@ describe('upstream service validation lease', () => {
     const session = new UpstreamServiceSession(client, () => ({ username: 'unused', password: 'unused' }))
 
     expect((await session.request('/api/sessions')).status).toBe(200)
-    expect(paths).toEqual(['/api/status', '/', '/api/sessions'])
+    expect(paths).toEqual(['/api/status', '/', '/api/profiles', '/api/sessions'])
     expect(session.connectionInfo()).toMatchObject({
       endpoint: 'http://127.0.0.1:9119',
       authMode: 'loopback-token',
@@ -130,7 +130,7 @@ describe('upstream service validation lease', () => {
   })
 
   it('refreshes a rotated loopback token once and replays parallel reads', async () => {
-    let activeToken = 'loopback-token-first'
+    let activeToken = 'loopback-token-first-fixture'
     let pageLoads = 0
     const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
       const path = new URL(String(input)).pathname
@@ -143,10 +143,10 @@ describe('upstream service validation lease', () => {
         ? Response.json({ ok: true })
         : Response.json({ detail: 'Unauthorized' }, { status: 401 })
     })
-    const client = new UpstreamClient(new URL('http://localhost:9119'), fetch)
+    const client = new UpstreamClient(new URL('http://127.0.0.1:9119'), fetch)
     const session = new UpstreamServiceSession(client, () => undefined)
     await session.ensure()
-    activeToken = 'loopback-token-second'
+    activeToken = 'loopback-token-second-fixture'
 
     const responses = await Promise.all([
       client.request('/api/sessions/a', session.jar),
@@ -154,6 +154,7 @@ describe('upstream service validation lease', () => {
     ])
     expect(responses.map(response => response.status)).toEqual([200, 200])
     expect(pageLoads).toBe(2)
+    expect(session.connectionInfo().authMode).toBe('loopback-token')
   })
 
   it('refuses token discovery from a non-loopback upstream', async () => {
@@ -161,7 +162,7 @@ describe('upstream service validation lease', () => {
     const client = new UpstreamClient(new URL('http://192.168.1.20:9119'), fetch)
     const session = new UpstreamServiceSession(client, () => undefined)
 
-    await expect(session.ensure()).rejects.toMatchObject({ code: 'upstream_auth_unsafe' })
+    await expect(session.ensure()).rejects.toMatchObject({ code: 'loopback_auth_required' })
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 

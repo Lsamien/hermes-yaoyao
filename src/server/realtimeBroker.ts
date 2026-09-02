@@ -11,6 +11,7 @@ export interface RealtimePrincipal {
   upstreamKey: string
   instanceKey?: string
   paired: boolean
+  agent?: WebSocket.ClientOptions['agent']
   valid(): boolean
   authorize?(kind: 'chat' | 'groups', method?: string): void
   url(channel: 'chat' | 'groups', anchor?: { epoch: string; cursor: number }): Promise<URL>
@@ -260,7 +261,7 @@ export class RealtimeBroker {
       const url = await u.principal.url('chat')
       if (this.closed) throw new Error('Broker closed')
       await new Promise<void>((resolve, reject) => {
-        const ws = new WebSocket(url, { headers: { Origin: `${url.protocol === 'wss:' ? 'https:' : 'http:'}//${url.host}` }, maxPayload: CHAT_MAX_PAYLOAD, handshakeTimeout: 15_000 })
+        const ws = new WebSocket(url, { agent: u.principal.agent, headers: { Origin: `${url.protocol === 'wss:' ? 'https:' : 'http:'}//${url.host}` }, maxPayload: CHAT_MAX_PAYLOAD, handshakeTimeout: 15_000 })
         u.socket = ws
         const timeout = setTimeout(() => { reject(new Error('Upstream ready timeout')); ws.terminate() }, 20_000)
         let ready = false
@@ -383,7 +384,7 @@ export class RealtimeBroker {
     const url = await c.principal.url('groups', c.group)
     const validator = new GroupFrameValidator(c.group!.epoch, c.group!.cursor)
     await new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(url, { headers: { Origin: `${url.protocol === 'wss:' ? 'https:' : 'http:'}//${url.host}` }, maxPayload: 2 * 1024 * 1024, handshakeTimeout: 15_000 })
+      const ws = new WebSocket(url, { agent: c.principal.agent, headers: { Origin: `${url.protocol === 'wss:' ? 'https:' : 'http:'}//${url.host}` }, maxPayload: 2 * 1024 * 1024, handshakeTimeout: 15_000 })
       c.socket = ws
       const timer = setTimeout(() => { ws.terminate(); reject(new Error('Group ready timeout')) }, 20_000)
       ws.on('message', (data, binary) => {

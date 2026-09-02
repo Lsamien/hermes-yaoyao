@@ -1195,20 +1195,16 @@ export class HermesChatPushJobWatcher {
         transport.start()
         return
       }
-      const ticketResponse = await this.upstreamSession.request('/api/auth/ws-ticket', { method: 'POST' })
-      if (ticketResponse.status < 200 || ticketResponse.status >= 300) {
-        throw new Error(`Hermes WebSocket ticket failed (${ticketResponse.status})`)
-      }
-      const ticket = string(parseUpstreamJSON(ticketResponse.body).ticket)
-      if (!ticket) throw new Error('Hermes returned an empty WebSocket ticket')
+      const credential = await this.upstreamSession.webSocketCredential()
       if (!this.#running || generation !== this.#generation) return
       const url = new URL(this.config.upstream)
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
       const prefix = this.config.upstream.pathname === '/' ? '' : this.config.upstream.pathname.replace(/\/$/, '')
       url.pathname = `${prefix}/api/ws`
       url.search = ''
-      url.searchParams.set('ticket', ticket)
+      url.searchParams.set(credential.name, credential.value)
       const socket = new WebSocket(url, {
+        agent: this.upstreamSession.client.directAgent,
         headers: { Origin: this.config.upstream.origin },
         maxPayload: 36 * 1_024 * 1_024,
         handshakeTimeout: 15_000,
@@ -1534,23 +1530,19 @@ export class HermesGroupEventSource implements GroupEventSource {
     anchor: GroupWatchAnchor,
     handlers: { onEnvelope(envelope: GroupEventEnvelope): void; onClose(error?: Error): void },
   ): Promise<GroupEventConnection> {
-    const ticketResponse = await this.upstreamSession.request('/api/auth/ws-ticket', { method: 'POST' })
-    if (ticketResponse.status < 200 || ticketResponse.status >= 300) {
-      throw new Error(`Hermes WebSocket ticket failed (${ticketResponse.status})`)
-    }
-    const ticket = string(parseUpstreamJSON(ticketResponse.body).ticket)
-    if (!ticket) throw new Error('Hermes returned an empty WebSocket ticket')
+    const credential = await this.upstreamSession.webSocketCredential()
     const url = new URL(this.config.upstream)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
     const prefix = this.config.upstream.pathname === '/' ? '' : this.config.upstream.pathname.replace(/\/$/, '')
     url.pathname = `${prefix}/api/plugins/yaoyao/v1/events`
     url.search = ''
-    url.searchParams.set('ticket', ticket)
+    url.searchParams.set(credential.name, credential.value)
     url.searchParams.set('epoch', anchor.epoch)
     url.searchParams.set('cursor', String(anchor.cursor))
 
     return await new Promise<GroupEventConnection>((resolve, reject) => {
       const socket = new WebSocket(url, {
+        agent: this.upstreamSession.client.directAgent,
         headers: { Origin: this.config.upstream.origin },
         maxPayload: 2 * 1_024 * 1_024,
         handshakeTimeout: 15_000,

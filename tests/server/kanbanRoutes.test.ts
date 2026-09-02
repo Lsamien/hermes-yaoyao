@@ -312,7 +312,12 @@ describe('Kanban proxy routes', () => {
     config.production = true
     config.upstreamUsername = 'service-admin'
     config.upstreamPassword = 'service-password'
-    const runtime = createAuthenticatedApplication({ config, fetchImpl: fixture.fetchImpl })
+    const runtime = createAuthenticatedApplication({ config, fetchImpl: (async (input, init) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/api/status') return json({ auth_required: true })
+      if (path === '/api/auth/providers') return json({}, { status: 503 })
+      return fixture.fetchImpl(input, init)
+    }) as typeof fetch })
     runtimes.push(runtime)
     const agent = request.agent(runtime.app.callback())
 

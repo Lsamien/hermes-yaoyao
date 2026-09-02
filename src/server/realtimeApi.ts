@@ -54,20 +54,25 @@ export class RealtimeAPI {
     }
     return {
       key, instanceKey: this.config.upstream.href, upstreamKey: `${this.config.upstream.href}:${device ? `device:${device}` : 'service'}`, paired: Boolean(device), valid, authorize,
+      agent: this.upstream.directAgent,
       observeCommand: f => observer?.observeClientFrame(f),
       observeEvent: f => observer?.observeUpstreamFrame(Buffer.from(f), false),
       url: async (kind, anchor) => {
         if (device && !valid()) throw new HttpError(401, 'Device revoked', 'authentication_required')
-        const response = jar
-          ? await this.upstream.request('/api/auth/ws-ticket', jar, { method: 'POST' })
-          : await this.session.request('/api/auth/ws-ticket', { method: 'POST' })
-        if (response.status !== 200) throw new HttpError(502, 'Upstream authentication failed', 'upstream_auth_failed')
-        const ticket = JSON.parse(response.body.toString()).ticket
-        if (typeof ticket !== 'string' || !ticket) throw new HttpError(502, 'Invalid upstream ticket', 'invalid_ticket')
+        // Paired devices retain their delegated identity; never upgrade a device
+        // cookie into the local service's loopback authorization.
+        let credential: { name: string; value: string }
+        if (jar) {
+          const response = await this.upstream.request('/api/auth/ws-ticket', jar, { method: 'POST' })
+          if (response.status !== 200) throw new HttpError(502, 'Upstream authentication failed', 'upstream_auth_failed')
+          const ticket = JSON.parse(response.body.toString()).ticket
+          if (typeof ticket !== 'string' || !ticket) throw new HttpError(502, 'Invalid upstream ticket', 'invalid_ticket')
+          credential = { name: 'ticket', value: ticket }
+        } else credential = await this.session.webSocketCredential()
         const url = new URL(this.config.upstream)
         url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
         url.pathname = `${url.pathname.replace(/\/$/, '')}/api/${kind === 'chat' ? 'ws' : 'plugins/yaoyao/v1/events'}`
-        url.search = ''; url.searchParams.set('ticket', ticket)
+        url.search = ''; url.searchParams.set(credential.name, credential.value)
         if (anchor) { url.searchParams.set('epoch', anchor.epoch); url.searchParams.set('cursor', String(anchor.cursor)) }
         return url
       },
@@ -78,15 +83,14 @@ export class RealtimeAPI {
       key: `push:${job.localUserID}:${this.auth.pushAuthorizationVersion(job.localUserID)}`,
       upstreamKey: `${this.config.upstream.href}:service`, paired: false,
       instanceKey: this.config.upstream.href,
+      agent: this.upstream.directAgent,
       valid: () => this.auth.isUserActive(job.localUserID),
       url: async () => {
-        const response = await this.session.request('/api/auth/ws-ticket', { method: 'POST' })
-        const ticket = JSON.parse(response.body.toString()).ticket
-        if (response.status !== 200 || !ticket) throw new Error('Upstream authentication failed')
+        const credential = await this.session.webSocketCredential()
         const url = new URL(this.config.upstream)
         url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
         url.pathname = `${url.pathname.replace(/\/$/, '')}/api/ws`
-        url.search = ''; url.searchParams.set('ticket', ticket)
+        url.search = ''; url.searchParams.set(credential.name, credential.value)
         return url
       },
     }

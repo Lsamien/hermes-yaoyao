@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import WebSocket, { WebSocketServer } from 'ws'
@@ -213,4 +214,3 @@ describe('HTTP+SSE migration', () => {
     expect(status).toBe(410)
   })
 })
-

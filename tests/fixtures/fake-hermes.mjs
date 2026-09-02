@@ -2,6 +2,8 @@ import { createServer } from 'node:http'
 import WebSocket, { WebSocketServer } from 'ws'
 
 const port = Number(process.env.FAKE_HERMES_PORT || 19119)
+const localAuthorization = process.env.FAKE_HERMES_LOCAL_AUTH === '1'
+const localToken = 'fixture_native_loopback_session_token_123456'
 const epoch = '11111111-1111-4111-8111-111111111111'
 const roomId = '22222222-2222-4222-8222-222222222222'
 const agentId = '33333333-3333-4333-8333-333333333333'
@@ -72,6 +74,7 @@ function broadcastGroup(event, payload) {
 }
 
 function authenticated(request) {
+  if (localAuthorization) return request.headers['x-hermes-session-token'] === localToken
   return String(request.headers.cookie || '').includes('fake_session=authenticated')
 }
 
@@ -154,7 +157,12 @@ const server = createServer(async (request, response) => {
     rpcRequests.length = 0
     return json(response, 200, { ok: true })
   }
-  if (url.pathname === '/api/status') return json(response, 200, { version: 'test', overall: 'ok', auth_required: true, auth_providers: ['basic'], gateway_running: true, gateway_state: 'running' })
+  if (localAuthorization && url.pathname === '/') {
+    response.writeHead(200, { 'Content-Type': 'text/html' })
+    return response.end(`<script>window.__HERMES_SESSION_TOKEN__=${JSON.stringify(localToken)};</script>`)
+  }
+  if (url.pathname === '/api/status') return json(response, 200, { version: 'test', overall: 'ok', auth_required: !localAuthorization, auth_providers: localAuthorization ? [] : ['basic'], gateway_running: true, gateway_state: 'running' })
+  if (localAuthorization && ['/api/auth/providers', '/api/auth/ws-ticket', '/auth/password-login'].includes(url.pathname)) return json(response, 403, { detail: 'No account or ticket in local mode' })
   if (url.pathname === '/api/auth/providers') return json(response, 200, { providers: [{ name: 'basic', display_name: '账号密码', supports_password: true }] })
   if (url.pathname === '/auth/password-login' && request.method === 'POST') {
     const input = await body(request)
@@ -413,7 +421,8 @@ const server = createServer(async (request, response) => {
 const sockets = new WebSocketServer({ noServer: true })
 server.on('upgrade', (request, socket, head) => {
   const url = new URL(request.url || '/', `http://${request.headers.host}`)
-  if (url.searchParams.get('ticket') !== 'fake-ticket') return socket.destroy()
+  if (localAuthorization ? url.searchParams.get('token') !== localToken || url.searchParams.has('ticket')
+    : url.searchParams.get('ticket') !== 'fake-ticket') return socket.destroy()
   sockets.handleUpgrade(request, socket, head, client => {
     if (url.pathname.endsWith('/events')) {
       groupConnectionCount += 1

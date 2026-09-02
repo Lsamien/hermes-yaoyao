@@ -1,6 +1,6 @@
 # 夭夭 Web
 
-夭夭 Web 是一个独立的本地 Web 工作台，通过端口 `8800` 连接 Hermes Dashboard/Gateway `9119`，提供普通聊天、群聊、文件库和产物浏览。通过本项目安装的 LaunchAgent 会持续监督 `9119`：缺失时自动配置 Dashboard 认证并启动它。
+夭夭 Web 是一个独立的本地 Web 工作台，通过端口 `8800` 连接 Hermes Dashboard/Gateway `9119`，提供普通聊天、群聊、文件库和产物浏览。通过本项目安装的 LaunchAgent 会持续监督本机 `9119`：缺失时在 `127.0.0.1` 启动它，不自动写入账号密码，也不重启或重绑定已有服务。
 
 ## 8800 用户与 iOS
 
@@ -16,9 +16,12 @@ iOS/Web 连接 `http://主机:8800` 并使用 8800 用户登录，客户端实�
 登录页扫描后会把 8800 保存为普通服务器账号。`yaoyao://login` 登录码与
 `yaoyao://pair` 子节点码相互独立，不会把手机误登记为子节点。
 
-8800 使用单独托管的 9119 服务账号。受管本机首次安装会生成随机服务密码并加密
-保存；外部或 Docker 9119 可在“系统管理”中配置，或设置
+8800 直连 `127.0.0.1`（或 `::1`），且 9119 明确声明 `auth_required=false` 时，
+使用 Hermes 签发的本机临时会话令牌，无需配置 9119 用户名密码。令牌仅保存在服务端内存，
+不返回客户端；REST 和上游 WebSocket 均携带该凭据。远程或已开启账号鉴权的 9119
+仍使用独立服务账号，可在“系统管理”中配置，或设置
 `HERMES_YAOYAO_UPSTREAM_USERNAME` 和 `HERMES_YAOYAO_UPSTREAM_PASSWORD_FILE`。
+`localhost`、Docker 宿主机别名和转发头不作为本机授权依据；详见 [本机授权边界](docs/loopback-authorization.md)。
 
 ### iOS 后台消息推送
 
@@ -245,21 +248,21 @@ npm run dev
 
 ## 网络暴露：9119 与 8800 分别控制
 
-通过 `service install` 安装的受管服务默认开放可信局域网：Hermes Dashboard `9119` 和夭夭 Web `8800` 都监听 `0.0.0.0`。手动 `npm start` 与 Docker 部署仍保留各自的绑定默认值。
+通过 `service install` 安装的受管服务默认只开放夭夭 Web `8800` 到可信局域网；新启动的 Hermes Dashboard `9119` 仅监听回环。手动 `npm start` 与 Docker 部署仍保留各自的绑定默认值。
 
 | 端口 | 服务 | 默认 | 单独开启局域网 |
 | --- | --- | --- | --- |
-| `9119` | Hermes Dashboard | `0.0.0.0` | 由夭夭 Web 监督；沿用或创建随机服务账号后启动 |
+| `9119` | Hermes Dashboard | `127.0.0.1` | 不自动开放；已有服务保持原配置，远程服务必须启用鉴权 |
 | `8800` | 夭夭 Web | `0.0.0.0` | LaunchAgent 显式启用可信局域网 HTTP |
 
-夭夭 Web 默认上游仍是 `http://127.0.0.1:9119`，8800 在本机通过回环连接受监督的 9119；两个服务对局域网的监听地址均为 `0.0.0.0`。
+夭夭 Web 默认上游仍是 `http://127.0.0.1:9119`；客户端只连接 8800。监督器仅管理此本机 HTTP 端口，不替外部上游启动本机 Dashboard。
 
-受管 `service install` 会覆盖遗留的 loopback 环境并保持局域网监听。若必须限制为仅本机访问，请使用手动 `npm start` 或 Docker 的回环绑定，不要使用受管 LaunchAgent。
+受管 `service install` 会覆盖 8800 遗留的 loopback 环境并保持 8800 局域网监听。若 8800 也必须仅本机访问，请使用手动 `npm start` 或 Docker 的回环绑定，不要使用受管 LaunchAgent。
 
 默认局域网 HTTP 只适合可信网络。跨不受信网络使用时必须配置 `HERMES_YAOYAO_TLS_CERT` 和 `HERMES_YAOYAO_TLS_KEY`，并限制防火墙或反向代理访问范围。
 
-受管服务会在 `dashboard.basic_auth` 未配置时创建 `yaoyao-service` 和随机密码的
-scrypt 哈希，同时生成会话签名 `secret`；明文服务密码只加密保存在 8800 数据目录。
+受管服务不创建或修改 `dashboard.basic_auth`。已有密码配置不会被删除；若 9119
+仍要求账号鉴权，需在 8800 配置服务账号，不会自动降级成免账号模式。
 8800 本地管理员 `admin/admin` 首次登录强制修改。具体步骤见
 [Agent 安装手册](docs/agent-install.md#受管-9119-的默认认证与持续监督)。
 Dashboard 的 `--insecure` 参数不会关闭认证；不要并行安装其他 Dashboard 监督器。
@@ -374,13 +377,13 @@ curl --fail --silent http://127.0.0.1:9119/api/dashboard/plugins
 
 ## 受管服务操作与验收
 
-`service install` 会写入并启动 `com.samien.hermes-yaoyao` LaunchAgent；它默认让 8800 与受监督的 9119 监听局域网。已安装服务的环境变量写入 plist，因此改变监听地址、TLS 或监督开关后需要再次执行 `service install`，仅执行 `service start` 不会刷新这些配置。
+`service install` 会写入并启动 `com.samien.hermes-yaoyao` LaunchAgent；8800 默认监听局域网，新启动的受监督 9119 仅监听回环。已安装服务的环境变量写入 plist，因此改变监听地址、TLS 或监督开关后需要再次执行 `service install`，仅执行 `service start` 不会刷新这些配置。
 
 | 目标 | 命令 | 预期结果 |
 | --- | --- | --- |
 | 查看服务 | `node bin/hermes-yaoyao.mjs service status` | `com.samien.hermes-yaoyao` 为 running |
 | 查看 Web | `curl --noproxy '*' --fail --silent http://127.0.0.1:8800/` | 返回夭夭 Web 页面 |
-| 查看 Dashboard | `curl --noproxy '*' --fail --silent http://127.0.0.1:9119/api/auth/providers` | 返回基础认证 provider |
+| 查看 Dashboard | `curl --noproxy '*' --fail --silent http://127.0.0.1:9119/api/status` | 查看 `auth_required`；`false` 表示本机令牌模式 |
 | 查看监听器 | `lsof -nP -iTCP:8800 -sTCP:LISTEN` 与 `lsof -nP -iTCP:9119 -sTCP:LISTEN` | 每个端口恰好一个监听进程 |
 | 查看受管日志 | `tail -f ~/Library/Logs/hermes-yaoyao.log` | 记录 Web 监听和 Dashboard 监督事件 |
 

@@ -21,6 +21,38 @@ function cookies(response: request.Response): string {
 }
 
 describe('8800 local authentication routes', () => {
+  it('installs without upstream credentials while keeping local login and CSRF mandatory', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'yaoyao-local-token-')); roots.push(home)
+    const token = 'fixture_local_only_session_token_123456'
+    const config: ServerConfig = {
+      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
+      mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false, superviseDashboard: true,
+    }
+    const runtime = createApplication({ config, fetchImpl: (async (input, init) => {
+      const path = new URL(String(input)).pathname
+      if (path === '/api/status') return Response.json({ auth_required: false })
+      if (path === '/') return new Response(`<script>window.__HERMES_SESSION_TOKEN__="${token}";</script>`)
+      if (new Headers(init?.headers).get('x-hermes-session-token') !== token) return Response.json({}, { status: 401 })
+      return Response.json({ profiles: [{ name: 'default', is_default: true }] })
+    }) as typeof fetch }); runtimes.push(runtime)
+    expect(runtime.auth.upstreamCredentials()).toBeUndefined()
+    const agent = request.agent(runtime.app.callback()), origin = 'http://127.0.0.1:8800'
+    await agent.get('/api/realtime/capabilities').set('Host', '127.0.0.1:8800').expect(401)
+    const boot = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    expect(boot.body.authRequired).toBe(true)
+    const login = await agent.post('/api/app/login').set('Host', '127.0.0.1:8800').set('Origin', origin)
+      .set('X-CSRF-Token', boot.body.csrfToken).send({ username: 'admin', password: 'admin' }).expect(200)
+    await agent.put('/api/app/account/credentials').set('Host', '127.0.0.1:8800').set('Origin', origin)
+      .set('X-CSRF-Token', login.body.csrfToken).send({ currentPassword: 'admin', newPassword: 'fixture-password', username: 'owner' }).expect(200)
+    const ready = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    expect(ready.body).toMatchObject({ authRequired: true, authenticated: true, upstreamReady: true })
+    expect(ready.body.profiles).toHaveLength(1)
+    expect(JSON.stringify([ready.body, ready.headers])).not.toContain(token)
+    expect(runtime.auth.upstreamCredentials()).toBeUndefined()
+    await agent.post('/api/realtime/channels').set('Host', '127.0.0.1:8800').set('Origin', origin).send({ channel: 'chat' }).expect(403)
+    await request(runtime.app.callback()).get('/api/realtime/capabilities').set('Host', '127.0.0.1:8800').expect(401)
+  })
   it('forces admin/admin to change, then serves shared profiles through the service account', async () => {
     const home = mkdtempSync(join(tmpdir(), 'yaoyao-local-routes-'))
     roots.push(home)
@@ -29,6 +61,7 @@ describe('8800 local authentication routes', () => {
       allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
       mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
       superviseDashboard: true,
+      upstreamUsername: 'service', upstreamPassword: 'fixture-password',
     }
     let wsTicketForwardedFor: string | null | undefined
     const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -127,6 +160,7 @@ describe('8800 local authentication routes', () => {
         allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
         mediaOwner: 'tester', allowInsecureLan: true, insecureLan: true, production: false,
         superviseDashboard: true,
+        upstreamUsername: 'service', upstreamPassword: 'fixture-password',
       }
       const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
         const path = new URL(input instanceof Request ? input.url : String(input)).pathname

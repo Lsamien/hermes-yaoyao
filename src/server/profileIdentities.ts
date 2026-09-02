@@ -29,15 +29,7 @@ export class UpstreamProfileIdentityService {
   ) {}
 
   async load(): Promise<RemoteProfileIdentity[]> {
-    const ticketResponse = await this.upstream.request('/api/auth/ws-ticket', {
-      method: 'POST',
-    })
-    if (ticketResponse.status < 200 || ticketResponse.status >= 300) {
-      throw new HttpError(502, 'Hermes 未签发身份读取凭据', 'profile_identity_ticket_failed')
-    }
-    let ticket = ''
-    try { ticket = String(JSON.parse(ticketResponse.body.toString('utf8')).ticket ?? '') } catch { /* handled below */ }
-    if (!ticket) throw new HttpError(502, 'Hermes 返回了空身份读取凭据', 'profile_identity_ticket_failed')
+    const credential = await this.upstream.webSocketCredential()
 
     const url = new URL(this.config.upstream)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -45,10 +37,11 @@ export class UpstreamProfileIdentityService {
       ? '' : this.config.upstream.pathname.replace(/\/$/, '')
     url.pathname = `${prefix}/api/ws`
     url.search = ''
-    url.searchParams.set('ticket', ticket)
+    url.searchParams.set(credential.name, credential.value)
 
     return new Promise<RemoteProfileIdentity[]>((resolve, reject) => {
       const socket = new WebSocket(url, {
+        agent: this.upstream.client.directAgent,
         headers: { Origin: this.config.upstream.origin },
         handshakeTimeout: 15_000,
         maxPayload: 36 * 1_024 * 1_024,

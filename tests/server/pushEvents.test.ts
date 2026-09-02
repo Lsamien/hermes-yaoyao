@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import WebSocket, { WebSocketServer } from 'ws'
@@ -521,7 +522,7 @@ describe('push event bridge', () => {
     })
     let ticketRequests = 0
     const session = {
-      request: () => {
+      webSocketCredential: () => {
         ticketRequests += 1
         return new Promise<never>(() => undefined)
       },
@@ -550,7 +551,7 @@ describe('push event bridge', () => {
     const upstream = createServer((request, response) => {
       response.setHeader('Content-Type', 'application/json')
       const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname
-      if (path === '/api/status') response.end('{"auth_required":false}')
+      if (path === '/api/status') response.end('{"auth_required":true}')
       else if (path === '/api/auth/ws-ticket') response.end('{"ticket":"ownership-ticket"}')
       else response.end('{}')
     })
@@ -610,7 +611,8 @@ describe('push event bridge', () => {
     const upstream = createServer((request, response) => {
       response.setHeader('Content-Type', 'application/json')
       const url = new URL(request.url ?? '/', 'http://127.0.0.1')
-      if (url.pathname === '/api/status') response.end(JSON.stringify({ auth_required: false }))
+      if (url.pathname === '/api/status') response.end(JSON.stringify({ auth_required: true }))
+      else if (url.pathname === '/api/auth/me') response.end(JSON.stringify({ user_id: 'service' }))
       else if (url.pathname === '/api/auth/ws-ticket') response.end(JSON.stringify({ ticket: 'push-ticket' }))
       else if (url.pathname === '/api/sessions/stored-1/messages') {
         messageReads += 1

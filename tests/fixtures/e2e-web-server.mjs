@@ -13,4 +13,10 @@ Object.assign(process.env, {
   HERMES_YAOYAO_UPSTREAM_PASSWORD: 'test',
 })
 
+if (process.env.FAKE_HERMES_LOCAL_AUTH === '1') {
+  delete process.env.HERMES_YAOYAO_UPSTREAM_USERNAME
+  delete process.env.HERMES_YAOYAO_UPSTREAM_PASSWORD
+  delete process.env.HERMES_YAOYAO_UPSTREAM_PASSWORD_FILE
+}
+
 await import('../../dist-server/server/index.js')

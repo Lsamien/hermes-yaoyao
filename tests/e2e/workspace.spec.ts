@@ -36,6 +36,19 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole('navigation')).toBeVisible()
 })
 
+test('explains optional upstream credentials without blocking a ready connection', async ({ page }, testInfo) => {
+  await page.getByRole('button', { name: '打开设置中心' }).first().click()
+  const dialog = page.getByRole('dialog', { name: '设置中心' })
+  await dialog.getByRole('button', { name: 'Hermes 连接', exact: true }).click()
+  await expect(dialog.locator('[aria-label="Hermes 连接状态"]')).toBeVisible()
+  await expect(dialog.getByText('9119 连接正常', { exact: true })).toBeVisible()
+  await expect(dialog.getByRole('heading', { name: '服务账号（按需配置）' })).toBeVisible()
+  await expect(dialog.getByText(/无需配置用户名和密码/)).toBeVisible()
+  await expect(dialog.locator('input[name="upstream-username"]')).toHaveValue('')
+  await expect(dialog.locator('input[name="upstream-password"]')).toHaveValue('')
+  await page.screenshot({ path: testInfo.outputPath('loopback-authorization.png') })
+})
+
 test('uses the yaoyao-webui grouped model picker without a mobile full-screen sheet', async ({ page }) => {
   await page.goto('/chat/session-demo')
   await page.locator('.composer-tool--model').click()

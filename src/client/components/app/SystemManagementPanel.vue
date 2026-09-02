@@ -425,6 +425,8 @@ watch(() => [props.active, props.section] as const, ([active, section]) => {
       </div>
       <p v-if="connectionStatus?.authMode === 'loopback-token'" class="connection-mode-note">9119 使用本机临时 Token，8800 会自动读取并在 9119 重启后刷新；Token 不会在设置中显示。</p>
       <p v-else-if="connectionStatus?.authMode === 'loopback-direct'" class="connection-mode-note">当前 9119 允许本机直接访问，不需要账号或 Token；该兼容模式只允许回环地址使用。</p>
+      <p class="network-description">直连本机 127.0.0.1 或 ::1 且 Hermes 启用本机授权时，自动使用临时会话令牌，无需配置用户名和密码。远程上游或已启用账号鉴权的 9119 仍需服务账号；8800 登录保护保持不变，不会自动修改 Hermes 账号配置。</p>
+      <h4 v-if="passwordAuthentication">服务账号（按需配置）</h4>
       <form v-if="passwordAuthentication" @submit.prevent="saveUpstream">
         <label><span>9119 用户名</span><input v-model="upstreamUsername" name="upstream-username" autocomplete="off" :disabled="busy" /></label>
         <label><span>9119 密码</span><input v-model="upstreamPassword" name="upstream-password" type="password" autocomplete="new-password" :disabled="busy" /></label>

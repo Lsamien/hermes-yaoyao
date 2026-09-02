@@ -123,9 +123,6 @@ export function createApplication(options: ApplicationOptions = {}): Application
   const uploads = options.uploads ?? new UploadStore(config.home)
   const updates = options.updates ?? new SystemUpdateManager(config)
   const auth = options.auth ?? new LocalAuthStore(config.home, Boolean(config.tlsCert))
-  if (config.superviseDashboard && !config.upstreamUsername && !config.upstreamPassword) {
-    auth.ensureUpstreamCredentials()
-  }
   const configuredUpstreamCredentials = config.upstreamUsername && config.upstreamPassword
     ? { username: config.upstreamUsername, password: config.upstreamPassword }
     : undefined
@@ -347,7 +344,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     chatPushJobs,
     groupPushEvents,
     close: () => {
-      upstream.readCache.close()
+      upstream.close()
       realtime.close()
       chatPushJobs.stop()
       groupPushEvents.stop()

@@ -3,18 +3,18 @@ import { resolve } from 'node:path'
 import send from 'koa-send'
 import serve from 'koa-static'
 import { createApplication, createNodeServer } from './app.js'
-import { isLoopbackHost, loadServerConfig } from './config.js'
+import { loadServerConfig } from './config.js'
 import { DashboardSupervisor } from './dashboardSupervisor.js'
+import { isLocalAuthorizationTarget } from './loopbackAuthorization.js'
 
 const config = loadServerConfig()
 const runtime = createApplication({
   config,
 })
 const dashboardSupervisor = config.superviseDashboard
-  ? new DashboardSupervisor({
-      allowLan: !isLoopbackHost(config.host),
-      credentials: runtime.auth.upstreamCredentials(),
-    })
+  && isLocalAuthorizationTarget(config.upstream) && config.upstream.hostname === '127.0.0.1'
+  && config.upstream.protocol === 'http:' && config.upstream.port === '9119'
+  ? new DashboardSupervisor({})
   : undefined
 const nodeRuntime = createNodeServer(runtime)
 let closeFrontend = async (): Promise<void> => undefined
