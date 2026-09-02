@@ -1589,7 +1589,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
         'x-mime-type': mimeType,
       }
     }
-    const response = await dependencies.upstream.request(path, jar, {
+    const response = await dependencies.upstream.withReadScope(`device:${ctx.params.deviceID}`, ctx.get('x-yaoyao-cache') === 'bypass', () => dependencies.upstream.request(path, jar, {
       method: ctx.method,
       search: new URLSearchParams(ctx.querystring),
       body: ['GET', 'HEAD'].includes(ctx.method) || isWorkerAttachment
@@ -1598,7 +1598,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       headers: requestHeaders,
       clientAddress: path === '/api/auth/ws-ticket'
         ? undefined : ctx.req.socket.remoteAddress,
-    })
+    }))
     dependencies.pairings.updateCookies(ctx.params.deviceID, jar.header)
     sendUpstreamResponse(ctx, response, jar)
   })

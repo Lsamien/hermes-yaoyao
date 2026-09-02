@@ -449,43 +449,98 @@ export class LocalAuthStore {
 export class UpstreamServiceSession {
   readonly #jar = new CookieJar('')
   #loginTask: Promise<void> | undefined
+  #ensureTask: Promise<void> | undefined
+  #validatedUntil = 0
+  #credentialFingerprint: string | undefined
+  #generation = 0
+  readonly #now: () => number
+  readonly #validationTTL: number
 
   constructor(
     readonly client: UpstreamClient,
     readonly credentials: () => UpstreamCredentials | undefined,
-  ) {}
+    options: { now?: () => number; validationTTL?: number } = {},
+  ) {
+    this.#now = options.now ?? Date.now
+    this.#validationTTL = options.validationTTL ?? 30_000
+    client.setReauthenticationHandler(this.#jar, async () => {
+      this.#syncCredentials()
+      this.#validatedUntil = 0
+      await this.#login(this.#generation)
+    })
+  }
 
   get jar(): CookieJar { return this.#jar }
 
   async ensure(): Promise<void> {
-    const status = await this.client.request('/api/status', this.#jar)
+    this.#syncCredentials()
+    if (this.#validatedUntil > this.#now()) return
+    if (this.#ensureTask) return this.#ensureTask
+    const generation = this.#generation
+    const task = this.#validate(generation).then(() => {
+      this.#checkGeneration(generation)
+      this.#validatedUntil = this.#now() + this.#validationTTL
+    }).finally(() => { if (this.#ensureTask === task) this.#ensureTask = undefined })
+    this.#ensureTask = task
+    return task
+  }
+
+  invalidateAuthentication(): void { this.#validatedUntil = 0; this.client.invalidateReads() }
+
+  #syncCredentials(): void {
+    const fingerprint = createHash('sha256').update(JSON.stringify(this.credentials() ?? null)).digest('hex')
+    if (this.#credentialFingerprint !== undefined && fingerprint !== this.#credentialFingerprint) {
+      this.#generation++
+      this.#validatedUntil = 0; this.#ensureTask = undefined; this.#loginTask = undefined
+      this.#jar.replace(new CookieJar())
+      this.client.invalidateReads()
+    }
+    this.#credentialFingerprint = fingerprint
+  }
+
+  #checkGeneration(generation: number): void {
+    this.#syncCredentials()
+    if (generation !== this.#generation) throw new HttpError(409, '上游凭据已变化，请重试读取', 'upstream_credentials_changed')
+  }
+
+  async #validate(generation: number): Promise<void> {
+    // Probe into a temporary jar. A delayed old probe must not overwrite freshly
+    // rotated service credentials/cookies in the live jar.
+    const probe = new CookieJar(this.#jar.header)
+    const status = await this.client.request('/api/status', probe)
     if (status.status < 200 || status.status >= 300) throw new HttpError(502, '9119 状态不可用', 'upstream_unavailable')
     const parsed = JSON.parse(status.body.toString('utf8')) as Record<string, unknown>
-    if (parsed.auth_required !== true && parsed.authRequired !== true) return
-    const me = await this.client.request('/api/auth/me', this.#jar)
-    if (me.status >= 200 && me.status < 300) return
-    if (!this.#loginTask) this.#loginTask = this.#login().finally(() => { this.#loginTask = undefined })
-    await this.#loginTask
+    this.#checkGeneration(generation)
+    if (parsed.auth_required !== true && parsed.authRequired !== true) { this.#jar.replace(probe); return }
+    const me = await this.client.request('/api/auth/me', probe)
+    this.#checkGeneration(generation)
+    if (me.status >= 200 && me.status < 300) { this.#jar.replace(probe); return }
+    if (me.status !== 401 && me.status !== 403) throw new HttpError(502, '无法验证 9119 服务会话', 'upstream_auth_unavailable')
+    await this.#login(generation)
   }
 
   async request(path: string, options: UpstreamRequestOptions = {}): Promise<UpstreamResponse> {
     await this.ensure()
-    let response = await this.client.request(path, this.#jar, options)
-    if (response.status === 401) {
-      await this.#login()
-      response = await this.client.request(path, this.#jar, options)
-    }
-    return response
+    return this.client.request(path, this.#jar, options)
   }
 
   async verify(credentials: UpstreamCredentials): Promise<void> {
     await this.#authenticate(credentials, new CookieJar(''))
   }
 
-  async #login(): Promise<void> {
+  async #login(generation: number): Promise<void> {
+    if (this.#loginTask) return this.#loginTask
     const credentials = this.credentials()
     if (!credentials) throw new HttpError(503, '尚未配置 9119 服务账号', 'upstream_credentials_required')
-    await this.#authenticate(credentials, this.#jar)
+    const jar = new CookieJar()
+    const task = this.#authenticate({ ...credentials }, jar).then(() => {
+      this.#checkGeneration(generation)
+      this.#jar.replace(jar)
+      this.client.invalidateReads()
+      this.#validatedUntil = this.#now() + this.#validationTTL
+    }).finally(() => { if (this.#loginTask === task) this.#loginTask = undefined })
+    this.#loginTask = task
+    return task
   }
 
   async #authenticate(credentials: UpstreamCredentials, jar: CookieJar): Promise<void> {

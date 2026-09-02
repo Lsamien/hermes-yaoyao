@@ -5,6 +5,7 @@ import { checkedChatFrame, CHAT_MAX_PAYLOAD, GroupFrameValidator } from './realt
 import { RealtimeReceipts, type CommandReceipt } from './realtimeReceipts.js'
 
 type Frame = Record<string, any>
+export interface RealtimeActivity { kind: 'command' | 'event' | 'group' | 'reset'; name: string; sessionId?: string; roomId?: string }
 export interface RealtimePrincipal {
   key: string
   upstreamKey: string
@@ -45,7 +46,7 @@ export class RealtimeBroker {
   private receipts: RealtimeReceipts
   private timer: ReturnType<typeof setInterval>
   private closed = false
-  constructor(home: string, readonly now = Date.now) {
+  constructor(home: string, readonly now = Date.now, readonly onActivity: (activity: RealtimeActivity) => void = () => {}) {
     this.receipts = new RealtimeReceipts(home)
     this.timer = setInterval(() => this.sweep(), 5_000)
     this.timer.unref()
@@ -197,7 +198,10 @@ export class RealtimeBroker {
       if (!c.principal.valid()) throw new HttpError(401, 'Authentication expired', 'authentication_required')
       const previouslyActive = route?.active ?? false
       if (route && (method === 'prompt.submit' || method === 'session.steer')) route.active = true
+      const activity: RealtimeActivity = { kind: 'command', name: method, sessionId: route?.stored }
+      this.onActivity(activity)
       const response = await this.rpc(u, method, p, f => c.principal.observeEvent?.(JSON.stringify(f)), f => c.principal.observeCommand?.(JSON.stringify(f)))
+        .finally(() => this.onActivity(activity))
       if (response.error && route && (method === 'prompt.submit' || method === 'session.steer')) route.active = previouslyActive
       if (!response.error && route && (method === 'prompt.submit' || method === 'session.steer')) route.active = true
       if ((opening || method === 'session.branch') && response.result) {
@@ -320,6 +324,7 @@ export class RealtimeBroker {
     if (!p || typeof p.type !== 'string') return
     const sid = String(p.session_id ?? '')
     const r = u.byRuntime.get(sid)
+    this.onActivity({ kind: 'event', name: p.type, sessionId: r?.stored })
     if (sid && !r) {
       const size = Buffer.byteLength(JSON.stringify(f))
       if (u.earlyBytes + size > 1024 * 1024) { u.early.clear(); u.earlyBytes = 0; this.reset(u, 'unmapped_event_overflow'); return }
@@ -371,6 +376,7 @@ export class RealtimeBroker {
     }
   }
   private reset(u: Upstream, reason: string): void {
+    this.onActivity({ kind: 'reset', name: reason })
     for (const c of this.channels.values()) if (c.kind === 'chat' && c.principal.upstreamKey === u.principal.upstreamKey) this.emit(c, 'reset', { reason })
   }
   private async connectGroup(c: RealtimeChannel): Promise<void> {
@@ -384,13 +390,14 @@ export class RealtimeBroker {
         try {
           if (!validator.accept(data, binary)) return
           const frame = JSON.parse(data.toString()) as Frame
+          this.onActivity({ kind: 'group', name: String(frame.event ?? frame.type), roomId: frame.roomId })
           if (frame.type === 'group.ready') { clearTimeout(timer); resolve() }
           if (frame.type === 'group.event') c.group!.cursor = frame.cursor
           this.emit(c, 'frame', frame)
         } catch { this.emit(c, 'reset', { reason: 'group_gap' }); ws.close() }
       })
       ws.on('error', () => { clearTimeout(timer); reject(new Error('Group connection failed')) })
-      ws.on('close', () => { clearTimeout(timer); reject(new Error('Group disconnected')); if (this.channels.has(c.id)) this.emit(c, 'reset', { reason: 'group_disconnected' }) })
+      ws.on('close', () => { clearTimeout(timer); reject(new Error('Group disconnected')); this.onActivity({ kind: 'group', name: 'group_disconnected' }); if (this.channels.has(c.id)) this.emit(c, 'reset', { reason: 'group_disconnected' }) })
     })
   }
   private emit(c: RealtimeChannel, event: StreamEntry['event'], value: Frame): void {

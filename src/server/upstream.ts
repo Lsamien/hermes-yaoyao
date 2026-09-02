@@ -1,4 +1,6 @@
 import type Koa from 'koa'
+import { createHash } from 'node:crypto'
+import { readCacheContext, readPolicy, mutationTags, UpstreamReadCache } from './upstreamReadCache.js'
 import { parse } from 'cookie'
 import { HttpError } from './errors.js'
 import { appendSetCookies, CSRF_COOKIE } from './security.js'
@@ -70,6 +72,11 @@ export class CookieJar {
     return [...this.#values.entries()].map(([name, value]) => `${name}=${value}`).join('; ')
   }
 
+  replace(other: CookieJar): void {
+    this.#values.clear(); this.#browserCookies.clear()
+    for (const [name, value] of other.#values) this.#values.set(name, value)
+  }
+
   get browserCookies(): string[] {
     return [...this.#browserCookies.values()]
   }
@@ -88,6 +95,7 @@ export class UpstreamHttpError extends HttpError {
 }
 
 export interface UpstreamRequestOptions {
+  cache?: 'reload'
   method?: string
   search?: URLSearchParams
   body?: unknown
@@ -98,13 +106,84 @@ export interface UpstreamRequestOptions {
 }
 
 export class UpstreamClient {
+  readonly readCache: UpstreamReadCache
+  private reauthentication = new WeakMap<CookieJar, () => Promise<void>>()
   constructor(
     readonly baseURL: URL,
     readonly fetchImpl: typeof fetch = fetch,
     readonly publicSecure = false,
-  ) {}
+    now: () => number = Date.now,
+  ) { this.readCache = new UpstreamReadCache(now) }
 
-  async request(
+  withReadScope<T>(scope: string, fresh: boolean, run: () => T): T {
+    return readCacheContext.run({ scope, fresh }, run)
+  }
+  invalidateReads(tags?: readonly string[]): void { this.readCache.invalidate(tags) }
+  observeRealtime(change: { kind: 'command' | 'event' | 'group' | 'reset'; name: string; sessionId?: string; roomId?: string }): void {
+    if (change.kind === 'reset') { this.invalidateReads(['sessions', 'groups', 'profiles', 'models']); return }
+    if (change.kind === 'group') {
+      if (change.name === 'group.heartbeat' || change.name === 'group.ready') return
+      this.invalidateReads(change.roomId ? ['group-list', `group:${change.roomId}`] : ['groups'])
+      return
+    }
+    if (/^(profiles\.(configure|set_asset|changed)|pet\.changed|models\.changed|model\.)/.test(change.name)) {
+      this.invalidateReads(['profiles', 'models']); return
+    }
+    if (change.name === 'sessions.changed') { this.invalidateReads(['sessions']); return }
+    if (change.kind === 'command' && !/^(prompt\.submit|session\.(create|resume|branch|close|steer|interrupt)|config\.set|approval\.respond|clarify\.respond)$/.test(change.name)) return
+    if (change.kind === 'event' && !/^(message\.|session\.|config\.|compression\.|run\.|error$)/.test(change.name)) return
+    const tags = change.sessionId ? [`session:${change.sessionId}`] : ['sessions']
+    if (change.kind === 'command' || !/\.delta$/.test(change.name)) tags.push('session-list')
+    if (change.name === 'config.set') tags.push('models', 'profiles')
+    this.invalidateReads(tags)
+  }
+  setReauthenticationHandler(jar: CookieJar, renew: () => Promise<void>): void { this.reauthentication.set(jar, renew) }
+
+  async request(path: string, jar: CookieJar, options: UpstreamRequestOptions = {}): Promise<UpstreamResponse> {
+    const method = options.method ?? 'GET'
+    const tags = ['GET', 'HEAD'].includes(method) ? undefined : mutationTags(path)
+    if (tags) this.invalidateReads(tags)
+    const context = readCacheContext.getStore()
+    const forcedTags = method === 'GET' && (context?.fresh || options.cache === 'reload') ? readPolicy(path, options.search)?.tags : undefined
+    if (forcedTags) this.invalidateReads(forcedTags)
+    const load = async () => {
+      const sentCookies = jar.header
+      let response = await this.fetchResponse(path, jar, options)
+      if (response.status === 401 || response.status === 403) this.invalidateReads()
+      const renew = this.reauthentication.get(jar)
+      if (response.status === 401 && renew && !path.startsWith('/api/auth/') && !path.startsWith('/auth/')) {
+        // A parallel request may already have rotated the service cookies. Never replay
+        // a whole route handler (it may have performed several writes); repair this one 401 only.
+        if (jar.header === sentCookies) await renew()
+        response = await this.fetchResponse(path, jar, options)
+      }
+      return response
+    }
+    try {
+      const headers = new Headers(options.headers)
+      const policy = method === 'GET' && context && !context.fresh && options.cache !== 'reload'
+        && !['range', 'if-none-match', 'if-modified-since', 'if-match', 'if-unmodified-since'].some(name => headers.has(name))
+        ? readPolicy(path, options.search) : undefined
+      let response: UpstreamResponse
+      if (policy && context) {
+        const search = new URLSearchParams(options.search); search.sort()
+        const key = createHash('sha256').update(JSON.stringify([
+          context.scope, this.baseURL.href, path, search.toString(), jar.header ?? '',
+          [...headers.entries()].sort(([a], [b]) => a.localeCompare(b)), options.clientAddress ?? '', options.maxResponseBytes ?? null,
+        ])).digest('hex')
+        response = await this.readCache.read(key, policy, load)
+      } else response = await load()
+      // Snapshot-after-anchor ordering: no room snapshot fetched before this fresh
+      // journal cursor may be reused to bootstrap a stream starting at that cursor.
+      if (path === '/api/plugins/yaoyao/v1/capabilities' && response.status === 200) this.invalidateReads(['groups'])
+      return response
+    } finally {
+      if (tags) this.invalidateReads(tags)
+      if (forcedTags) this.invalidateReads(forcedTags)
+    }
+  }
+
+  private async fetchResponse(
     path: string,
     jar: CookieJar,
     options: UpstreamRequestOptions = {},

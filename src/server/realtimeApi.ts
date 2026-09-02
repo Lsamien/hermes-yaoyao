@@ -19,7 +19,10 @@ export class RealtimeAPI {
   constructor(readonly config: ServerConfig, readonly auth: LocalAuthStore, readonly csrf: CsrfProtection,
     readonly pairings: NodePairingStore, readonly upstream: UpstreamClient, readonly session: UpstreamServiceSession,
     readonly push?: { coordinator: PushEventCoordinator; resolver: ChatNotificationResolver }) {
-    this.broker = new RealtimeBroker(config.home)
+    this.broker = new RealtimeBroker(config.home, Date.now, change => {
+      upstream.observeRealtime(change)
+      if (change.kind === 'reset') session.invalidateAuthentication()
+    })
   }
   private principal(ctx: Koa.Context, device?: string): RealtimePrincipal {
     let key: string

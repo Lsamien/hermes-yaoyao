@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { once } from 'node:events'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RealtimeBroker, type RealtimePrincipal, type StreamEntry } from '../../src/server/realtimeBroker.js'
+import { RealtimeBroker, type RealtimeActivity, type RealtimePrincipal, type StreamEntry } from '../../src/server/realtimeBroker.js'
 import { RealtimeReceipts } from '../../src/server/realtimeReceipts.js'
 
 const cleanup: Array<() => void> = []
@@ -38,11 +38,12 @@ async function fixture() {
     })
   })
   let now = Date.now()
-  const broker = new RealtimeBroker(home, () => now)
+  const activities: RealtimeActivity[] = []
+  const broker = new RealtimeBroker(home, () => now, change => activities.push(change))
   cleanup.push(() => broker.close())
   const principal = (key: string): RealtimePrincipal => ({ key, upstreamKey: 'one-service', paired: false,
     valid: () => true, url: async () => new URL(`ws://127.0.0.1:${(ws.address() as any).port}`) })
-  return { home, broker, principal, commands, count: () => count, advance: (n: number) => { now += n },
+  return { home, broker, principal, commands, activities, count: () => count, advance: (n: number) => { now += n },
     disconnect: () => peer!.terminate(), truncate: () => { truncate = true }, dropPrompt: () => { dropPrompt = true },
     emit: (type: string, payload: unknown) => {
       const params = { type, session_id: 'runtime-1', seq: ++seq, payload }; history.push(params)
@@ -160,5 +161,21 @@ describe('realtime broker', () => {
     expect(result.state).toBe('unknown')
     expect((await f.broker.command(c, 'lost-ack', prompt)).state).toBe('unknown')
     expect(f.commands.filter(f => f.method === 'prompt.submit')).toHaveLength(1)
+  })
+  it('invalidates read snapshots before/after mutation and before delivering live events', async () => {
+    const f = await fixture(), c = await f.broker.create(f.principal('alice'), 'chat')
+    await f.broker.command(c, 'open', resume)
+    await f.broker.command(c, 'send', { method: 'prompt.submit', params: { session_id: 'runtime-1', text: 'once' } })
+    expect(f.activities.filter(c => c.kind === 'command' && c.name === 'prompt.submit')).toEqual([
+      { kind: 'command', name: 'prompt.submit', sessionId: 'stored-1' },
+      { kind: 'command', name: 'prompt.submit', sessionId: 'stored-1' },
+    ])
+    const seen: StreamEntry[] = []
+    f.broker.subscribe(c, undefined, entry => {
+      if (entry.data.includes('message.delta')) expect(f.activities.at(-1)).toMatchObject({ kind: 'event', name: 'message.delta', sessionId: 'stored-1' })
+      seen.push(entry)
+    })
+    f.emit('message.delta', { text: 'fresh' })
+    await vi.waitFor(() => expect(seen.some(e => e.data.includes('fresh'))).toBe(true))
   })
 })

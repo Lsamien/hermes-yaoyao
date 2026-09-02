@@ -357,8 +357,8 @@ describe('8800 BFF', () => {
       .expect(200)
     expect(records.map((entry) => entry.path)).toEqual([
       '/api/status', '/api/auth/me', '/api/status',
-      '/api/status', '/api/auth/me', '/api/profiles',
-      '/api/status', '/api/auth/me', '/api/plugins/yaoyao/profiles',
+      '/api/profiles',
+      '/api/plugins/yaoyao/profiles',
     ])
     expect(response.body).toMatchObject({
       authRequired: true,

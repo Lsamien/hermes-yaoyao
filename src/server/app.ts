@@ -292,7 +292,10 @@ export function createApplication(options: ApplicationOptions = {}): Application
         }
       }
     }
-    await next()
+    const user = ctx.state.localUser as { id: string } | undefined
+    if (user) {
+      await upstream.withReadScope(`user:${user.id}:${auth.pushAuthorizationVersion(user.id)}`, ctx.get('x-yaoyao-cache') === 'bypass', next)
+    } else await next()
   })
 
   const router = createApiRouter({
@@ -344,6 +347,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     chatPushJobs,
     groupPushEvents,
     close: () => {
+      upstream.readCache.close()
       realtime.close()
       chatPushJobs.stop()
       groupPushEvents.stop()

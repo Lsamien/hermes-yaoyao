@@ -79,9 +79,11 @@ ID 和包名。浏览器只提交路径和公开元数据；8800 本地校验 RS
 插件安装接口安装。默认源为
 `https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao`。
 
-当前发布版本：**Git `v0.2.27` / 夭夭 Web `0.2.27` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
+当前发布版本：**Git `v0.2.28` / 夭夭 Web `0.2.28` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
 
-本版将普通聊天和团队事件统一为 HTTP+SSE，增加服务端连接管理、近期事件补收、提交回执去重与权限隔离。8800 到 9119 的上游接口及 Python 插件保持不变。详见 [HTTP+SSE 接口与升级边界](docs/http-sse-realtime.md)。
+本版增加有界热点读取缓存、并发读取合并、30 秒上游状态/身份检查复用，以及写操作和实时事件驱动的缓存失效。客户端授权与 9119 实际请求鉴权仍然保留。详见 [读取缓存与一致性边界](docs/read-cache.md)。
+
+普通聊天和团队事件继续使用 [HTTP+SSE 接口](docs/http-sse-realtime.md)，不兼容旧客户端 WebSocket。8800 到 9119 的上游接口及 Python 插件保持不变。
 
 需要由自动化 Agent 部署或升级时，请直接使用 [Agent 安装手册](docs/agent-install.md)。其中包含固定版本校验、备份、同步、单一 Dashboard 重载与验证步骤。
 
