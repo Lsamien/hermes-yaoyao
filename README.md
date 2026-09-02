@@ -82,9 +82,9 @@ ID 和包名。浏览器只提交路径和公开元数据；8800 本地校验 RS
 插件安装接口安装。默认源为
 `https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao`。
 
-当前发布版本：**Git `v0.2.29` / 夭夭 Web `0.2.29` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
+当前发布版本：**Git `v0.2.30` / 夭夭 Web `0.2.30` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
 
-本版让 8800 自动兼容 9119 的本机 Session Token、密码认证和旧版本机直连模式，并在设置中明确展示认证模式、连接地址、验证时间以及 8800/9119 各自的网络边界。9119 可保持仅本机监听，8800 继续面向局域网提供服务。
+本版支持 Web 独立检查更新、升级和回滚，9119 离线、超时或认证失败不再阻塞升级。8800 仍保留管理员登录及安全校验，并兼容 9119 的本机 Session Token、密码认证和旧版本机直连模式；9119 可保持仅本机监听，8800 继续面向局域网提供服务。
 
 普通聊天和团队事件继续使用 [HTTP+SSE 接口](docs/http-sse-realtime.md)，不兼容旧客户端 WebSocket。8800 到 9119 的上游接口及 Python 插件保持不变。
 
@@ -189,6 +189,8 @@ Content-Type: application/json
 
 macOS 受管服务可在左下角 Agent 菜单中打开“系统更新”。Git 发布标签负责 Web
 版本，`release.json` 同时声明兼容的插件版本；插件本身始终通过 9119 独立同步。
+
+独立升级能力从 `v0.2.30` 生效。旧版首次升级仍使用旧更新器：请在 9119 可用时升级一次，或按固定标签手动部署新版；升级后不再要求 9119 在线。
 
 升级接口固定读取 `HERMES_YAOYAO_RELEASE_SOURCE`，只接受发布源中最新的
 `vX.Y.Z` 标签，并在下载后核对标签解析出的 Git 提交和发布清单。浏览器不能传入
