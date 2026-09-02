@@ -1169,6 +1169,53 @@ function sendLocalMedia(ctx: Koa.Context, path: string): void {
   ctx.body = createReadStream(path, { start, end: boundedEnd })
 }
 
+function prepareFilePreview(ctx: Koa.Context, name: string): void {
+  const type = ctx.response.get('content-type').split(';', 1)[0]?.trim().toLowerCase()
+  const activeContent = type === 'text/html'
+    || type === 'application/xhtml+xml'
+    || type === 'image/svg+xml'
+    || Boolean(type?.endsWith('/xml') || type?.endsWith('+xml'))
+  if (activeContent) {
+    ctx.type = 'application/octet-stream'
+    ctx.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`)
+  } else {
+    ctx.remove('Content-Disposition')
+  }
+}
+
+function hermesMediaPath(ctx: Koa.Context): string {
+  const segment = (value: string): string => {
+    if (!value || value === '.' || value === '..' || /[/\\\u0000-\u001f\u007f]/.test(value)) {
+      throw new HttpError(400, '媒体路径无效', 'invalid_media_path')
+    }
+    return value
+  }
+  const owner = segment(ctx.params.owner)
+  const profile = ctx.params.profile ? segment(ctx.params.profile) : undefined
+  const directory = profile ? ctx.params.mediaDir : 'cache'
+  if (!['cache', 'images', 'screenshots', 'attachments'].includes(directory)) {
+    throw new HttpError(404, '媒体目录不存在', 'media_not_found')
+  }
+  const raw = ctx.params.filePath
+  const parts = (Array.isArray(raw) ? raw : [raw]).flatMap(part => part.split('/')).map(segment)
+  return `/Users/${owner}/.hermes/${profile ? `profiles/${profile}/` : ''}${directory}/${parts.join('/')}`
+}
+
+async function proxyHermesMedia(ctx: Koa.Context, dependencies: RouteDependencies): Promise<void> {
+  dependencies.auth.require(ctx)
+  const path = hermesMediaPath(ctx)
+  // Generated media belongs to Hermes, which may run on a different machine
+  // or inside a container. Let its file API enforce the managed-root policy.
+  const response = await dependencies.upstreamSession.request('/api/files/download', {
+    search: new URLSearchParams({ path }),
+    headers: ctx.get('range') ? { range: ctx.get('range') } : undefined,
+    maxResponseBytes: 100 * 1_024 * 1_024,
+  })
+  sendUpstreamResponse(ctx, response, dependencies.upstreamSession.jar)
+  ctx.set('Cache-Control', 'private, no-store')
+  if (response.status >= 200 && response.status < 300) prepareFilePreview(ctx, basename(path))
+}
+
 function pairedLocalMediaPath(config: ServerConfig, rawPath: string): string {
   if (!rawPath || rawPath.length > 8_192 || rawPath.includes('\u0000')) {
     throw new HttpError(400, '远程文件路径无效', 'invalid_node_file_path')
@@ -1619,6 +1666,11 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     dependencies.pairings.updateCookies(ctx.params.deviceID, jar.header)
     sendUpstreamResponse(ctx, response, jar)
   })
+
+  // Keep the original URL usable by inline Markdown, the lightbox and downloads.
+  // These root/profile cache paths are not files on the Web server itself.
+  router.get('/Users/:owner/.hermes/cache/*filePath', ctx => proxyHermesMedia(ctx, dependencies))
+  router.get('/Users/:owner/.hermes/profiles/:profile/:mediaDir/*filePath', ctx => proxyHermesMedia(ctx, dependencies))
 
   // Historical messages can contain Markdown links such as
   // /Users/<owner>/Agents/<path>. Map only the configured media root, never
@@ -2421,17 +2473,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
         maxResponseBytes: 256 * 1_024 * 1_024,
       })
       if (action === 'preview') {
-        const type = ctx.response.get('content-type').split(';', 1)[0]?.trim().toLowerCase()
-        const activeContent = type === 'text/html'
-          || type === 'application/xhtml+xml'
-          || type === 'image/svg+xml'
-          || Boolean(type?.endsWith('/xml') || type?.endsWith('+xml'))
-        if (activeContent) {
-          ctx.type = 'application/octet-stream'
-          ctx.set('Content-Disposition', `attachment; filename="file-${id}"`)
-        } else {
-          ctx.remove('Content-Disposition')
-        }
+        prepareFilePreview(ctx, `file-${id}`)
       }
     })
   }

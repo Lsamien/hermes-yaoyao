@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
 import WebSocket, { WebSocketServer } from 'ws'
 
 const port = Number(process.env.FAKE_HERMES_PORT || 19119)
@@ -105,6 +106,7 @@ const sessions = [
   { id: 'session-second', profile: 'yaoyao', source: 'web', title: '第二个会话', preview: '用于验证列表和切换', message_count: 2, tool_call_count: 0, started_at: now() - 7200, last_active_at: now() - 600, model: 'gpt-5.5', provider: 'openai' },
   { id: 'session-demo', profile: 'yaoyao', source: 'web', title: '夭夭 Web 验收会话', preview: '文件库与群聊已经就绪', message_count: 4, tool_call_count: 1, started_at: now() - 3600, last_active_at: now(), pinned: true, model: 'gpt-5.6', provider: 'openai' },
   { id: 'session-yaoer', profile: 'yaoer', source: 'web', title: '瑶儿专属会话', message_count: 1, tool_call_count: 0, started_at: now() - 3500, last_active_at: now() - 20, model: 'gpt-5.6', provider: 'openai' },
+  { id: 'session-media', profile: 'yaoer', source: 'web', title: '瑶儿生成图片验收', message_count: 1, tool_call_count: 0, started_at: now() - 3400, last_active_at: now() - 30, model: 'gpt-5.6', provider: 'openai' },
   ...Array.from({ length: 101 }, (_, index) => ({ id: `session-page-${index + 1}`, profile: 'yaoyao', source: 'web', title: `分页会话 ${index + 1}`, message_count: 0, tool_call_count: 0, started_at: now() - 10_000 - index, last_active_at: now() - 10_000 - index })),
 ]
 const messages = [
@@ -124,6 +126,17 @@ const messages = [
   { id: 'message-background-process', role: 'user', content: '[IMPORTANT: Background process proc_6be40e6c3864 exited (exit code 143, SIGTERM).\nCommand: ./run_mac.sh\nOutput:\nmodel loaded', timestamp: now() - 135 },
   { id: 'message-system', role: 'user', content: '[System: The active model for this chat has changed to gpt-5.6-terra via provider openai.]', timestamp: now() - 130 },
 ]
+// These are Hermes-owned paths, deliberately absent from the Web server's
+// filesystem. Only the authenticated upstream file API can serve their bytes.
+const profileMediaPaths = [
+  '/Users/samien/.hermes/profiles/yaoer/cache/images/openai_codex_gpt-image-2-high_20260902_194820_1d225f08.png',
+  '/Users/samien/.hermes/profiles/yaoer/cache/images/国漫三视图.png',
+]
+const profileMediaPng = readFileSync(new URL('../../public/brand/AppIcon-1024.png', import.meta.url))
+const profileMediaMessages = [{
+  id: 'message-profile-media', role: 'assistant', timestamp: now() - 30,
+  content: `已经生成两张图片：\n\n![3D 半写实女性四视图](${profileMediaPaths[0]})\n\n![国漫三视图](${profileMediaPaths[1]})`,
+}]
 const groupAgent = { id: agentId, roomId, profile: 'yaoyao', displayName: '夭夭', description: '主 Agent', enabled: true, replyWithoutMention: true, isHost: true, model: 'gpt-5.6', provider: 'openai', reasoningEffort: 'high', fastMode: true, status: 'idle', createdAt: now() - 2000, updatedAt: now() }
 const secondGroupAgent = { id: secondAgentId, roomId, profile: 'yaoer', nodeId: 'remote-node', nodeLabel: '远程节点', displayName: '瑶儿', description: '评审 Agent', enabled: true, replyWithoutMention: false, isHost: false, model: 'gpt-5.6', provider: 'openai', reasoningEffort: 'medium', fastMode: false, status: 'idle', createdAt: now() - 1900, updatedAt: now() }
 const groupAgents = [groupAgent, secondGroupAgent]
@@ -171,6 +184,16 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === '/auth/logout' && request.method === 'POST') return json(response, 200, { ok: true }, { 'Set-Cookie': 'fake_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax' })
   if (!authenticated(request)) return json(response, 401, { detail: 'Unauthorized' })
+  if (url.pathname === '/api/files/download' && request.method === 'GET') {
+    const path = url.searchParams.get('path')
+    if (!profileMediaPaths.includes(path)) return json(response, 404, { detail: 'File not found' })
+    response.writeHead(200, {
+      'Content-Type': 'image/png',
+      'Content-Length': profileMediaPng.length,
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(path.split('/').at(-1))}`,
+    })
+    return response.end(profileMediaPng)
+  }
   if (url.pathname.startsWith('/api/plugins/yaoyao/v1/') && !groupAvailable) return json(response, 503, { detail: 'Group service temporarily unavailable' })
   if (url.pathname === '/api/auth/me') return json(response, 200, { user_id: 'demo-user', display_name: '验收用户', email: 'demo@example.invalid', provider: 'basic' })
   if (url.pathname === '/api/auth/ws-ticket' && request.method === 'POST') return json(response, 200, { ticket: 'fake-ticket' })
@@ -305,7 +328,8 @@ const server = createServer(async (request, response) => {
   }
   if (/^\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
     const id = decodeURIComponent(url.pathname.split('/')[3])
-    const scopedMessages = id === 'session-yaoer' ? [{ id: 'yaoer-history', role: 'assistant', content: '瑶儿历史消息', timestamp: now() - 10 }] : messages
+    const scopedMessages = id === 'session-media' ? profileMediaMessages
+      : id === 'session-yaoer' ? [{ id: 'yaoer-history', role: 'assistant', content: '瑶儿历史消息', timestamp: now() - 10 }] : messages
     return json(response, 200, { messages: scopedMessages, pagination: { total: scopedMessages.length, returned: scopedMessages.length, limit: 150, hasMore: false } })
   }
   if (/^\/api\/sessions\/[^/]+$/.test(url.pathname)) {

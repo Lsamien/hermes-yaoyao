@@ -82,7 +82,7 @@ ID 和包名。浏览器只提交路径和公开元数据；8800 本地校验 RS
 插件安装接口安装。默认源为
 `https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao`。
 
-当前发布版本：**Git `v0.2.30` / 夭夭 Web `0.2.30` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
+当前发布版本：**Git `v0.2.31` / 夭夭 Web `0.2.31` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
 
 本版支持 Web 独立检查更新、升级和回滚，9119 离线、超时或认证失败不再阻塞升级。8800 仍保留管理员登录及安全校验，并兼容 9119 的本机 Session Token、密码认证和旧版本机直连模式；9119 可保持仅本机监听，8800 继续面向局域网提供服务。
 
