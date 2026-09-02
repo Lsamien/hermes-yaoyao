@@ -6,8 +6,8 @@
 
 | 项目 | 版本 | 校验位置 |
 | --- | --- | --- |
-| Git 发布标签 | `v0.2.28` | `release.json` 的 `gitTag` 与 `git describe --tags --exact-match HEAD` |
-| 夭夭 Web | `0.2.28` | `release.json` 与 `package.json` 的 `version` |
+| Git 发布标签 | `v0.2.29` | `release.json` 的 `gitTag` 与 `git describe --tags --exact-match HEAD` |
+| 夭夭 Web | `0.2.29` | `release.json` 与 `package.json` 的 `version` |
 | Hermes Dashboard 插件 | `1.7.3` | `hermes-plugins/yaoyao/dashboard/manifest.json` 的 `version` |
 
 以下步骤以仓库根目录为工作目录。不要使用浮动分支替代发布标签。

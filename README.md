@@ -79,9 +79,9 @@ ID 和包名。浏览器只提交路径和公开元数据；8800 本地校验 RS
 插件安装接口安装。默认源为
 `https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao`。
 
-当前发布版本：**Git `v0.2.28` / 夭夭 Web `0.2.28` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
+当前发布版本：**Git `v0.2.29` / 夭夭 Web `0.2.29` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
 
-本版增加有界热点读取缓存、并发读取合并、30 秒上游状态/身份检查复用，以及写操作和实时事件驱动的缓存失效。客户端授权与 9119 实际请求鉴权仍然保留。详见 [读取缓存与一致性边界](docs/read-cache.md)。
+本版让 8800 自动兼容 9119 的本机 Session Token、密码认证和旧版本机直连模式，并在设置中明确展示认证模式、连接地址、验证时间以及 8800/9119 各自的网络边界。9119 可保持仅本机监听，8800 继续面向局域网提供服务。
 
 普通聊天和团队事件继续使用 [HTTP+SSE 接口](docs/http-sse-realtime.md)，不兼容旧客户端 WebSocket。8800 到 9119 的上游接口及 Python 插件保持不变。
 
