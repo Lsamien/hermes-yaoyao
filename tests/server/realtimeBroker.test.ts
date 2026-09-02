@@ -1,0 +1,164 @@
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { once } from 'node:events'
+import { WebSocketServer, type WebSocket } from 'ws'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { RealtimeBroker, type RealtimePrincipal, type StreamEntry } from '../../src/server/realtimeBroker.js'
+import { RealtimeReceipts } from '../../src/server/realtimeReceipts.js'
+
+const cleanup: Array<() => void> = []
+afterEach(() => cleanup.splice(0).reverse().forEach(f => f()))
+async function fixture() {
+  const home = mkdtempSync(join(tmpdir(), 'yaoyao-realtime-test-'))
+  const ws = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+  await once(ws, 'listening')
+  cleanup.push(() => { for (const c of ws.clients) c.terminate(); ws.close() })
+  const commands: any[] = []
+  let count = 0
+  let seq = 0, truncate = false, dropPrompt = false
+  const history: any[] = []
+  let peer: WebSocket
+  ws.on('connection', socket => {
+    peer = socket; count++
+    socket.send(JSON.stringify({ method: 'event', params: { type: 'gateway.ready', payload: { replay_epoch: 'test' } } }))
+    socket.on('message', raw => {
+      const f = JSON.parse(raw.toString()); commands.push(f)
+      if (f.method === 'prompt.submit' && dropPrompt) { socket.terminate(); return }
+      if (f.method === 'session.events.since') {
+        socket.send(JSON.stringify({ id: f.id, result: { epoch: 'test', truncated: truncate,
+          events: history.filter(e => e.seq > f.params.last_seen) } }))
+      } else if (f.method === 'session.branch') {
+        socket.send(JSON.stringify({ id: f.id, result: { session_id: 'runtime-branch', stored_session_id: 'stored-branch' } }))
+      } else if (f.method === 'session.create' || f.method === 'session.resume') {
+        socket.send(JSON.stringify({ id: f.id, result: { session_id: 'runtime-1', stored_session_id: 'stored-1', running: false } }))
+      } else {
+        setTimeout(() => socket.send(JSON.stringify({ id: f.id, result: { status: 'submitted' } })), 20)
+      }
+    })
+  })
+  let now = Date.now()
+  const broker = new RealtimeBroker(home, () => now)
+  cleanup.push(() => broker.close())
+  const principal = (key: string): RealtimePrincipal => ({ key, upstreamKey: 'one-service', paired: false,
+    valid: () => true, url: async () => new URL(`ws://127.0.0.1:${(ws.address() as any).port}`) })
+  return { home, broker, principal, commands, count: () => count, advance: (n: number) => { now += n },
+    disconnect: () => peer!.terminate(), truncate: () => { truncate = true }, dropPrompt: () => { dropPrompt = true },
+    emit: (type: string, payload: unknown) => {
+      const params = { type, session_id: 'runtime-1', seq: ++seq, payload }; history.push(params)
+      if (peer!.readyState === 1) peer!.send(JSON.stringify({ method: 'event', params }))
+    } }
+}
+const resume = { method: 'session.resume', params: { session_id: 'stored-1', profile: 'default' } }
+describe('realtime broker', () => {
+  it('shares upstream across subscribers and isolates unregistered routes', async () => {
+    const f = await fixture()
+    const a = await f.broker.create(f.principal('alice'), 'chat')
+    const b = await f.broker.create(f.principal('bob'), 'chat')
+    const c = await f.broker.create(f.principal('alice'), 'chat')
+    await f.broker.command(a, 'resume-a', resume)
+    await f.broker.command(c, 'resume-c', resume)
+    const seenA: StreamEntry[] = [], seenB: StreamEntry[] = [], seenC: StreamEntry[] = []
+    f.broker.subscribe(a, undefined, x => seenA.push(x)); f.broker.subscribe(b, undefined, x => seenB.push(x)); f.broker.subscribe(c, undefined, x => seenC.push(x))
+    f.emit('message.delta', { text: '你好' })
+    await new Promise(r => setTimeout(r, 30))
+    expect(f.count()).toBe(1)
+    expect(seenA.some(x => x.data.includes('你好'))).toBe(true)
+    expect(seenC.some(x => x.data.includes('你好'))).toBe(true)
+    expect(seenB.some(x => x.data.includes('你好'))).toBe(false)
+    expect(() => f.broker.get(f.principal('bob'), a.id)).toThrow('Channel not found')
+  })
+  it('deduplicates simultaneous commands and rejects a changed payload', async () => {
+    const f = await fixture(), p = f.principal('alice')
+    const c = await f.broker.create(p, 'chat')
+    await f.broker.command(c, 'open', resume)
+    const prompt = { method: 'prompt.submit', params: { session_id: 'runtime-1', text: 'secret prompt' } }
+    const [one, two] = await Promise.all([f.broker.command(c, 'outbox-1', prompt), f.broker.command(c, 'outbox-1', prompt)])
+    expect(one).toEqual(two); expect(one.state).toBe('confirmed')
+    expect(f.commands.filter(x => x.method === 'prompt.submit')).toHaveLength(1)
+    expect(() => f.broker.command(c, 'outbox-1', { ...prompt, params: { ...prompt.params, text: 'different' } })).toThrow('conflict')
+    expect(() => f.broker.receipt(f.principal('bob'), 'outbox-1')).toThrow('Receipt not found')
+    for (const file of ['realtime-receipts.sqlite3', 'realtime-receipts.sqlite3-wal']) expect(readFileSync(join(f.home, file)).includes(Buffer.from('secret prompt'))).toBe(false)
+  })
+  it('keeps upstream alive after downstream detach and replays exact cursor', async () => {
+    const f = await fixture(), p = f.principal('alice')
+    const c = await f.broker.create(p, 'chat')
+    await f.broker.command(c, 'open', resume)
+    const entries: StreamEntry[] = []
+    const off = f.broker.subscribe(c, undefined, x => entries.push(x))
+    const cursor = entries.at(-1)!.id
+    off(); f.emit('message.start', {}); f.emit('message.delta', { text: 'background' })
+    await new Promise(r => setTimeout(r, 30))
+    const replay: StreamEntry[] = []
+    f.broker.subscribe(c, cursor, x => replay.push(x))
+    expect(replay).toHaveLength(2); expect(f.count()).toBe(1)
+    f.advance(600_001)
+    expect(() => f.broker.subscribe(c, cursor, () => {})).toThrow('Replay window expired')
+  })
+  it('does not execute runtime commands without a route subscription', async () => {
+    const f = await fixture()
+    const c = await f.broker.create(f.principal('alice'), 'chat')
+    const result = await f.broker.command(c, 'forbidden', { method: 'session.interrupt', params: { session_id: 'guessed' } })
+    expect(result.state).toBe('rejected'); expect(f.commands).toHaveLength(0)
+  })
+  it('marks write-ahead admissions unknown after a process restart', () => {
+    const home = mkdtempSync(join(tmpdir(), 'yaoyao-receipts-test-'))
+    const a = new RealtimeReceipts(home)
+    a.reserve('alice', 'submitted', '{"text":"private"}'); a.close()
+    const b = new RealtimeReceipts(home)
+    expect(b.reserve('alice', 'submitted', '{"text":"private"}')).toMatchObject({ state: 'unknown' })
+    b.close()
+  })
+  it('registers branch identities without losing the original subscription', async () => {
+    const f = await fixture(), c = await f.broker.create(f.principal('alice'), 'chat')
+    await f.broker.command(c, 'open', resume)
+    const branch = await f.broker.command(c, 'branch', { method: 'session.branch', params: { session_id: 'runtime-1' } })
+    expect(branch.state).toBe('confirmed')
+    const sent = await f.broker.command(c, 'branched-prompt', { method: 'prompt.submit', params: { session_id: 'runtime-branch', text: 'branch' } })
+    expect(sent.state).toBe('confirmed')
+    expect(c.routes.size).toBe(2)
+  })
+  it('does not let guessed approval IDs escape a subscribed session', async () => {
+    const f = await fixture(), c = await f.broker.create(f.principal('alice'), 'chat')
+    await f.broker.command(c, 'open', resume)
+    const result = await f.broker.command(c, 'approval', { method: 'approval.respond', params: { session_id: 'runtime-1', request_id: 'another-users-approval', approved: true } })
+    expect(result).toMatchObject({ state: 'rejected', response: { error: { code: 'interaction_forbidden' } } })
+    expect(f.commands.filter(x => x.method === 'approval.respond')).toHaveLength(0)
+  })
+  it('page reloads cannot exhaust live-stream capacity with detached handles', async () => {
+    const f = await fixture(), p = f.principal('alice')
+    for (let i = 0; i < 40; i++) await f.broker.create(p, 'chat')
+    expect(f.broker.channels.size).toBe(32)
+    expect(f.count()).toBe(1)
+  })
+  it('recovers the upstream replay ring without losing offline deltas', async () => {
+    const f = await fixture(), c = await f.broker.create(f.principal('alice'), 'chat')
+    await f.broker.command(c, 'open', resume)
+    const received: StreamEntry[] = []
+    f.broker.subscribe(c, undefined, e => received.push(e))
+    f.emit('message.delta', { text: 'before' })
+    await vi.waitFor(() => expect(received.some(e => e.data.includes('before'))).toBe(true))
+    f.disconnect(); f.emit('message.delta', { text: 'offline' })
+    await vi.waitFor(() => expect(received.filter(e => e.data.includes('offline'))).toHaveLength(1), { timeout: 2500 })
+    expect(f.count()).toBe(2)
+    expect(received.filter(e => e.event === 'reset')).toHaveLength(0)
+  })
+  it('reports reset when upstream history was truncated', async () => {
+    const f = await fixture(), c = await f.broker.create(f.principal('alice'), 'chat')
+    await f.broker.command(c, 'open', resume)
+    const received: StreamEntry[] = []
+    f.broker.subscribe(c, undefined, e => received.push(e))
+    f.truncate(); f.disconnect()
+    await vi.waitFor(() => expect(received.some(e => e.event === 'reset')).toBe(true), { timeout: 2500 })
+  })
+  it('never repeats a prompt when the upstream acceptance reply is lost', async () => {
+    const f = await fixture(), c = await f.broker.create(f.principal('alice'), 'chat')
+    await f.broker.command(c, 'open', resume)
+    f.dropPrompt()
+    const prompt = { method: 'prompt.submit', params: { session_id: 'runtime-1', text: 'do once' } }
+    const result = await f.broker.command(c, 'lost-ack', prompt)
+    expect(result.state).toBe('unknown')
+    expect((await f.broker.command(c, 'lost-ack', prompt)).state).toBe('unknown')
+    expect(f.commands.filter(f => f.method === 'prompt.submit')).toHaveLength(1)
+  })
+})

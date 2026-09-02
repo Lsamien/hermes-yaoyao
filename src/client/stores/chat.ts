@@ -719,7 +719,7 @@ export const useChatStore = defineStore('chat', () => {
         session_id: runtimeId,
         text: parts.join('\n\n'),
         ...(effectiveMode === 'queue' ? { queued: true } : {}),
-      }))
+      }, 120_000, `web:prompt:${clientMessageId}`))
       const status = string(result.status, 'accepted').toLowerCase()
       if (effectiveMode === 'steer' && !['accepted', 'queued', 'steered', 'streaming'].includes(status)) {
         throw new RpcError(string(result.error ?? result.message, 'Hermes 拒绝了 Steer 请求'), status)

@@ -373,6 +373,10 @@ export class ChatPushRelayObserver {
     })
   }
 
+  ownsJob(jobID: string): boolean {
+    return !this.#closed && [...this.#jobsByRuntimeSession.values()].some(jobs => jobs.some(job => job.id === jobID))
+  }
+
   observeUpstreamFrame(data: RawData, isBinary: boolean): void {
     if (this.#closed || isBinary) return
     let frame: JsonRecord
@@ -1127,13 +1131,20 @@ async function chatTerminalCandidate(
  * Server-owned recovery connection for one persisted chat job. The caller
  * controls the number of concurrently started watchers.
  */
+export interface ChatPushRecoveryTransport {
+  start(): void
+  send(data: string): void
+  close(code?: number, reason?: string): void
+}
+export type ChatPushTransportFactory = (job: ChatPushJob, onFrame: (frame: string) => void, onClose: () => void) => Promise<ChatPushRecoveryTransport>
+
 export class HermesChatPushJobWatcher {
   #job: ChatPushJob
   #running = false
   #generation = 0
   #retryAttempt = 0
   #retryTimer?: ReturnType<typeof setTimeout>
-  #socket?: WebSocket
+  #socket?: WebSocket | ChatPushRecoveryTransport
   #resumeRequestID = ''
   #frames = Promise.resolve()
   #finished = false
@@ -1146,6 +1157,7 @@ export class HermesChatPushJobWatcher {
     readonly resolver: ChatNotificationResolver = new HermesChatNotificationResolver(upstreamSession),
     readonly now: () => number = Date.now,
     readonly onFinished?: (jobID: string) => void,
+    readonly transportFactory?: ChatPushTransportFactory,
   ) {
     this.#job = { ...job }
   }
@@ -1174,6 +1186,15 @@ export class HermesChatPushJobWatcher {
       return
     }
     try {
+      if (this.transportFactory) {
+        const transport = await this.transportFactory(this.#job,
+          frame => this.#queueFrame(generation, Buffer.from(frame), false),
+          () => this.#scheduleReconnect(generation))
+        if (!this.#running || generation !== this.#generation) { transport.close(); return }
+        this.#socket = transport
+        transport.start()
+        return
+      }
       const ticketResponse = await this.upstreamSession.request('/api/auth/ws-ticket', { method: 'POST' })
       if (ticketResponse.status < 200 || ticketResponse.status >= 300) {
         throw new Error(`Hermes WebSocket ticket failed (${ticketResponse.status})`)
@@ -1376,6 +1397,7 @@ export class HermesChatPushJobWatcher {
 }
 
 export interface ChatPushJobManagerOptions {
+  transportFactory?: ChatPushTransportFactory
   maximumConcurrent?: number
   reconcileMilliseconds?: number
   now?: () => number
@@ -1384,6 +1406,8 @@ export interface ChatPushJobManagerOptions {
 
 /** Starts and bounds the server-owned recovery sockets for persisted jobs. */
 export class ChatPushJobManager {
+  private transportFactory?: ChatPushTransportFactory
+  private brokerOwnsJob?: (job: ChatPushJob) => boolean
   readonly #watchers = new Map<string, HermesChatPushJobWatcher>()
   readonly #maximumConcurrent: number
   readonly #reconcileMilliseconds: number
@@ -1403,6 +1427,11 @@ export class ChatPushJobManager {
     this.#reconcileMilliseconds = Math.max(250, Math.trunc(options.reconcileMilliseconds ?? 1_000))
     this.#now = options.now ?? Date.now
     this.#resolver = options.resolver ?? new HermesChatNotificationResolver(upstreamSession)
+    this.transportFactory = options.transportFactory
+  }
+
+  setTransportFactory(factory: ChatPushTransportFactory, ownsJob?: (job: ChatPushJob) => boolean): void {
+    this.transportFactory = factory; this.brokerOwnsJob = ownsJob
   }
 
   start(): void {
@@ -1444,10 +1473,11 @@ export class ChatPushJobManager {
     for (const job of pending) {
       const structurallyEligible = job.expiresAt > now
         && job.metadata?.baselineCaptured === true
-        && Number.isFinite(Number(job.metadata?.disconnectedAt))
+        && (Boolean(this.transportFactory) || Number.isFinite(Number(job.metadata?.disconnectedAt)))
         && Boolean(string(job.metadata?.runID) || string(job.metadata?.promptDigest))
         && (job.phase === 'submitted' || job.phase === 'accepted' || job.phase === 'watching')
       if (!structurallyEligible) continue
+      if (this.brokerOwnsJob?.(job)) continue
       if (this.coordinator.canRecoverChatJob
         && !await this.coordinator.canRecoverChatJob(job)) continue
       jobs.push(job)
@@ -1474,6 +1504,7 @@ export class ChatPushJobManager {
           this.#watchers.delete(jobID)
           if (this.#running) void this.reconcile()
         },
+        this.transportFactory,
       )
       this.#watchers.set(job.id, watcher)
       watcher.start()

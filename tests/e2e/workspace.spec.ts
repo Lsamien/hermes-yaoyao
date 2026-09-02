@@ -817,6 +817,24 @@ test('shows a thinking animation after submit until output starts', async ({ pag
   await expect(page.locator('.thinking-indicator')).toHaveCount(0)
 })
 
+test('uses HTTP commands and SSE for chat and team events without opening client WebSockets', async ({ page }, testInfo) => {
+  const sockets: string[] = [], paths: string[] = []
+  page.on('websocket', socket => sockets.push(socket.url()))
+  page.on('request', request => paths.push(new URL(request.url()).pathname))
+  await page.goto('/chat/session-demo?profile=yaoyao')
+  await page.locator('.composer-textarea').fill('验证 HTTP SSE 入口')
+  await page.getByRole('button', { name: '发送消息' }).click()
+  await expect(page.getByText('这是来自假 Gateway 的流式回复。', { exact: true })).toBeVisible()
+  expect(paths.some(path => /^\/api\/realtime\/channels\/[^/]+\/commands$/.test(path))).toBe(true)
+  expect(paths.some(path => /^\/api\/realtime\/channels\/[^/]+\/events$/.test(path))).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('http-sse-chat.png'), fullPage: true })
+  await page.getByRole('button', { name: '团队', exact: true }).click()
+  await page.getByRole('option').filter({ hasText: '设计验收' }).click()
+  await expect(page.getByRole('heading', { name: '设计验收' })).toBeVisible()
+  expect(sockets).toEqual([])
+  await page.screenshot({ path: testInfo.outputPath('http-sse-team.png'), fullPage: true })
+})
+
 test('keeps streamed text below sealed interim commentary and its tool trace', async ({ page }) => {
   await page.goto('/chat/session-demo?profile=yaoyao')
   await page.locator('.composer-textarea').fill('验证流式分段')

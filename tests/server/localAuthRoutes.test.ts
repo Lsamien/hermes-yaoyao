@@ -104,8 +104,8 @@ describe('8800 local authentication routes', () => {
     expect(nativeProfiles.body.profiles[0]).toMatchObject({
       name: 'default', description: '丫头', display_name: '丫头', agentName: '丫头',
     })
-    await native.post('/api/auth/ws-ticket').set('Host', '127.0.0.1:8800').send({}).expect(200, /upstream-ticket/)
-    expect(wsTicketForwardedFor).toBeNull()
+    await native.post('/api/auth/ws-ticket').set('Host', '127.0.0.1:8800').send({}).expect(410)
+    expect(wsTicketForwardedFor).toBeUndefined()
   })
 
   it('lets one 8800 claim another 8800 as a direct child node', async () => {

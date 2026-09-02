@@ -5,10 +5,10 @@ import { createServer as createHttpsServer } from 'node:https'
 import { join } from 'node:path'
 import { bodyParser } from '@koa/bodyparser'
 import Koa from 'koa'
+import { RealtimeAPI } from './realtimeApi.js'
 import type { ServerConfig } from './config.js'
 import { loadServerConfig } from './config.js'
 import { errorMessage, HttpError } from './errors.js'
-import { RealtimeLeaseStore } from './leases.js'
 import { NodePairingStore } from './pairing.js'
 import { LocalAuthStore, UpstreamServiceSession } from './localAuth.js'
 import { AccountLoginPairingStore } from './accountPairing.js'
@@ -23,7 +23,6 @@ import {
 import { UpstreamHttpError, UpstreamClient } from './upstream.js'
 import { UploadStore } from './uploads.js'
 import { SystemUpdateManager } from './updateManager.js'
-import { installWebSocketRelay } from './websocket.js'
 import { PushCoordinator } from './pushCoordinator.js'
 import {
   APNsConfigurationManager,
@@ -49,7 +48,6 @@ export interface ApplicationOptions {
   config?: ServerConfig
   fetchImpl?: typeof fetch
   csrfSecret?: Buffer
-  leases?: RealtimeLeaseStore
   pairings?: NodePairingStore
   uploads?: UploadStore
   updates?: SystemUpdateManager
@@ -64,10 +62,10 @@ export interface ApplicationOptions {
 }
 
 export interface ApplicationRuntime {
+  realtime: RealtimeAPI
   app: Koa
   config: ServerConfig
   csrf: CsrfProtection
-  leases: RealtimeLeaseStore
   pairings: NodePairingStore
   upstream: UpstreamClient
   uploads: UploadStore
@@ -120,7 +118,6 @@ export function createApplication(options: ApplicationOptions = {}): Application
   const app = new Koa()
   app.proxy = false
   const csrf = new CsrfProtection(persistentCsrfSecret(config.home, options.csrfSecret), Boolean(config.tlsCert))
-  const leases = options.leases ?? new RealtimeLeaseStore()
   const pairings = options.pairings ?? new NodePairingStore(config.home)
   const upstream = new UpstreamClient(config.upstream, options.fetchImpl, Boolean(config.tlsCert))
   const uploads = options.uploads ?? new UploadStore(config.home)
@@ -191,6 +188,11 @@ export function createApplication(options: ApplicationOptions = {}): Application
     new HermesGroupEventSource(config, upstreamSession),
     pushEventCoordinator,
   )
+  const realtime = new RealtimeAPI(config, auth, csrf, pairings, upstream, upstreamSession, {
+    coordinator: pushEventCoordinator,
+    resolver: new HermesChatNotificationResolver(upstreamSession, (user, prompt) => push.promptDigest(user, prompt)),
+  })
+  chatPushJobs.setTransportFactory(realtime.recoveryTransport, job => realtime.ownsPushJob(job.id))
   try {
     uploads.cleanupUncommitted()
   } catch {
@@ -242,13 +244,14 @@ export function createApplication(options: ApplicationOptions = {}): Application
     }
     await next()
   })
+  app.use(realtime.middleware())
   app.use(bodyParser({
     encoding: 'utf-8',
     enableTypes: ['json'],
     parsedMethods: ['POST', 'PUT', 'PATCH', 'DELETE'],
     jsonLimit: '2mb',
-    onError: (_error, ctx) => {
-      throw new HttpError(ctx.status === 413 ? 413 : 400, 'Invalid JSON request body', 'invalid_json_body')
+    onError: (error, ctx) => {
+      throw new HttpError(ctx.status === 413 || (error as { status?: number }).status === 413 ? 413 : 400, 'Invalid JSON request body', 'invalid_json_body')
     },
   }))
   app.use(async (ctx, next) => {
@@ -296,7 +299,6 @@ export function createApplication(options: ApplicationOptions = {}): Application
     config,
     csrf,
     upstream,
-    leases,
     pairings,
     uploads,
     updates,
@@ -322,10 +324,10 @@ export function createApplication(options: ApplicationOptions = {}): Application
   })
 
   return {
+    realtime,
     app,
     config,
     csrf,
-    leases,
     pairings,
     upstream,
     uploads,
@@ -342,6 +344,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     chatPushJobs,
     groupPushEvents,
     close: () => {
+      realtime.close()
       chatPushJobs.stop()
       groupPushEvents.stop()
       push.close()
@@ -374,27 +377,13 @@ export function createNodeServer(runtime: ApplicationRuntime): NodeServerRuntime
   }
   synchronizePushObservers()
   const removePushConfigurationListener = runtime.push.onEnabledChange(synchronizePushObservers)
-  const removeWebSockets = installWebSocketRelay(
-    server,
-    config,
-    runtime.leases,
-    runtime.pairings,
-    {
-      coordinator: runtime.pushEventCoordinator,
-      resolveGatewayUser: request => runtime.auth.currentFromCookieHeader(
-        typeof request.headers.cookie === 'string' ? request.headers.cookie : undefined,
-      )?.id,
-      notificationResolver: new HermesChatNotificationResolver(
-        runtime.upstreamSession,
-        (localUserID, prompt) => runtime.push.promptDigest(localUserID, prompt),
-      ),
-    },
-  )
+  const removeWebSockets = runtime.realtime.rejectLegacyUpgrades(server)
   return {
     server,
     close: async () => {
       removePushConfigurationListener()
       removeWebSockets()
+      runtime.realtime.close()
       await new Promise<void>((resolve, reject) => {
         if (!server.listening) {
           resolve()

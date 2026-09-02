@@ -25,12 +25,14 @@ const TEST_USER: LocalUser = {
 }
 
 class AuthenticatedTestStore extends LocalAuthStore {
+  override currentFromCookieHeader(_cookie: string | undefined): LocalUser { return TEST_ADMIN }
   override current(_ctx: Koa.Context): LocalUser { return TEST_ADMIN }
   override require(_ctx: Koa.Context, _allowPasswordChange = false): LocalUser { return TEST_ADMIN }
   override requireAdmin(_ctx: Koa.Context): LocalUser { return TEST_ADMIN }
 }
 
 class UserAuthenticatedTestStore extends LocalAuthStore {
+  override currentFromCookieHeader(_cookie: string | undefined): LocalUser { return TEST_USER }
   override current(_ctx: Koa.Context): LocalUser { return TEST_USER }
   override require(_ctx: Koa.Context, _allowPasswordChange = false): LocalUser { return TEST_USER }
 }

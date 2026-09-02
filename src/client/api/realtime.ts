@@ -1,197 +1,81 @@
-import type { GroupSocketEnvelope, JsonValue, RealtimeConnectionState, RpcEventFrame, RpcRequestFrame } from '@shared/types'
-import { apiRequest, ApiError, unwrapData } from './client'
-import { createId } from '@/utils/id'
+import type { GroupSocketEnvelope, JsonValue, RealtimeConnectionState, RpcEventFrame } from '@shared/types'
+import { ApiError } from './client'
 import { number, record, string } from '@/utils/normalize'
+import { HTTPRealtimeChannel, HTTPRPCError } from './httpRealtime'
 
 export class RpcError extends Error {
-  readonly code?: number | string
-  readonly data?: JsonValue
-
-  constructor(message: string, code?: number | string, data?: JsonValue) {
-    super(message)
-    this.name = 'RpcError'
-    this.code = code
-    this.data = data
+  constructor(message: string, readonly code?: number | string, readonly data?: JsonValue) {
+    super(message); this.name = 'RpcError'
   }
-}
-
-interface LeaseResponse { lease?: string; token?: string; id?: string; expiresAt?: string }
-
-export async function createRealtimeLease(channel: 'chat' | 'groups', anchor?: { epoch: string; cursor: number }): Promise<string> {
-  const payload = unwrapData(await apiRequest<LeaseResponse>('/api/app/realtime-leases', {
-    method: 'POST', body: { channel, ...(anchor ?? {}) }, timeoutMs: 15_000,
-  }))
-  const lease = payload.lease ?? payload.token ?? payload.id
-  if (!lease?.trim()) throw new ApiError('实时连接租约无效', 0, 'INVALID_LEASE')
-  return lease.trim()
-}
-
-function webSocketURL(path: string, query: Record<string, string | number | undefined>): string {
-  const url = new URL(path, window.location.origin)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  for (const [key, value] of Object.entries(query)) if (value !== undefined) url.searchParams.set(key, String(value))
-  return url.toString()
 }
 
 type StateListener = (state: RealtimeConnectionState, reason?: string) => void
 type RpcEventListener = (event: RpcEventFrame['params']) => void
 
-interface PendingRequest {
-  resolve(value: JsonValue): void
-  reject(reason: unknown): void
-  timer: number
-  method: string
-}
-
+/** Historical facade name retained for store injection; transport is HTTP+SSE only. */
 export class ChatRpcSocket {
-  private socket?: WebSocket
+  private http?: HTTPRealtimeChannel
   private generation = 0
-  private pending = new Map<string, PendingRequest>()
+  private openingRequests = 0
+  private earlyFrames: string[] = []
   private eventListeners = new Set<RpcEventListener>()
   private stateListeners = new Set<StateListener>()
-  private manuallyClosed = false
   state: RealtimeConnectionState = 'idle'
 
-  onEvent(listener: RpcEventListener): () => void {
-    this.eventListeners.add(listener)
-    return () => this.eventListeners.delete(listener)
-  }
-
-  onState(listener: StateListener): () => void {
-    this.stateListeners.add(listener)
-    return () => this.stateListeners.delete(listener)
-  }
-
+  onEvent(listener: RpcEventListener): () => void { this.eventListeners.add(listener); return () => this.eventListeners.delete(listener) }
+  onState(listener: StateListener): () => void { this.stateListeners.add(listener); return () => this.stateListeners.delete(listener) }
   async connect(): Promise<void> {
     this.close()
-    this.manuallyClosed = false
     const generation = ++this.generation
-    this.publishState('leasing')
-    const lease = await createRealtimeLease('chat')
-    if (generation !== this.generation || this.manuallyClosed) return
     this.publishState('connecting')
-    await new Promise<void>((resolve, reject) => {
-      const socket = new WebSocket(webSocketURL('/ws/chat', { lease }))
-      this.socket = socket
-      let settled = false
-      const readyTimer = window.setTimeout(() => {
-        if (settled) return
-        settled = true
-        socket.close(1011, 'gateway ready timeout')
-        reject(new ApiError('等待 Hermes 实时握手超时', 0, 'GATEWAY_READY_TIMEOUT'))
-      }, 15_000)
-      socket.addEventListener('open', () => {
-        if (generation !== this.generation) return socket.close(1000)
-        this.publishState('connected')
-      }, { once: true })
-      socket.addEventListener('message', event => {
-        void this.handleMessage(event.data, generation).then(ready => {
-          if (!ready || settled) return
-          settled = true
-          window.clearTimeout(readyTimer)
-          resolve()
-        })
-      })
-      socket.addEventListener('error', () => {
-        if (!settled) {
-          settled = true
-          window.clearTimeout(readyTimer)
-          reject(new ApiError('聊天实时连接失败', 0, 'WEBSOCKET_ERROR'))
-        }
-      })
-      socket.addEventListener('close', event => {
-        if (!settled) {
-          settled = true
-          window.clearTimeout(readyTimer)
-          reject(new ApiError(event.reason || '聊天实时连接在握手前关闭', 0, 'WEBSOCKET_CLOSED'))
-        }
-        this.handleClose(event, generation)
-      })
+    await HTTPRealtimeChannel.requireSupport()
+    if (generation !== this.generation) return
+    this.http = new HTTPRealtimeChannel(frame => this.handleMessage(frame, generation), error => {
+      if (generation === this.generation) this.publishState('failed', error.message)
     })
+    await this.http.open('chat')
   }
-
   close(): void {
-    this.manuallyClosed = true
-    this.generation += 1
-    this.socket?.close(1000, 'client close')
-    this.socket = undefined
-    this.rejectAll(new ApiError('实时连接已关闭', 0, 'WEBSOCKET_CLOSED'))
+    this.generation++; this.http?.close(); this.http = undefined
+    this.earlyFrames = []; this.openingRequests = 0
     this.publishState('disconnected')
   }
-
-  async request(method: string, params: Record<string, JsonValue> = {}, timeoutMs = 120_000): Promise<JsonValue> {
-    const socket = this.socket
-    if (!socket || socket.readyState !== WebSocket.OPEN) throw new ApiError('聊天实时连接尚未就绪', 0, 'WEBSOCKET_NOT_READY')
-    const id = createId('rpc')
-    const frame: RpcRequestFrame = { jsonrpc: '2.0', id, method, params }
-    return new Promise<JsonValue>((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        this.pending.delete(id)
-        reject(new ApiError(`实时请求超时：${method}`, 0, 'RPC_TIMEOUT'))
-        // A timed-out request has an unknown receipt and the transport may be half-open.
-        this.socket?.close(1011, 'rpc timeout')
-      }, timeoutMs)
-      this.pending.set(id, { resolve, reject, timer, method })
-      try {
-        socket.send(JSON.stringify(frame))
-      } catch (error) {
-        window.clearTimeout(timer)
-        this.pending.delete(id)
-        reject(error)
+  async request(method: string, params: Record<string, JsonValue> = {}, timeoutMs = 120_000, requestId?: string): Promise<JsonValue> {
+    if (!this.http) throw new ApiError('HTTP 事件通道尚未就绪', 0, 'REALTIME_NOT_READY')
+    const generation = this.generation
+    const opening = ['session.create', 'session.resume', 'session.branch'].includes(method)
+    if (opening) this.openingRequests++
+    try { return await this.http.request(method, params, timeoutMs, requestId) }
+    catch (error) { if (error instanceof HTTPRPCError) throw new RpcError(error.message, error.code, error.data); throw error }
+    finally {
+      if (opening && generation === this.generation) {
+        this.openingRequests--
+        window.setTimeout(() => {
+          if (generation !== this.generation || this.openingRequests) return
+          const frames = this.earlyFrames; this.earlyFrames = []
+          for (const frame of frames) void this.handleMessage(frame, generation)
+        }, 0)
       }
-    })
-  }
-
-  private async handleMessage(data: unknown, generation: number): Promise<boolean> {
-    if (generation !== this.generation) return false
-    let text: string
-    if (typeof data === 'string') text = data
-    else if (data instanceof Blob) text = await data.text()
-    else if (data instanceof ArrayBuffer) text = new TextDecoder().decode(data)
-    else return false
-    let frame: unknown
-    try { frame = JSON.parse(text) } catch { return false }
-    const source = record(frame)
-    const id = typeof source.id === 'string' || typeof source.id === 'number' ? String(source.id) : ''
-    if (id && this.pending.has(id)) {
-      const pending = this.pending.get(id)!
-      this.pending.delete(id)
-      window.clearTimeout(pending.timer)
-      const error = record(source.error)
-      if (source.error) pending.reject(new RpcError(string(error.message, 'Hermes JSON-RPC 请求失败'), error.code as number | string, error.data as JsonValue))
-      else pending.resolve((source.result ?? null) as JsonValue)
-      return false
     }
-    if (source.method !== 'event') return false
-    const params = record(source.params)
-    const type = string(params.type)
-    if (!type) return false
-    const event: RpcEventFrame['params'] = {
-      type,
-      session_id: string(params.session_id) || undefined,
-      profile: string(params.profile) || undefined,
-      payload: (params.payload ?? null) as JsonValue,
+  }
+  private async handleMessage(text: string, generation: number): Promise<void> {
+    if (generation !== this.generation) return
+    const frame = record(JSON.parse(text))
+    if (frame.method !== 'event') return
+    const params = record(frame.params), type = string(params.type)
+    if (!type) return
+    if (this.openingRequests && type !== 'gateway.ready') {
+      if (this.earlyFrames.length >= 512) { this.earlyFrames = []; this.publishState('failed', '事件缓存已满，需要重新同步') }
+      else this.earlyFrames.push(text)
+      return
     }
     if (type === 'gateway.ready') this.publishState('ready')
-    for (const listener of this.eventListeners) listener(event)
-    return type === 'gateway.ready'
-  }
-
-  private handleClose(event: CloseEvent, generation: number): void {
-    if (generation !== this.generation) return
-    this.socket = undefined
-    this.rejectAll(new ApiError('聊天实时连接已断开', 0, 'WEBSOCKET_CLOSED'))
-    this.publishState(this.manuallyClosed ? 'disconnected' : 'failed', event.reason || `连接关闭（${event.code}）`)
-  }
-
-  private rejectAll(error: Error): void {
-    for (const pending of this.pending.values()) {
-      window.clearTimeout(pending.timer)
-      pending.reject(error)
+    const event: RpcEventFrame['params'] = {
+      type, session_id: string(params.session_id) || undefined,
+      profile: string(params.profile) || undefined, payload: (params.payload ?? null) as JsonValue,
     }
-    this.pending.clear()
+    for (const listener of this.eventListeners) listener(event)
   }
-
   private publishState(state: RealtimeConnectionState, reason?: string): void {
     this.state = state
     for (const listener of this.stateListeners) listener(state, reason)
@@ -207,55 +91,27 @@ export interface GroupEventSocketOptions {
 }
 
 export class GroupEventSocket {
-  private socket?: WebSocket
+  private http?: HTTPRealtimeChannel
   private generation = 0
-  private manuallyClosed = false
   private epoch = ''
   private cursor = 0
   state: RealtimeConnectionState = 'idle'
-
   async connect(options: GroupEventSocketOptions): Promise<void> {
     this.close()
-    this.manuallyClosed = false
-    this.epoch = options.epoch
-    this.cursor = options.cursor
+    this.epoch = options.epoch; this.cursor = options.cursor
     const generation = ++this.generation
-    this.publish(options, 'leasing')
-    const lease = await createRealtimeLease('groups', { epoch: this.epoch, cursor: this.cursor })
-    if (generation !== this.generation || this.manuallyClosed) return
     this.publish(options, 'connecting')
-    await new Promise<void>((resolve, reject) => {
-      const socket = new WebSocket(webSocketURL('/ws/groups', { lease }))
-      this.socket = socket
-      let settled = false
-      socket.addEventListener('open', () => {
-        if (generation !== this.generation) return socket.close(1000)
-        settled = true
-        resolve()
-      }, { once: true })
-      socket.addEventListener('message', event => { void this.handleMessage(event.data, generation, options) })
-      socket.addEventListener('error', () => {
-        if (!settled) {
-          settled = true
-          reject(new ApiError('团队事件连接失败', 0, 'GROUP_WEBSOCKET_ERROR'))
-        }
-      })
-      socket.addEventListener('close', event => {
-        if (generation !== this.generation) return
-        this.socket = undefined
-        this.publish(options, this.manuallyClosed ? 'disconnected' : 'failed', event.reason || `连接关闭（${event.code}）`)
-      })
+    await HTTPRealtimeChannel.requireSupport()
+    if (generation !== this.generation) return
+    this.http = new HTTPRealtimeChannel(frame => this.handleMessage(frame, generation, options), error => {
+      if (generation === this.generation) this.needsReset(options, error.message)
     })
+    await this.http.open('groups', { epoch: this.epoch, cursor: this.cursor })
   }
-
   close(): void {
-    this.manuallyClosed = true
-    this.generation += 1
-    this.socket?.close(1000, 'client close')
-    this.socket = undefined
+    this.generation++; this.http?.close(); this.http = undefined
     this.state = 'disconnected'
   }
-
   private async handleMessage(data: unknown, generation: number, options: GroupEventSocketOptions): Promise<void> {
     if (generation !== this.generation) return
     let text: string
@@ -309,8 +165,8 @@ export class GroupEventSocket {
   }
 
   private needsReset(options: GroupEventSocketOptions, reason: string): void {
+    this.http?.close(); this.http = undefined
     this.publish(options, 'needs-reset', reason)
-    this.socket?.close(1000, 'reset required')
     options.onReset(reason)
   }
 

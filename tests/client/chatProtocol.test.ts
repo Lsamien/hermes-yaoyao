@@ -2,94 +2,65 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatRpcSocket, GroupEventSocket } from '@/api/realtime'
 import { setApiCsrfToken } from '@/api/client'
 
-class FakeWebSocket extends EventTarget {
-  static readonly CONNECTING = 0
-  static readonly OPEN = 1
-  static readonly CLOSING = 2
-  static readonly CLOSED = 3
-  static instances: FakeWebSocket[] = []
+beforeEach(() => { setApiCsrfToken('csrf-test'); vi.stubGlobal('WebSocket', vi.fn()) })
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
-  readonly url: string
-  readyState = FakeWebSocket.CONNECTING
-  sent: string[] = []
-
-  constructor(url: string) {
-    super()
-    this.url = url
-    FakeWebSocket.instances.push(this)
-    queueMicrotask(() => {
-      this.readyState = FakeWebSocket.OPEN
-      this.dispatchEvent(new Event('open'))
-    })
-  }
-
-  send(data: string): void { this.sent.push(data) }
-  close(code = 1000, reason = ''): void {
-    this.readyState = FakeWebSocket.CLOSED
-    this.dispatchEvent(new CloseEvent('close', { code, reason }))
-  }
-  message(value: unknown): void { this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(value) })) }
+function httpFixture() {
+  let kind = 'chat', epoch = '', cursor = 0
+  let stream: ReadableStreamDefaultController<Uint8Array> | undefined
+  const send = (frame: object) => stream!.enqueue(new TextEncoder().encode('event: frame\ndata: ' + JSON.stringify(frame) + '\n\n'))
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input)
+    if (path.endsWith('/capabilities')) return Response.json({ protocolVersion: 1, csrfToken: 'csrf-test' })
+    if (init?.method === 'DELETE') return new Response(null, { status: 204 })
+    if (path.endsWith('/channels')) {
+      const body = JSON.parse(String(init?.body)); kind = body.channel; epoch = body.epoch; cursor = body.cursor
+      return Response.json({ id: 'channel-1' }, { status: 201 })
+    }
+    if (path.endsWith('/events')) {
+      const body = new ReadableStream<Uint8Array>({ start(controller) {
+        stream = controller
+        send(kind === 'chat'
+          ? { method: 'event', params: { type: 'gateway.ready', payload: {} } }
+          : { type: 'group.ready', epoch, cursor, heartbeatSeconds: 20 })
+        init?.signal?.addEventListener('abort', () => { try { controller.close() } catch {} }, { once: true })
+      } })
+      return new Response(body, { headers: { 'content-type': 'text/event-stream' } })
+    }
+    return Response.json({ state: 'confirmed', response: { result: { total_tokens: 42 } } })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return { fetchMock, send }
 }
 
-beforeEach(() => {
-  FakeWebSocket.instances = []
-  setApiCsrfToken('csrf-test')
-  vi.stubGlobal('WebSocket', FakeWebSocket)
-})
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-  vi.restoreAllMocks()
-})
-
-function leaseFetch() {
-  const mock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ lease: 'lease-1' }), {
-    status: 201, headers: { 'content-type': 'application/json' },
-  }))
-  vi.stubGlobal('fetch', mock)
-  return mock
-}
-
-describe('raw realtime protocols', () => {
-  it('waits for gateway.ready and correlates JSON-RPC responses', async () => {
-    leaseFetch()
-    const socket = new ChatRpcSocket()
-    const events: string[] = []
+describe('HTTP-only realtime protocols', () => {
+  it('waits for SSE ready and submits commands through HTTP without opening a WS', async () => {
+    const f = httpFixture(), socket = new ChatRpcSocket(), events: string[] = []
     socket.onEvent(event => events.push(event.type))
-    const connecting = socket.connect()
-    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1))
-    const transport = FakeWebSocket.instances[0]
-    await Promise.resolve()
-    expect(socket.state).toBe('connected')
-    transport.message({ jsonrpc: '2.0', method: 'event', params: { type: 'gateway.ready', payload: {} } })
-    await connecting
+    await socket.connect()
     expect(socket.state).toBe('ready')
-
-    const response = socket.request('session.usage', { session_id: 'runtime-1' })
-    const frame = JSON.parse(transport.sent[0])
-    expect(frame).toMatchObject({ jsonrpc: '2.0', method: 'session.usage', params: { session_id: 'runtime-1' } })
-    transport.message({ jsonrpc: '2.0', id: frame.id, result: { total_tokens: 42 } })
-    await expect(response).resolves.toEqual({ total_tokens: 42 })
+    const result = await socket.request('session.usage', { session_id: 'runtime-1' }, 5000, 'stable-command')
+    expect(result).toEqual({ total_tokens: 42 })
+    const sent = f.fetchMock.mock.calls.find(([path]) => String(path).endsWith('/commands'))![1]!
+    expect(new Headers(sent.headers).get('Idempotency-Key')).toBe('stable-command')
+    expect(JSON.parse(String(sent.body))).toMatchObject({ method: 'session.usage', params: { session_id: 'runtime-1' } })
     expect(events).toEqual(['gateway.ready'])
+    expect(WebSocket).not.toHaveBeenCalled()
     socket.close()
   })
-
-  it('binds a group lease to epoch/cursor but exposes only the lease in WS query', async () => {
-    const fetchMock = leaseFetch()
-    const socket = new GroupEventSocket()
-    await socket.connect({
-      epoch: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      cursor: 12,
-      onEnvelope: () => undefined,
-      onReset: () => undefined,
-    })
-    const request = fetchMock.mock.calls[0]?.[1]
-    expect(request).toBeDefined()
-    expect(JSON.parse(String(request!.body))).toEqual({
-      channel: 'groups', epoch: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', cursor: 12,
-    })
-    const url = new URL(FakeWebSocket.instances[0].url)
-    expect([...url.searchParams.keys()]).toEqual(['lease'])
+  it('preserves the group epoch/cursor on the HTTP channel', async () => {
+    const f = httpFixture(), socket = new GroupEventSocket()
+    await socket.connect({ epoch: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', cursor: 12, onEnvelope: () => {}, onReset: () => {} })
+    const sent = f.fetchMock.mock.calls.find(([path]) => String(path).endsWith('/channels'))![1]!
+    expect(JSON.parse(String(sent.body))).toEqual({ channel: 'groups', epoch: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', cursor: 12 })
+    expect(WebSocket).not.toHaveBeenCalled()
+    socket.close()
+  })
+  it.each([401, 404, 405, 410])('does not downgrade after HTTP %s', async status => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'unsupported or unauthorized' }, { status })))
+    const socket = new ChatRpcSocket()
+    await expect(socket.connect()).rejects.toThrow()
+    expect(WebSocket).not.toHaveBeenCalled()
     socket.close()
   })
 })

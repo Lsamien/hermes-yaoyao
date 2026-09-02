@@ -73,7 +73,7 @@ function errorMessage(payload: unknown, fallback: string): string {
 }
 
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
-  if (!path.startsWith('/api/app/')) throw new ApiError('客户端仅允许访问 /api/app 接口', 0, 'INVALID_PATH')
+  if (!path.startsWith('/api/app/') && !path.startsWith('/api/realtime/')) throw new ApiError('客户端仅允许访问应用接口', 0, 'INVALID_PATH')
 
   const method = (options.method ?? 'GET').toUpperCase()
   const headers = new Headers(options.headers)

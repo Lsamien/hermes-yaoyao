@@ -8,7 +8,6 @@ import { isSupportedGroupProtocolVersion, SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL
 import type { ServerConfig } from './config.js'
 import { DEFAULT_YAOYAO_PLUGIN_SOURCE, isLoopbackHost, isLoopbackUpstream, isPrivateHost } from './config.js'
 import { HttpError } from './errors.js'
-import { canonicalEpoch, groupCursor, type RealtimeChannel, RealtimeLeaseStore } from './leases.js'
 import { compareReleaseVersions } from './releases.js'
 import {
   bearerToken,
@@ -17,7 +16,7 @@ import {
   type NodeScope,
   NodePairingStore,
 } from './pairing.js'
-import { acceptedRequestOrigin, accountKeyFromCookieHeader, CsrfProtection, requestAccountKey } from './security.js'
+import { CsrfProtection, requestAccountKey } from './security.js'
 import {
   applyUpstreamCookies,
   CookieJar,
@@ -52,7 +51,6 @@ export interface RouteDependencies {
   config: ServerConfig
   csrf: CsrfProtection
   upstream: UpstreamClient
-  leases: RealtimeLeaseStore
   pairings: NodePairingStore
   uploads: UploadStore
   updates: SystemUpdateManager
@@ -633,7 +631,6 @@ function pairedProxyPath(rawPath: string): string {
   }
   const allowed = path === '/status'
     || path === '/auth/me'
-    || path === '/auth/ws-ticket'
     || path === '/profiles'
     || path.startsWith('/profiles/')
     || path === '/sessions'
@@ -1063,66 +1060,6 @@ async function requireGatewayAuthentication(
     throw new HttpError(401, 'Hermes authentication is required', 'authentication_required')
   }
   requireSuccess(identity)
-}
-
-async function issueLease(
-  ctx: Koa.Context,
-  dependencies: RouteDependencies,
-  jar: CookieJar,
-): Promise<void> {
-  const request = body(ctx)
-  const channel = request.channel
-  if (channel !== 'chat' && channel !== 'groups') {
-    throw new HttpError(400, 'channel must be chat or groups', 'invalid_channel')
-  }
-  const status = requireSuccess(await dependencies.upstream.request('/api/status', jar))
-  if (channel === 'groups') {
-    const capabilities = requireSuccess(await dependencies.upstream.request(
-      '/api/plugins/yaoyao/v1/capabilities',
-      jar,
-    ))
-    const protocolVersion = Number(capabilities.protocolVersion ?? capabilities.protocol_version)
-    if (!isSupportedGroupProtocolVersion(protocolVersion)) {
-      throw new HttpError(409, `Hermes group chat protocol ${SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL} is required`, 'unsupported_group_protocol')
-    }
-  }
-  let credential: { name: 'ticket' | 'token'; value: string }
-  if (authRequired(status)) {
-    const ticketResponse = requireSuccess(await dependencies.upstream.request('/api/auth/ws-ticket', jar, {
-      method: 'POST',
-    }))
-    if (typeof ticketResponse.ticket !== 'string' || !ticketResponse.ticket.trim()) {
-      throw new HttpError(502, 'Hermes returned an empty WebSocket ticket', 'invalid_ticket')
-    }
-    credential = { name: 'ticket', value: ticketResponse.ticket.trim() }
-  } else {
-    const root = await dependencies.upstream.request('/', jar, { maxResponseBytes: 2 * 1_024 * 1_024 })
-    const match = root.body.toString('utf8').match(/window\.__HERMES_SESSION_TOKEN__="([^"]+)"/)
-    if (!match?.[1]) throw new HttpError(401, 'Hermes did not provide a local session token', 'missing_session_token')
-    credential = { name: 'token', value: match[1] }
-  }
-
-  const origin = acceptedRequestOrigin(
-    ctx.get('origin'),
-    ctx.get('host'),
-    ctx.secure || Boolean(dependencies.config.tlsCert),
-    dependencies.config.allowedHosts,
-  )
-  if (!origin) throw new HttpError(400, 'Invalid request host', 'invalid_host')
-  const accountKeys = new Set([
-    requestAccountKey(ctx.req),
-    accountKeyFromCookieHeader(jar.header, ctx.req.socket.remoteAddress),
-  ])
-  const lease = dependencies.leases.issue({
-    channel: channel as RealtimeChannel,
-    credential,
-    origin,
-    accountKeys,
-    localUserID: (ctx.state.localUser as LocalUser | undefined)?.id,
-    epoch: channel === 'groups' ? canonicalEpoch(request.epoch) : undefined,
-    cursor: channel === 'groups' ? groupCursor(request.cursor) : undefined,
-  })
-  json(ctx, 201, { lease: lease.id, channel: lease.channel, expiresAt: lease.expiresAt })
 }
 
 async function searchSessions(ctx: Koa.Context, dependencies: RouteDependencies): Promise<void> {
@@ -2169,9 +2106,6 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
         restartRequired: false,
       })
     })
-  })
-  router.post('/api/app/realtime-leases', async (ctx) => {
-    await withJar(ctx, (jar) => issueLease(ctx, dependencies, jar))
   })
 
   router.get('/api/app/profiles', async (ctx) => {

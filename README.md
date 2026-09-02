@@ -9,7 +9,8 @@
 所有 8800 用户共享本机 9119 的 Bots、历史、团队和文件；普通用户不能管理用户、
 节点、插件或系统升级。
 
-iOS 默认连接 `http://主机:8800` 并使用 8800 用户登录；已有 9119 账号继续兼容。
+iOS/Web 连接 `http://主机:8800` 并使用 8800 用户登录，客户端实时接口仅支持 HTTP+SSE。
+从 v0.2.27 起，旧客户端 WebSocket、票据和租约接口已移除；iOS 必须同步更新到 HTTP+SSE 版本。
 9119 和 8800 都可管理由 8800 签发配对码的直接子节点，节点不会递归暴露孙节点。
 已登录 Web 用户还可在“手机登录与节点”中生成两分钟有效的一次性登录二维码；iOS
 登录页扫描后会把 8800 保存为普通服务器账号。`yaoyao://login` 登录码与
@@ -21,7 +22,7 @@ iOS 默认连接 `http://主机:8800` 并使用 8800 用户登录；已有 9119 
 
 ### iOS 后台消息推送
 
-iOS 在线时继续使用 8800 的 WebSocket 实时接收消息；App 被挂起或未运行时，8800
+iOS 在线时使用 8800 的 SSE 实时接收消息；App 被挂起或未运行时，8800
 可作为 APNs Provider 发送系统通知。推送设备与当前 8800 用户绑定，普通聊天只提醒
 该用户经 8800 发起的任务；团队在用户首次发言后自动订阅，也可在团队页关闭。
 
@@ -39,7 +40,7 @@ export HERMES_YAOYAO_APNS_TOPIC=cn.samien.yaoyao.hermes
 管理员可在“系统管理 → iOS 消息推送”查看配置、注册设备和待发送数量，页面与日志均
 不会显示 `.p8` 内容或 device token。Docker 部署需要把 `.p8` 只读挂载到容器，并让
 `HERMES_YAOYAO_APNS_KEY_FILE` 指向容器内绝对路径。APNs 只要求 8800 能主动访问
-Apple，不需要把 8800 暴露到公网；手机访问 8800 仍应优先使用 HTTPS/WSS 或 Tailscale。
+Apple，不需要把 8800 暴露到公网；手机访问 8800 仍应优先使用 HTTPS 或 Tailscale。
 
 未设置任何 `HERMES_YAOYAO_APNS_*` 环境变量时，管理员也可以在“系统管理 → iOS
 消息推送”填写 **8800 所在机器上的 `.p8` 绝对路径**、Key ID、Team ID、Topic 及启用
@@ -78,7 +79,9 @@ ID 和包名。浏览器只提交路径和公开元数据；8800 本地校验 RS
 插件安装接口安装。默认源为
 `https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao`。
 
-当前发布版本：**Git `v0.2.26` / 夭夭 Web `0.2.26` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
+当前发布版本：**Git `v0.2.27` / 夭夭 Web `0.2.27` / Hermes Dashboard 插件 `1.7.3`**。版本组合由仓库根目录的 `release.json` 唯一声明，并由 `npm run release:verify` 校验。
+
+本版将普通聊天和团队事件统一为 HTTP+SSE，增加服务端连接管理、近期事件补收、提交回执去重与权限隔离。8800 到 9119 的上游接口及 Python 插件保持不变。详见 [HTTP+SSE 接口与升级边界](docs/http-sse-realtime.md)。
 
 需要由自动化 Agent 部署或升级时，请直接使用 [Agent 安装手册](docs/agent-install.md)。其中包含固定版本校验、备份、同步、单一 Dashboard 重载与验证步骤。
 
@@ -236,7 +239,7 @@ npm run dev
 
 原生群聊由房主 Hermes 保存权威房间、话题和消息。扫码时，iOS 会把远端节点以加密凭据注册到房主插件；房主通过远端 `nodeWorker` 执行 Session，并转发流式事件、审批、澄清、中断和受限群聊附件。房主工作目录不会作为远端绝对路径使用，远端 Agent 默认采用自己的工作区。
 
-免密配对和跨节点执行应使用 HTTPS/WSS 或 Tailscale。受管安装会显式设置 `HERMES_YAOYAO_ALLOW_INSECURE_LAN=1`，因此默认 HTTP 监听只适合可信局域网；不要把二维码或配对凭据发送给不受信任的人。
+免密配对和跨节点执行应使用 HTTPS 或 Tailscale。受管安装会显式设置 `HERMES_YAOYAO_ALLOW_INSECURE_LAN=1`，因此默认 HTTP 监听只适合可信局域网；不要把二维码或配对凭据发送给不受信任的人。
 
 ## 网络暴露：9119 与 8800 分别控制
 

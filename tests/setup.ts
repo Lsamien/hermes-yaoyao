@@ -1,7 +1,7 @@
 import { afterEach } from 'vitest'
 
 afterEach(() => {
-  document.body.innerHTML = ''
-  localStorage.clear()
-  sessionStorage.clear()
+  if (typeof document !== 'undefined') document.body.innerHTML = ''
+  if (typeof localStorage !== 'undefined') localStorage.clear()
+  if (typeof sessionStorage !== 'undefined') sessionStorage.clear()
 })
