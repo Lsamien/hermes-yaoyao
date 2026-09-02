@@ -197,20 +197,21 @@ export function restorePreviousService({
   }
 }
 
-async function responseJSON(url) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(3_000), cache: 'no-store' })
+async function responseJSON(url, fetchImpl) {
+  const response = await fetchImpl(url, { signal: AbortSignal.timeout(3_000), cache: 'no-store' })
   if (!response.ok) fail(`${url} 返回 HTTP ${response.status}`)
   return response.json()
 }
 
-async function verifyRuntime(timeoutMs = 45_000) {
+export async function verifyRuntime(timeoutMs = 45_000, fetchImpl = fetch) {
   const deadline = Date.now() + timeoutMs
   let lastError = ''
   while (Date.now() < deadline) {
     try {
-      const health = await responseJSON('http://127.0.0.1:8800/healthz')
-      const ready = await responseJSON('http://127.0.0.1:8800/readyz')
-      if (health.ok === true && ready.ok === true) return
+      // /readyz deliberately includes 9119 reachability. Only the Web's own
+      // health decides update/rollback success, including older releases.
+      const health = await responseJSON('http://127.0.0.1:8800/healthz', fetchImpl)
+      if (health.ok === true) return
       lastError = 'Web 服务尚未就绪'
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error)

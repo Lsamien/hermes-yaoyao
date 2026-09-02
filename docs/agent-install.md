@@ -242,11 +242,13 @@ node bin/hermes-yaoyao.mjs service install
 Git、发布目录、命令输出或日志。配置后检查系统管理中的 APNs/FCM 独立状态；一方
 未配置或失败不能使另一方停止。
 
-## 7. 通过受管服务进行配套升级
+## 7. 通过受管服务独立升级 Web
 
 首次按第 6 步安装 Web `0.2.28` 后，可在左下角 Agent 菜单打开“系统更新”。
 检查更新只读取固定的 `HERMES_YAOYAO_RELEASE_SOURCE`，并锁定最新 `vX.Y.Z`
-标签解析到的 Git 提交；执行升级前仍会检查插件持久目录是否安全。
+标签解析到的 Git 提交。更新状态、检查、执行、任务查询和回滚仅要求 8800 本地管理员登录；
+写请求仍验证 Origin、CSRF 和本机访问策略，不要求 9119 可用或通过上游认证。
+不会检查插件持久目录或强制先升级插件。9119 离线时，登录初始化最多等待 3 秒后仍可进入更新页。
 
 升级任务由 8800 外部的独立 updater 执行。运行文件会安装到
 `~/.local/share/hermes-yaoyao/releases/`，LaunchAgent 改为指向稳定的
@@ -257,13 +259,18 @@ Git、发布目录、命令输出或日志。配置后检查系统管理中的 A
 时，才在重新安装 LaunchAgent 前设置 `HERMES_YAOYAO_ALLOW_REMOTE_UPDATE=1`。
 Docker 和其他非 macOS 部署必须替换镜像，不能调用服务内升级接口。
 
-升级成功后至少验证：
+Web 升级成功必须通过自身健康检查，并确认发布目录：
 
 ```bash
 curl --noproxy '*' --fail --silent http://127.0.0.1:8800/healthz
+readlink ~/.local/share/hermes-yaoyao/current
+```
+
+下列是独立的上游诊断。9119 离线时可失败，不应因此判定 Web 升级失败或回滚：
+
+```bash
 curl --noproxy '*' --fail --silent http://127.0.0.1:8800/readyz
 curl --noproxy '*' --fail --silent http://127.0.0.1:9119/api/dashboard/plugins
-readlink ~/.local/share/hermes-yaoyao/current
 ```
 
 ## 8. 失败处理

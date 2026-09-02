@@ -10,6 +10,7 @@ import {
   serviceInstallInvocation,
   switchCurrent,
   validateManifest,
+  verifyRuntime,
 } from '../bin/hermes-yaoyao-updater.mjs'
 
 const roots: string[] = []
@@ -18,6 +19,32 @@ afterEach(() => {
 })
 
 describe('standalone updater primitives', () => {
+  it('accepts a healthy Web without probing 9119 or upstream-dependent readiness', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url !== 'http://127.0.0.1:8800/healthz') throw new Error('9119 offline')
+      return Response.json({ ok: true })
+    })
+    await verifyRuntime(1_000, fetchImpl)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8800/healthz')
+  })
+
+  it('still fails an unhealthy Web and retries transient startup failures', async () => {
+    vi.useFakeTimers()
+    try {
+      const unhealthy = vi.fn(async () => Response.json({ ok: false }))
+      const check = expect(verifyRuntime(1_000, unhealthy)).rejects.toThrow('升级后健康检查失败')
+      await vi.advanceTimersByTimeAsync(1_000)
+      await check
+      const recovering = vi.fn().mockRejectedValueOnce(new Error('starting'))
+        .mockResolvedValueOnce(Response.json({ ok: true }))
+      const recovered = verifyRuntime(1_000, recovering)
+      await vi.advanceTimersByTimeAsync(500)
+      await recovered
+      expect(recovering).toHaveBeenCalledTimes(2)
+    } finally { vi.useRealTimers() }
+  })
+
   it('atomically switches the stable current symlink', () => {
     const root = mkdtempSync(join(tmpdir(), 'hermes-updater-'))
     roots.push(root)

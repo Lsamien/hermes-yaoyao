@@ -951,20 +951,37 @@ async function bootstrap(
   let upstreamReady = false
   let upstreamError: string | undefined
   if (!user.mustChangePassword) {
+    let timeout: ReturnType<typeof setTimeout> | undefined
     try {
-      const statusResponse = await dependencies.upstreamSession.request('/api/status')
-      const rawStatus = requireSuccess(statusResponse)
-      status = publicStatus(rawStatus)
-      const profilesResponse = await dependencies.upstreamSession.request('/api/profiles')
-      const pluginProfilesResponse = await dependencies.upstreamSession.request('/api/plugins/yaoyao/profiles')
-      profiles = profilesWithHermesBotNames(
-        normalizedProfiles(requireSuccess(profilesResponse)),
-        pluginProfilesResponse.status >= 200 && pluginProfilesResponse.status < 300
-          ? parseJson(pluginProfilesResponse) : undefined,
-      )
+      // Local login/settings must remain usable even when 9119 never responds.
+      // Publish only a complete result; a late probe cannot mutate this response.
+      const upstream = await Promise.race([
+        (async () => {
+          const statusResponse = await dependencies.upstreamSession.request('/api/status')
+          const rawStatus = requireSuccess(statusResponse)
+          const profilesResponse = await dependencies.upstreamSession.request('/api/profiles')
+          const pluginProfilesResponse = await dependencies.upstreamSession.request('/api/plugins/yaoyao/profiles')
+          return {
+            status: publicStatus(rawStatus),
+            profiles: profilesWithHermesBotNames(
+              normalizedProfiles(requireSuccess(profilesResponse)),
+              pluginProfilesResponse.status >= 200 && pluginProfilesResponse.status < 300
+                ? parseJson(pluginProfilesResponse) : undefined,
+            ),
+          }
+        })(),
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error('9119 连接超时；仍可管理 8800 和升级 Web')), 3_000)
+          timeout.unref()
+        }),
+      ])
+      status = upstream.status
+      profiles = upstream.profiles
       upstreamReady = true
     } catch (error) {
       upstreamError = error instanceof Error ? error.message : '9119 不可用'
+    } finally {
+      if (timeout) clearTimeout(timeout)
     }
   }
   json(ctx, 200, {
@@ -1924,15 +1941,10 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     })
   })
   router.get('/api/app/system/update/status', async (ctx) => {
-    await withJar(ctx, async (jar) => {
-      await requireGatewayAuthentication(ctx, dependencies, jar)
-      const installedPluginVersion = await yaoyaoPluginVersion(dependencies, jar)
-      json(ctx, 200, systemUpdateStatusForRequest(
-        ctx,
-        dependencies,
-        dependencies.updates.status(installedPluginVersion),
-      ))
-    })
+    dependencies.auth.requireAdmin(ctx)
+    // No upstream calls, including best-effort plugin probes: a stalled 9119
+    // must not delay or prevent access to the independent Web updater.
+    json(ctx, 200, systemUpdateStatusForRequest(ctx, dependencies, dependencies.updates.status()))
   })
   router.get('/api/app/system/push-status', (ctx) => {
     dependencies.auth.requireAdmin(ctx)
@@ -1985,66 +1997,41 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     json(ctx, 200, pushSystemStatus(dependencies))
   })
   router.post('/api/app/system/update/check', async (ctx) => {
-    await withJar(ctx, async (jar) => {
-      await requireGatewayAuthentication(ctx, dependencies, jar)
-      const installedPluginVersion = await yaoyaoPluginVersion(dependencies, jar)
-      try {
-        json(ctx, 200, systemUpdateStatusForRequest(
-          ctx,
-          dependencies,
-          await dependencies.updates.check(installedPluginVersion),
-        ))
-      } catch (error) {
-        throw updateFailure(error)
-      }
-    })
+    dependencies.auth.requireAdmin(ctx)
+    try {
+      json(ctx, 200, systemUpdateStatusForRequest(ctx, dependencies, await dependencies.updates.check()))
+    } catch (error) {
+      throw updateFailure(error)
+    }
   })
   router.post('/api/app/system/update/apply', async (ctx) => {
-    await withJar(ctx, async (jar) => {
-      await requireGatewayAuthentication(ctx, dependencies, jar)
-      requireLocalSystemUpdate(ctx, dependencies)
-      const request = body(ctx)
-      const targetVersion = typeof request.targetVersion === 'string' ? request.targetVersion.trim() : ''
-      if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(targetVersion)) {
-        throw new HttpError(400, 'targetVersion 必须是有效的发布版本', 'invalid_request')
-      }
-      const installedPluginVersion = await yaoyaoPluginVersion(dependencies, jar)
-      await requireYaoyaoStorageReady(dependencies, jar, installedPluginVersion)
-      try {
-        const release = await dependencies.updates.check(installedPluginVersion)
-        if (!release.latest || release.latest.releaseVersion !== targetVersion) {
-          throw new Error('目标版本不是当前发布源的最新版本')
-        }
-        await reconcileYaoyaoPlugin(
-          dependencies,
-          jar,
-          ctx.req.socket.remoteAddress,
-          release.latest.pluginVersion,
-        )
-        json(ctx, 202, await dependencies.updates.startUpdate(targetVersion, installedPluginVersion))
-      } catch (error) {
-        throw updateFailure(error)
-      }
-    })
+    dependencies.auth.requireAdmin(ctx)
+    requireLocalSystemUpdate(ctx, dependencies)
+    const request = body(ctx)
+    const targetVersion = typeof request.targetVersion === 'string' ? request.targetVersion.trim() : ''
+    if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(targetVersion)) {
+      throw new HttpError(400, 'targetVersion 必须是有效的发布版本', 'invalid_request')
+    }
+    try {
+      json(ctx, 202, await dependencies.updates.startUpdate(targetVersion))
+    } catch (error) {
+      throw updateFailure(error)
+    }
   })
   router.get('/api/app/system/update/jobs/:jobID', async (ctx) => {
-    await withJar(ctx, async (jar) => {
-      await requireGatewayAuthentication(ctx, dependencies, jar)
-      const job = dependencies.updates.job(ctx.params.jobID)
-      if (!job) throw new HttpError(404, '升级任务不存在', 'system_update_job_not_found')
-      json(ctx, 200, job)
-    })
+    dependencies.auth.requireAdmin(ctx)
+    const job = dependencies.updates.job(ctx.params.jobID)
+    if (!job) throw new HttpError(404, '升级任务不存在', 'system_update_job_not_found')
+    json(ctx, 200, job)
   })
   router.post('/api/app/system/update/rollback', async (ctx) => {
-    await withJar(ctx, async (jar) => {
-      await requireGatewayAuthentication(ctx, dependencies, jar)
-      requireLocalSystemUpdate(ctx, dependencies)
-      try {
-        json(ctx, 202, dependencies.updates.startRollback())
-      } catch (error) {
-        throw updateFailure(error)
-      }
-    })
+    dependencies.auth.requireAdmin(ctx)
+    requireLocalSystemUpdate(ctx, dependencies)
+    try {
+      json(ctx, 202, dependencies.updates.startRollback())
+    } catch (error) {
+      throw updateFailure(error)
+    }
   })
   router.post('/api/app/plugins/yaoyao/reconcile', async (ctx) => {
     await withJar(ctx, async (jar) => {

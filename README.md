@@ -185,14 +185,14 @@ Content-Type: application/json
 插件目录。登录 Web 后还会比较发布清单与 9119 的实际插件版本，落后时自动通过
 同一接口更新。
 
-### Web 与插件配套升级
+### Web 独立升级
 
 macOS 受管服务可在左下角 Agent 菜单中打开“系统更新”。Git 发布标签负责 Web
 版本，`release.json` 同时声明兼容的插件版本；插件本身始终通过 9119 独立同步。
 
 升级接口固定读取 `HERMES_YAOYAO_RELEASE_SOURCE`，只接受发布源中最新的
 `vX.Y.Z` 标签，并在下载后核对标签解析出的 Git 提交和发布清单。浏览器不能传入
-仓库地址或任意提交。写接口仍受 Hermes 登录、Origin 和 CSRF 保护；默认还要求
+仓库地址或任意提交。所有更新接口都要求 8800 本地管理员登录，写接口仍受 Origin 和 CSRF 保护；默认还要求
 请求来自本机，可通过 `HERMES_YAOYAO_ALLOW_REMOTE_UPDATE=1` 明确允许远程管理。
 
 首次成功升级会把运行文件迁入：
@@ -203,9 +203,12 @@ macOS 受管服务可在左下角 Agent 菜单中打开“系统更新”。Git 
 └── current -> releases/<版本>-<提交>
 ```
 
-插件会先由已登录的 Web 会话通过 9119 更新并核对版本。独立 updater 只下载、
-构建和切换 Web 的 `current`，不会停止 9119、调用 `hermes config` 或读写
-`HERMES_HOME`。Web 验证失败时只回滚 Web；插件继续由 9119 保持最新版本。
+检查、执行、查询任务和回滚 Web 都不连接 9119，也不会先检测或更新插件。
+9119 离线、响应超时、认证失败或插件版本落后均不阻止 Web 升级；Git 发布源仍需可访问。
+登录初始化最多等待上游 3 秒，超时后仍可进入设置管理和更新 Web。
+独立 updater 只下载、构建和切换 Web 的 `current`，不会停止 9119、调用 `hermes config` 或读写
+`HERMES_HOME`。升级和回滚只用 `/healthz` 验证 Web 自身；`/readyz` 保留上游连通性诊断，
+不参与升级成败判定。Web 验证失败时只回滚 Web；插件由 9119 恢复后独立同步。
 用户数据始终留在 `~/.hermes-yaoyao` 和
 `~/.hermes/plugin-data/yaoyao`，不进入版本目录。
 

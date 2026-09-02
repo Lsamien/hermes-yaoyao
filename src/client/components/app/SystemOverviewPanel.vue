@@ -41,8 +41,7 @@ const deviceStatus = computed(() => devices.value ? `${devices.value.devices.len
 const voiceStatus = computed(() => voice.value ? `已配置 ${voice.value.voices.length} 个音色` : '尚未读取语音状态')
 const updateStatus = computed(() => {
   if (!update.value) return '尚未读取版本状态'
-  const plugin = update.value.installedPluginVersion || update.value.current.pluginVersion || '未安装'
-  return `Web ${update.value.current.webVersion} · 插件 ${plugin}`
+  return `Web ${update.value.current.webVersion} · 可独立升级与回滚`
 })
 
 async function refresh() {
@@ -53,7 +52,8 @@ async function refresh() {
     getPushSystemStatus(),
     pairedDevices(),
     getDuplexVoiceSettings(),
-    systemUpdateStatus(),
+    // Publish local update status immediately, without waiting for 9119 panels.
+    systemUpdateStatus().then(value => { update.value = value; return value }),
   ])
   if (results[0]?.status === 'fulfilled') users.value = results[0].value
   if (results[1]?.status === 'fulfilled') push.value = results[1].value
@@ -104,7 +104,7 @@ watch(() => props.active, active => { if (active) void refresh() }, { immediate:
       </button>
       <button type="button" @click="emit('navigate', 'system-update')">
         <AppIcon name="refresh" :size="22" />
-        <span><strong>更新与回滚</strong><small>{{ updateStatus }} <b v-if="update && !update.updateAvailable && update.versionsMatch">已是最新版本</b></small></span>
+        <span><strong>更新与回滚</strong><small>{{ updateStatus }} <b v-if="update?.latest && !update.updateAvailable">已是最新版本</b></small></span>
         <AppIcon class="chevron" name="chevron-left" :size="18" />
       </button>
     </div>

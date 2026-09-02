@@ -36,7 +36,7 @@ describe('system update routes', () => {
     expect(systemUpdateRequestAllowed('192.168.1.8', true)).toBe(true)
   })
 
-  it('checks and queues a fixed Web/plugin release through authenticated CSRF routes', async () => {
+  it('checks and queues a fixed Web release without reconciling the plugin', async () => {
     const root = mkdtempSync(join(tmpdir(), 'hermes-system-update-routes-'))
     roots.push(root)
     const projectRoot = join(root, 'project')
@@ -90,7 +90,8 @@ describe('system update routes', () => {
 
     const status = await request(runtime.app.callback())
       .get('/api/app/system/update/status').set('Host', '127.0.0.1:8800').set('Cookie', cookie).expect(200)
-    expect(status.body).toMatchObject({ installedPluginVersion: '1.7.1', versionsMatch: true, updateAvailable: false })
+    expect(status.body).toMatchObject({ updateAvailable: false })
+    expect(status.body.installedPluginVersion).toBeUndefined()
 
     const check = await mutation('/api/app/system/update/check').send({}).expect(200)
     expect(check.body).toMatchObject({ latest, updateAvailable: true })
@@ -98,6 +99,7 @@ describe('system update routes', () => {
     const queued = await mutation('/api/app/system/update/apply').send({ targetVersion: '0.3.0' }).expect(202)
     expect(queued.body).toMatchObject({ operation: 'update', state: 'queued', target: latest })
     expect(launched).toHaveLength(1)
+    expect(pluginVersion).toBe('1.7.1')
 
     const jobResponse = await request(runtime.app.callback())
       .get(`/api/app/system/update/jobs/${queued.body.id}`)

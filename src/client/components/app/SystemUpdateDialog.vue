@@ -22,7 +22,7 @@ let pollToken = 0
 
 const terminal = computed(() => job.value && ['succeeded', 'failed', 'rolled_back'].includes(job.value.state))
 const active = computed(() => job.value && !terminal.value)
-const currentPlugin = computed(() => status.value?.installedPluginVersion || '未安装')
+const currentPlugin = computed(() => status.value?.installedPluginVersion || '未检测（不影响 Web 升级）')
 const canApply = computed(() => Boolean(status.value?.supported && status.value.updateAvailable && status.value.latest && !active.value && !busy.value))
 
 function stopPolling() { pollToken += 1 }
@@ -61,7 +61,7 @@ async function poll(next: UpdateJob) {
 
 async function applyUpdate() {
   const target = status.value?.latest
-  if (!target || !window.confirm(`升级 Web 到 ${target.webVersion}？插件 ${target.pluginVersion} 将通过 9119 更新。`)) return
+  if (!target || !window.confirm(`仅升级 Web 到 ${target.webVersion}？无需连接 9119，不会更新插件。`)) return
   busy.value = true
   error.value = ''
   try {
@@ -74,7 +74,7 @@ async function applyUpdate() {
 }
 
 async function rollback() {
-  if (!window.confirm('回滚到上一次 Web 版本？插件继续由 9119 保持最新版本。')) return
+  if (!window.confirm('仅回滚到上一次 Web 版本？无需连接 9119，插件保持不变。')) return
   busy.value = true
   error.value = ''
   try {
@@ -111,7 +111,7 @@ onBeforeUnmount(stopPolling)
             <button class="icon-button" type="button" aria-label="关闭系统更新" :disabled="!!active" @click="emit('close')"><AppIcon name="close" /></button>
           </header>
 
-          <p class="system-update-intro">Web 服务独立升级；Hermes Dashboard 插件由 9119 自动更新到最新兼容版本。</p>
+          <p class="system-update-intro">Web 服务独立升级与回滚，9119 离线或认证失败也不影响。这里只检查 Web 发布源，不检测或更新插件；插件由 9119 独立管理。</p>
           <p v-if="error" class="system-update-error"><AppIcon name="alert" :size="15" />{{ error }}</p>
 
           <section v-if="status" class="version-grid">
@@ -121,7 +121,7 @@ onBeforeUnmount(stopPolling)
             <article><small>配套插件</small><strong>{{ status.latest?.pluginVersion || status.current.pluginVersion }}</strong></article>
           </section>
 
-          <p v-if="status && !status.versionsMatch" class="version-warning"><AppIcon name="alert" :size="14" />当前插件版本落后，登录后会自动通过 9119 更新。</p>
+          <p v-if="status?.installedPluginVersion && !status.versionsMatch" class="version-warning"><AppIcon name="alert" :size="14" />插件版本与 Web 清单不一致，可在 9119 恢复后单独更新；不影响 Web 升级。</p>
           <p v-if="status?.installationMode === 'source'" class="mode-note">首次升级会把运行服务迁移到可回滚的版本目录；Git 工作区不会被覆盖。</p>
           <p v-if="status && !status.supported" class="mode-note">{{ status.unsupportedReason }}</p>
 
@@ -134,7 +134,7 @@ onBeforeUnmount(stopPolling)
             <button v-if="job?.state === 'succeeded' || job?.state === 'rolled_back'" class="quiet-button" type="button" @click="reloadPage"><AppIcon name="refresh" :size="15" />刷新页面</button>
             <button v-else-if="status?.canRollback && !active" class="quiet-button danger" type="button" :disabled="busy" @click="rollback">回滚上一版本</button>
             <button class="quiet-button" type="button" :disabled="checking || !!active" @click="refresh(true)"><AppIcon name="refresh" :size="15" />{{ checking ? '检查中…' : '检查更新' }}</button>
-            <button class="solid-button" type="button" :disabled="!canApply" @click="applyUpdate"><AppIcon name="download" :size="16" />{{ active ? '升级中…' : status?.updateAvailable ? '升级配套版本' : '已是最新版本' }}</button>
+            <button class="solid-button" type="button" :disabled="!canApply" @click="applyUpdate"><AppIcon name="download" :size="16" />{{ active ? '升级中…' : status?.updateAvailable ? '升级 Web' : '已是最新版本' }}</button>
           </footer>
         </section>
       </div>

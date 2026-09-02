@@ -60,6 +60,27 @@ afterEach(() => {
 })
 
 describe('SystemUpdatePanel', () => {
+  it('allows Web updates with unknown plugin state and explains the offline boundary', async () => {
+    const offlineStatus = { ...readyStatus, installedPluginVersion: undefined, versionsMatch: false, updateAvailable: true,
+      latest: { ...manifest, releaseVersion: '0.3.0', webVersion: '0.3.0', gitTag: 'v0.3.0' } }
+    api.systemUpdateStatus.mockResolvedValue(offlineStatus)
+    api.checkSystemUpdate.mockResolvedValue(offlineStatus)
+    api.applySystemUpdate.mockResolvedValue(doneJob)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mount(SystemUpdatePanel, { global: { stubs: { AppIcon: true } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('9119 离线或认证失败也不影响')
+    expect(wrapper.text()).toContain('未检测（不影响 Web 升级）')
+    expect(wrapper.find('.version-warning').exists()).toBe(false)
+    const apply = wrapper.find<HTMLButtonElement>('.solid-button')
+    expect(apply.element.disabled).toBe(false)
+    await apply.trigger('click'); await flushPromises()
+    expect(confirm).toHaveBeenCalledWith('仅升级 Web 到 0.3.0？无需连接 9119，不会更新插件。')
+    expect(api.applySystemUpdate).toHaveBeenCalledWith('0.3.0')
+    expect(wrapper.text()).toContain('更新完成')
+    wrapper.unmount()
+  })
+
   it('resumes polling an existing non-terminal job and releases the settings lock', async () => {
     api.systemUpdateStatus
       .mockResolvedValueOnce({ ...readyStatus, job: activeJob })
@@ -96,7 +117,7 @@ describe('SystemUpdatePanel', () => {
     })
     await flushPromises()
 
-    const apply = wrapper.findAll<HTMLButtonElement>('button').find(button => button.text().includes('升级配套版本'))!
+    const apply = wrapper.findAll<HTMLButtonElement>('button').find(button => button.text().includes('升级 Web'))!
     await apply.trigger('click')
     await wrapper.vm.$nextTick()
     expect(wrapper.emitted('lock-change')?.at(-1)).toEqual([true])

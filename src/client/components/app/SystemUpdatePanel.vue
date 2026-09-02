@@ -27,7 +27,7 @@ let lifecycleToken = 0
 const terminal = computed(() => job.value && ['succeeded', 'failed', 'rolled_back'].includes(job.value.state))
 const jobRunning = computed(() => Boolean(job.value && !terminal.value))
 const locked = computed(() => operationStarting.value || (jobRunning.value && !trackingTimedOut.value))
-const currentPlugin = computed(() => status.value?.installedPluginVersion || '未安装')
+const currentPlugin = computed(() => status.value?.installedPluginVersion || '未检测（不影响 Web 升级）')
 const canApply = computed(() => Boolean(status.value?.supported && status.value.updateAvailable && status.value.latest && !jobRunning.value && !busy.value))
 
 function stopPolling() { pollToken += 1 }
@@ -82,7 +82,7 @@ async function loadAndResume(token: number) {
 
 async function applyUpdate() {
   const target = status.value?.latest
-  if (!target || !window.confirm(`升级 Web 到 ${target.webVersion}？插件 ${target.pluginVersion} 将通过 9119 更新。`)) return
+  if (!target || !window.confirm(`仅升级 Web 到 ${target.webVersion}？无需连接 9119，不会更新插件。`)) return
   const token = lifecycleToken
   operationStarting.value = true
   busy.value = true
@@ -103,7 +103,7 @@ async function applyUpdate() {
 }
 
 async function rollback() {
-  if (!window.confirm('回滚到上一次 Web 版本？插件继续由 9119 保持最新版本。')) return
+  if (!window.confirm('仅回滚到上一次 Web 版本？无需连接 9119，插件保持不变。')) return
   const token = lifecycleToken
   operationStarting.value = true
   busy.value = true
@@ -145,7 +145,7 @@ onBeforeUnmount(() => { lifecycleToken += 1; operationStarting.value = false; st
 
 <template>
   <section class="system-update-panel" aria-label="更新与回滚">
-    <p class="system-update-intro">Web 服务独立升级；Hermes Dashboard 插件由 9119 自动更新到最新兼容版本。</p>
+    <p class="system-update-intro">Web 服务独立升级与回滚，9119 离线或认证失败也不影响。这里只检查 Web 发布源，不检测或更新插件；插件由 9119 独立管理。</p>
     <p v-if="error" class="system-update-error" role="alert"><AppIcon name="alert" :size="16" />{{ error }}</p>
 
     <section v-if="status" class="version-grid" aria-label="版本信息">
@@ -155,7 +155,7 @@ onBeforeUnmount(() => { lifecycleToken += 1; operationStarting.value = false; st
       <article><small>配套插件</small><strong>{{ status.latest?.pluginVersion || status.current.pluginVersion }}</strong></article>
     </section>
 
-    <p v-if="status && !status.versionsMatch" class="version-warning"><AppIcon name="alert" :size="15" />当前插件版本落后，登录后会自动通过 9119 更新。</p>
+    <p v-if="status?.installedPluginVersion && !status.versionsMatch" class="version-warning"><AppIcon name="alert" :size="15" />插件版本与 Web 清单不一致，可在 9119 恢复后单独更新；不影响 Web 升级。</p>
     <p v-if="status?.installationMode === 'source'" class="mode-note">首次升级会把运行服务迁移到可回滚的版本目录；Git 工作区不会被覆盖。</p>
     <p v-if="status && !status.supported" class="mode-note">{{ status.unsupportedReason }}</p>
 
@@ -168,7 +168,7 @@ onBeforeUnmount(() => { lifecycleToken += 1; operationStarting.value = false; st
       <button v-if="job?.state === 'succeeded' || job?.state === 'rolled_back'" class="quiet-button" type="button" @click="reloadPage"><AppIcon name="refresh" :size="16" />刷新页面</button>
       <button v-else-if="status?.canRollback && !jobRunning" class="quiet-button danger" type="button" :disabled="busy" @click="rollback">回滚上一版本</button>
       <button class="quiet-button" type="button" :disabled="checking || busy || operationStarting || jobRunning" @click="refresh(true)"><AppIcon name="refresh" :size="16" />{{ checking ? '检查中…' : '检查更新' }}</button>
-      <button class="solid-button" type="button" :disabled="!canApply" @click="applyUpdate"><AppIcon name="download" :size="16" />{{ jobRunning ? '升级中…' : status?.updateAvailable ? '升级配套版本' : '已是最新版本' }}</button>
+      <button class="solid-button" type="button" :disabled="!canApply" @click="applyUpdate"><AppIcon name="download" :size="16" />{{ jobRunning ? '升级中…' : status?.updateAvailable ? '升级 Web' : '已是最新版本' }}</button>
     </footer>
   </section>
 </template>
