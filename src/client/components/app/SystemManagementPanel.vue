@@ -527,7 +527,7 @@ watch(() => [props.active, props.section] as const, ([active, section]) => {
 .connection-summary span.wide { grid-column: 1 / -1; }
 .connection-summary small { color: var(--text-muted); font-size: 11px; }
 .connection-summary b { overflow-wrap: anywhere; color: var(--text-primary); font-size: 13px; }
-.connection-mode-note { margin: 12px 0 0; padding: 9px 10px; border-radius: 9px; background: var(--surface-soft); color: var(--text-muted) !important; line-height: 1.55; }
+.block p.connection-mode-note { margin: 12px 0 0; padding: 9px 10px; border-radius: 9px; background: var(--surface-soft); color: var(--text-muted); line-height: 1.55; }
 .network-description { margin: 0; color: var(--text-muted) !important; line-height: 1.6; }
 .network-access-block { margin-top: 26px; padding-top: 24px; border-top: 1px solid var(--line); }
 .network-description code { color: var(--text-secondary); }
