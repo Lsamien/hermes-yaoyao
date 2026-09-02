@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
 import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import TeamAvatar from '@/components/common/TeamAvatar.vue'
-import { processTeamAvatarFile, randomTeamAnimalAvatar, TEAM_ANIMAL_AVATARS } from '@/utils/teamAvatar'
+import { processTeamAvatarFile } from '@/utils/teamAvatar'
 import type { GroupProfileOption } from './types'
 import { TEAM_PRESETS, type TeamPreset } from './teamPresets'
 
@@ -39,8 +39,7 @@ const hostProfile = ref('')
 const autoReply = ref(true)
 const replyRounds = ref(3)
 const orchestrationMode = ref<'free' | 'host'>('free')
-const avatarMode = ref<'animal' | 'upload'>('animal')
-const animalAvatar = ref<string>(TEAM_ANIMAL_AVATARS[0].value)
+const avatarMode = ref<'dynamic' | 'upload'>('dynamic')
 const avatarDataURL = ref('')
 const avatarError = ref('')
 const avatarInput = ref<HTMLInputElement>()
@@ -68,8 +67,7 @@ watch(() => props.open, open => {
   autoReply.value = true
   replyRounds.value = 3
   orchestrationMode.value = 'free'
-  avatarMode.value = 'animal'
-  animalAvatar.value = randomTeamAnimalAvatar().value
+  avatarMode.value = 'dynamic'
   avatarDataURL.value = ''
   avatarError.value = ''
 }, { immediate: true })
@@ -139,7 +137,7 @@ function create() {
     autoReply: autoReply.value,
     replyRounds: replyRounds.value,
   }
-  if (props.avatarEnabled) payload.avatar = avatarMode.value === 'upload' ? avatarDataURL.value : animalAvatar.value
+  if (props.avatarEnabled && avatarMode.value === 'upload') payload.avatar = avatarDataURL.value
   if (props.hostEnabled) payload.hostProfile = hostProfile.value
   if (props.hostFlowEnabled) payload.orchestrationMode = orchestrationMode.value
   if (props.roomInstructionsEnabled) payload.instructions = instructions.value.trim()
@@ -166,8 +164,8 @@ function create() {
           </section>
           <label class="field"><span>团队名称</span><input v-model="name" maxlength="80" autofocus placeholder="例如：产品评审" /></label>
           <section v-if="avatarEnabled" class="avatar-picker" aria-labelledby="team-avatar-label">
-            <TeamAvatar :name="name || '团队'" :avatar="avatarMode === 'upload' ? avatarDataURL : animalAvatar" :size="58" />
-            <div><strong id="team-avatar-label">团队头像</strong><small>{{ avatarMode === 'animal' ? '选择一个简洁的动物图标' : '使用上传的图片' }}</small><div class="animal-avatar-options" role="radiogroup" aria-label="动物团队头像"><button v-for="option in TEAM_ANIMAL_AVATARS" :key="option.id" type="button" role="radio" :aria-checked="avatarMode === 'animal' && animalAvatar === option.value" :aria-label="option.label" :class="{ selected: avatarMode === 'animal' && animalAvatar === option.value }" @click="animalAvatar = option.value; avatarMode = 'animal'"><img :src="option.src" alt="" /></button></div><p><button class="quiet-button" type="button" @click="animalAvatar = randomTeamAnimalAvatar().value; avatarMode = 'animal'">随机一个</button><button class="quiet-button" type="button" @click="avatarInput?.click()"><AppIcon name="image" :size="14" />上传图片</button></p></div>
+            <TeamAvatar :name="name || '团队'" :avatar="avatarMode === 'upload' ? avatarDataURL : ''" :members="selectedMembers.map(member => ({ name: member.displayName, avatar: member.avatar }))" :fallback-key="name || 'team'" :size="58" />
+            <div><strong id="team-avatar-label">团队头像</strong><small>{{ avatarMode === 'dynamic' ? '由成员的动态角色自动组成' : '使用上传的图片' }}</small><p><button class="quiet-button" :class="{ active: avatarMode === 'dynamic' }" type="button" @click="avatarMode = 'dynamic'">成员组合</button><button class="quiet-button" type="button" @click="avatarInput?.click()"><AppIcon name="image" :size="14" />上传图片</button></p></div>
             <input ref="avatarInput" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" @change="chooseAvatar" />
           </section>
           <p v-if="avatarError" class="avatar-error" role="alert">{{ avatarError }}</p>
@@ -220,7 +218,6 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
 .preset-picker { margin-bottom: 15px; }.preset-picker__heading, .role-mapping__heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 7px; color: var(--text-secondary); font-size: 10px; }.preset-picker__heading small, .role-mapping__heading small { color: var(--text-muted); font-size: 9px; }.preset-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }.preset-grid button { position: relative; display: grid; min-height: 82px; align-content: start; gap: 4px; padding: 10px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-soft); color: var(--text-primary); cursor: pointer; text-align: left; }.preset-grid button:hover { border-color: var(--line-strong); background: var(--surface-hover); }.preset-grid button.selected { border-color: color-mix(in srgb, var(--accent) 58%, var(--line)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 13%, transparent); }.preset-grid button:disabled { cursor: not-allowed; opacity: .48; }.preset-grid strong { padding-right: 42px; font-size: 10px; }.preset-grid small { color: var(--text-muted); font-size: 9px; line-height: 1.4; }.preset-grid em { position: absolute; top: 9px; right: 9px; color: var(--accent); font-size: 8px; font-style: normal; }
 .field { display: flex; flex-direction: column; gap: 6px; color: var(--text-secondary); font-size: 10px; }.field span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }.field small { color: var(--text-muted); font-size: 9px; font-weight: 400; }.field input, .field textarea { padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; outline: none; resize: vertical; background: var(--surface-soft); color: var(--text-primary); }.field input { height: 38px; }.field textarea { min-height: 86px; padding-block: 9px; line-height: 1.5; }.field input:focus, .field textarea:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }.room-instructions { margin-top: 13px; }
 .avatar-picker { display: flex; align-items: center; gap: 12px; margin-top: 13px; padding: 11px; border-radius: 11px; background: var(--surface-soft); }.avatar-picker > div { display: grid; min-width: 0; gap: 3px; }.avatar-picker strong { font-size: 10px; }.avatar-picker small { color: var(--text-muted); font-size: 9px; }.avatar-picker p { display: flex; gap: 5px; margin: 3px 0 0; }.avatar-picker .quiet-button { display: inline-flex; min-height: 27px; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid transparent; border-radius: 7px; background: var(--surface-hover); color: var(--text-secondary); cursor: pointer; font-size: 9px; }.avatar-picker .quiet-button.active { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); color: var(--accent); }.avatar-error { margin: 6px 0 0; color: var(--danger); font-size: 9px; }.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.animal-avatar-options { display: flex; gap: 6px; margin-top: 5px; }.animal-avatar-options button { display: grid; width: 34px; height: 34px; place-items: center; padding: 0; overflow: hidden; border: 2px solid transparent; border-radius: 50%; background: transparent; cursor: pointer; }.animal-avatar-options button:hover { border-color: var(--line-strong); }.animal-avatar-options button.selected { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent); }.animal-avatar-options img { width: 100%; height: 100%; object-fit: cover; }
 .agent-picker { margin-top: 17px; }.agent-picker__heading { display: flex; justify-content: space-between; margin-bottom: 7px; color: var(--text-secondary); font-size: 10px; }.agent-picker__heading small { color: var(--text-muted); }.agent-picker > button { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 9px; padding: 5px 8px; border: 0; border-radius: 9px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }.agent-picker > button:hover, .agent-picker > button.selected { background: var(--surface-soft); }.agent-picker > button:disabled { opacity: .35; }.agent-picker > button strong { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; font-size: 11px; }.agent-picker > button strong small { overflow: hidden; color: var(--text-muted); font-size: 9px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }.agent-picker p { color: var(--text-muted); font-size: 10px; }
 .role-mapping { margin-top: 17px; padding: 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-soft); }.role-mapping > label { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 42%); align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }.role-mapping > label:first-of-type { border-top: 0; }.role-mapping > label > span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }.role-mapping strong { display: flex; align-items: center; gap: 6px; font-size: 10px; }.role-mapping strong em { padding: 2px 5px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-size: 8px; font-style: normal; font-weight: 600; }.role-mapping small { color: var(--text-muted); font-size: 9px; line-height: 1.4; }.role-mapping select { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; outline: none; background: var(--surface-raised); color: var(--text-primary); font-size: 9px; }.role-mapping select:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }
 .host-picker { display: grid; grid-template-columns: minmax(0, 1fr) 148px; align-items: center; gap: 12px; margin-top: 13px; padding: 11px; border: 1px solid var(--line); border-radius: 10px; color: var(--text-secondary); font-size: 10px; }.host-picker > span { display: flex; min-width: 0; flex-direction: column; gap: 3px; font-weight: 650; }.host-picker small { color: var(--text-muted); font-size: 9px; font-weight: 400; line-height: 1.45; }.host-picker select { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; outline: 0; background: var(--surface-soft); color: var(--text-primary); font-size: 10px; }.host-picker select:focus { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--focus-ring); }

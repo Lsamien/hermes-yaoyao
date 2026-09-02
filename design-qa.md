@@ -96,3 +96,12 @@ final result: passed
 - 无剩余 P0、P1 或 P2 视觉问题。
 
 final result: passed
+
+## 群聊组合头像补充验收
+
+- 浏览器证据：`/Users/samien/.codex/visualizations/2026/09/02/01a05f7c-9ccc-76f2-99f3-116cd8ca64cb/group-mascot/web.jpg`。
+- 群聊默认头像由前三位成员角色组成；不足三位时使用圆、方、短三角补足，旧动物值按新组合头像显示。
+- 上传图片仍优先；创建与管理界面改为“成员组合 / 上传图片”，不再出现动物选择器。
+- `1440 × 1024` 浏览器检查确认三个成员均可辨识，短三角未被完全遮挡，控制台无 warning/error。
+
+final result: passed

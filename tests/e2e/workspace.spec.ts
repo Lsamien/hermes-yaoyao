@@ -145,26 +145,25 @@ test('uses split search for topics, teams, and archived content', async ({ page 
   await expect(searchDialog).toBeHidden()
 })
 
-test('shows the team animal avatar in the list and five choices during creation', async ({ page }) => {
+test('shows member mascot clusters in the list and during creation', async ({ page }) => {
   await page.getByRole('button', { name: '团队' }).click()
 
   const topicRow = page.locator('[data-sidebar-id="topic:22222222-2222-4222-8222-222222222222:77777777-7777-4777-8777-777777777777"]')
   const roomAvatar = topicRow.getByRole('img', { name: '设计验收团队头像' })
   await expect(roomAvatar).toBeVisible()
-  await expect(roomAvatar.locator('.team-avatar__image')).toBeVisible()
-  await expect(roomAvatar).toHaveCSS('border-radius', '50%')
-  const releaseTopicAvatar = page.locator('[data-sidebar-id="topic:22222222-2222-4222-8222-222222222222:88888888-8888-4888-8888-888888888888"] .team-avatar__image').first()
-  await expect(releaseTopicAvatar).toHaveAttribute('src', await roomAvatar.locator('.team-avatar__image').getAttribute('src') || '')
+  await expect(roomAvatar.locator('.team-avatar__member')).toHaveCount(3)
+  const releaseTopicAvatar = page.locator('[data-sidebar-id="topic:22222222-2222-4222-8222-222222222222:88888888-8888-4888-8888-888888888888"]').first().locator('.team-avatar__member')
+  await expect(releaseTopicAvatar).toHaveCount(3)
 
   await page.getByRole('button', { name: '新建团队' }).click()
   const dialog = page.getByRole('dialog', { name: '新建团队' })
   await expect(dialog.getByRole('region', { name: '团队预设' })).toBeVisible()
   await expect(dialog.getByRole('button', { name: /信息收集团队/ })).toBeDisabled()
   await expect(dialog.getByRole('button', { name: /信息收集团队/ })).toContainText('还缺 2 人')
-  await expect(dialog.getByText('选择一个简洁的动物图标')).toBeVisible()
-  await expect(dialog.locator('.animal-avatar-options button')).toHaveCount(5)
+  await expect(dialog.getByText('由成员的动态角色自动组成')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '成员组合' })).toBeVisible()
+  await expect(dialog.locator('.team-avatar__member')).toHaveCount(3)
   await expect(dialog.getByRole('button', { name: '上传图片' })).toBeVisible()
-  await expect(dialog.getByRole('button', { name: '随机一个' })).toBeVisible()
   await dialog.locator('input[type="file"]').setInputFiles('public/brand/AppIcon-1024.png')
   await expect(dialog.getByText('使用上传的图片')).toBeVisible()
   await expect(dialog.getByRole('img', { name: '团队团队头像' }).locator('img')).toBeVisible()
@@ -176,17 +175,18 @@ test('updates an existing team avatar from the Web manager', async ({ page }) =>
 
   const manager = page.locator('.group-manager')
   const preview = manager.getByRole('img', { name: '设计与工程协作团队头像' })
-  await expect(preview).toHaveCSS('border-radius', '50%')
+  await expect(preview.locator('.team-avatar__member')).toHaveCount(3)
   const uploadRequest = page.waitForRequest(request => request.method() === 'PATCH' && request.url().endsWith('/rooms/22222222-2222-4222-8222-222222222222'))
   await manager.locator('input[type="file"]').setInputFiles('public/brand/AppIcon-1024.png')
   expect((await uploadRequest).postDataJSON().avatar).toMatch(/^data:image\/png;base64,/)
   await expect(manager.getByText('使用上传的图片')).toBeVisible()
   await expect(preview.locator('img')).toBeVisible()
 
-  const animalRequest = page.waitForRequest(request => request.method() === 'PATCH' && request.url().endsWith('/rooms/22222222-2222-4222-8222-222222222222'))
-  await manager.getByRole('radio', { name: '狐狸' }).click()
-  expect((await animalRequest).postDataJSON()).toMatchObject({ avatar: 'builtin:team-animal:fox' })
-  await expect(manager.getByText('当前图标：狐狸')).toBeVisible()
+  const dynamicRequest = page.waitForRequest(request => request.method() === 'PATCH' && request.url().endsWith('/rooms/22222222-2222-4222-8222-222222222222'))
+  await manager.getByRole('button', { name: '成员组合' }).click()
+  expect((await dynamicRequest).postDataJSON()).toMatchObject({ avatar: '' })
+  await expect(manager.getByText('由成员的动态角色自动组成')).toBeVisible()
+  await expect(preview.locator('.team-avatar__member')).toHaveCount(3)
 })
 
 test('selects one protocol v5 host independently from no-mention replies', async ({ page }) => {

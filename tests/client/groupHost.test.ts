@@ -217,7 +217,7 @@ describe('group host controls', () => {
     wrapper.unmount()
   })
 
-  it('shows five animal choices and submits a randomly initialized team avatar', async () => {
+  it('builds a team avatar from member mascots without persisting a legacy animal', async () => {
     const choices = profiles('yaoyao', 'yaoer').map((profile, index) => ({
       ...profile,
       ...(index === 0 ? { avatar: 'data:image/png;base64,AA==' } : {}),
@@ -229,15 +229,15 @@ describe('group host controls', () => {
     })
     await wrapper.get('input[placeholder="例如：产品评审"]').setValue('头像团队')
     await wrapper.findAll('.agent-picker > button')[1]!.trigger('click')
-    expect(wrapper.findAll('.avatar-picker .animal-avatar-options button')).toHaveLength(5)
-    expect(wrapper.get('.avatar-picker').text()).toContain('选择一个简洁的动物图标')
-    expect(wrapper.get('.avatar-picker .team-avatar__image').attributes('src')).toMatch(/\.png$/)
+    expect(wrapper.findAll('.avatar-picker .team-avatar__member')).toHaveLength(3)
+    expect(wrapper.get('.avatar-picker').text()).toContain('由成员的动态角色自动组成')
+    expect(wrapper.findAll('.avatar-picker .agent-avatar--image')).toHaveLength(1)
     await wrapper.get('.solid-button').trigger('click')
     expect(wrapper.emitted('create')?.[0]?.[0]).toMatchObject({
       name: '头像团队',
       members: choices,
     })
-    expect((wrapper.emitted('create')?.[0]?.[0] as { avatar?: string }).avatar).toMatch(/^builtin:team-animal:(fox|whale|owl|rabbit|bear)$/)
+    expect((wrapper.emitted('create')?.[0]?.[0] as { avatar?: string }).avatar).toBeUndefined()
     wrapper.unmount()
   })
 
