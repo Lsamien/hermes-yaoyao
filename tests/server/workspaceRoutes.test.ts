@@ -108,7 +108,9 @@ describe('application workspace HTTP contract', () => {
     expect(upstream.some((p) => p.includes('/plugins/'))).toBe(false)
   })
   it('works without plugin discovery, installation, or any plugin HTTP request', async () => {
-    await req('get', '/api/app/capabilities').expect(200)
+    const capabilities = (await req('get', '/api/app/capabilities').expect(200)).body.features
+    expect(capabilities).toContain('editableGroups')
+    expect(capabilities).not.toContain('immutableGroups')
     await req('get', '/api/app/files').expect(200)
     await req('get', '/api/app/voice/runtime').expect(200)
     await req('get', '/api/app/system/update/status').expect(200)
@@ -116,7 +118,7 @@ describe('application workspace HTTP contract', () => {
     await req('get', '/api/plugins/yaoyao/v1/capabilities').expect(410)
     expect(upstream.some((p) => p.includes('/plugins/'))).toBe(false)
   })
-  it('creates application identities and enforces ownership and immutable members over HTTP', async () => {
+  it('changes members over HTTP while protecting the administrator and ownership', async () => {
     const a = (
       await req('post', '/api/app/agents').send({ name: '编辑', profile: 'default' }).expect(201)
     ).body.agent
@@ -131,8 +133,11 @@ describe('application workspace HTTP contract', () => {
     const rows = await req('get', '/api/app/conversations').expect(200)
     expect(rows.body.conversations).toHaveLength(3)
     await req('patch', `/api/app/conversations/${c.id}`)
-      .send({ memberIds: [a.id] })
+      .send({ memberIds: [b.id], administratorId: b.id })
       .expect(400)
+    await req('patch', `/api/app/conversations/${c.id}`).send({ memberIds: [a.id] }).expect(200)
+    expect((await req('get', `/api/app/conversations/${c.id}`)).body.conversation.memberIds).toEqual([a.id])
+    await req('patch', `/api/app/conversations/${c.id}`).send({ memberIds: [a.id, b.id] }).expect(200)
     await req('get', `/api/app/conversations/${c.id}`, 'second').expect(404)
     await req('patch', `/api/app/agents/${a.id}`, 'second').send({ name: '入侵' }).expect(404)
     expect((await req('get', '/api/app/events', 'second')).body.events).toEqual([])

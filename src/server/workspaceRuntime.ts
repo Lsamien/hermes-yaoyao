@@ -205,6 +205,9 @@ export class WorkspaceRuntime {
         if (!['queued', 'running'].includes(run.status)) break
         if (!this.userActive(owner)) throw new HttpError(403, '账号已停用', 'account_disabled')
         const c = this.store.require<Conversation>(owner, 'conversation', run.conversationId)
+        // A current reply may finish, but removed members must not start another turn.
+        run.queue = run.queue.filter(agentId => c.memberIds.includes(agentId))
+        run.next = run.next.filter(agentId => c.memberIds.includes(agentId))
         if (!run.queue.length) {
           if (
             c.kind === 'direct' ||
@@ -276,7 +279,9 @@ export class WorkspaceRuntime {
       if (!configuration) throw new Error('运行配置缺失，已停止自动协作')
       if (configuration.mode === 'free' || agentId === configuration.administratorId)
         run.next.push(
-          ...mentionedAgents(message.content, configuration.members).filter((id) => id !== agentId),
+          ...mentionedAgents(message.content, configuration.members).filter(
+            id => id !== agentId && c.memberIds.includes(id),
+          ),
         )
       if (
         c.kind === 'group' &&
@@ -285,6 +290,8 @@ export class WorkspaceRuntime {
       )
         run.hostReturn = true
       if (run.queue[0] === agentId) run.queue.shift()
+      run.queue = run.queue.filter(id => c.memberIds.includes(id))
+      run.next = run.next.filter(id => c.memberIds.includes(id))
       run.activeAgentId = run.queue[0]
       run.currentMessageId = undefined
       run.error = undefined

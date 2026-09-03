@@ -62,6 +62,7 @@ export const conversationPatch = z
     name: name.optional(),
     avatar: avatar.optional(),
     instructions: z.string().max(24_000).optional(),
+    memberIds: z.array(z.string().uuid()).min(1).max(8).optional(),
     administratorId: z.string().uuid().optional(),
     mode: z.enum(['host', 'free']).optional(),
     autoReplyIds: z.array(z.string().uuid()).max(8).optional(),
@@ -301,12 +302,26 @@ export class WorkspaceStore {
       c = this.require<Conversation>(owner, 'conversation', id)
     if (c.kind === 'direct' && Object.keys(patch).some((k) => k !== 'pinned'))
       throw new HttpError(400, '请编辑 Agent 资料', 'edit_agent_instead')
+    const memberIds = patch.memberIds ?? c.memberIds
+    const members = new Set(memberIds)
+    if (!members.has(c.administratorId))
+      throw new HttpError(400, '当前管理员不能移除，请先更换管理员并保存', 'administrator_required')
     if (
-      (patch.administratorId && !c.memberIds.includes(patch.administratorId)) ||
-      patch.autoReplyIds?.some((a) => !c.memberIds.includes(a))
+      members.size !== memberIds.length ||
+      !members.has(patch.administratorId ?? c.administratorId) ||
+      patch.autoReplyIds?.some((a) => !members.has(a) && !c.memberIds.includes(a))
     )
-      throw new HttpError(400, '只能选择现有成员', 'invalid_members')
-    const next = { ...c, ...patch, updatedAt: Date.now() }
+      throw new HttpError(400, '群成员或管理员无效', 'invalid_members')
+    for (const memberId of memberIds) {
+      const agent = this.require<Agent>(owner, 'agent', memberId)
+      if (!c.memberIds.includes(memberId) && agent.archived)
+        throw new HttpError(409, '已归档 Agent 不能加入群聊', 'agent_archived')
+    }
+    const next = {
+      ...c, ...patch, memberIds,
+      autoReplyIds: (patch.autoReplyIds ?? c.autoReplyIds).filter(a => members.has(a)),
+      updatedAt: Date.now(),
+    }
     this.atomic(() => {
       this.put(owner, 'conversation', id, next)
       this.event(owner, 'conversation.changed', next, id)

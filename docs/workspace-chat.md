@@ -2,7 +2,9 @@
 
 ## 身份和数据
 
-`WorkspaceAgent` 引用不可变的 `(nodeId, profile)`，保存名称、头像及角色规则。`WorkspaceConversation` 为 `direct` 或 `group`；每个角色只有一个 direct，group 的成员集合不可变，协议不包含 topicId。角色名在用户内唯一，以便精确 @。
+`WorkspaceAgent` 引用不可变的 `(nodeId, profile)`，保存名称、头像及角色规则。`WorkspaceConversation` 为 `direct` 或 `group`；每个角色只有一个 direct，group 支持增减成员，协议不包含 topicId。角色名在用户内唯一，以便精确 @。
+
+创建群聊选择 2～8 位成员；编辑时可以只保留管理员，最多 8 位。当前管理员不能移除，须先更换管理员并保存后再移除原管理员。新增成员必须属于当前用户且未归档。移除成员保留聊天记录及原会话，更新头像组合和提及名单，同时清理自动回复名单；进行中的回复可完成，后续接力不再调度已移除成员。
 
 应用数据保存在 Web 数据目录的 `workspace.sqlite3`。每一条实体、命令和事件包含服务端用户归属。隐藏上游会话只由 WorkspaceRuntime 驱动，原生历史及 RPC 不允许直接访问。基础 Hermes Profile 的记忆和工具权限没有被复制为新的隔离运行环境。
 

@@ -59,7 +59,7 @@ export function workspaceRouter(
       features: [
         'agents',
         'conversations',
-        'immutableGroups',
+        'editableGroups',
         'files',
         'voice',
         'context',

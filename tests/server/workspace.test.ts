@@ -281,7 +281,7 @@ describe('Web-owned workspace', () => {
     expect(() => store.require(other, 'conversation', direct(a.id).id)).toThrow('记录不存在')
     expect(requests).toEqual([])
   })
-  it('keeps membership immutable and validates member ownership', () => {
+  it('protects the current administrator and validates member ownership', () => {
     const a = agent('甲'),
       b = agent('乙'),
       foreign = agent('外部', other)
@@ -290,7 +290,10 @@ describe('Web-owned workspace', () => {
       memberIds: [a.id, b.id],
       administratorId: a.id,
     })
-    expect(() => store.updateConversation(owner, c.id, { memberIds: [b.id] })).toThrow()
+    expect(() => store.updateConversation(owner, c.id, { memberIds: [b.id] })).toThrow('当前管理员不能移除')
+    expect(() => store.updateConversation(owner, c.id, { memberIds: [b.id], administratorId: b.id })).toThrow('当前管理员不能移除')
+    expect(() => store.updateConversation(owner, c.id, { memberIds: [a.id, foreign.id] })).toThrow('记录不存在')
+    expect(() => store.updateConversation(owner, c.id, { memberIds: [a.id, a.id] })).toThrow('群成员或管理员无效')
     expect(() =>
       store.createGroup(owner, {
         name: '越权',
@@ -306,6 +309,49 @@ describe('Web-owned workspace', () => {
     expect(() =>
       store.createGroup(owner, { name: '新群', memberIds: [a.id, b.id], administratorId: a.id }),
     ).toThrow('已归档')
+    expect(store.updateConversation(owner, c.id, { memberIds: [a.id] }).memberIds).toEqual([a.id])
+    expect(() => store.updateConversation(owner, c.id, { memberIds: [a.id, b.id] })).toThrow('已归档')
+  })
+  it('adds and removes members, cleans automatic replies, and permits removal after administrator transfer', async () => {
+    const a = agent('管理员'), b = agent('旧成员'), added = agent('新成员')
+    const c = store.createGroup(owner, { name: '成员维护', memberIds: [a.id, b.id], administratorId: a.id, autoReplyIds: [b.id] })
+    await finished(runtime.send(owner, c.id, { requestId: randomUUID(), content: '保留这条历史' }).id)
+    const before = store.require<WorkspaceConversation>(owner, 'conversation', c.id)
+    const history = store.messages(owner, c.id)
+    const changed = store.updateConversation(owner, c.id, { memberIds: [a.id, added.id] })
+    expect(changed.memberIds).toEqual([a.id, added.id])
+    expect(changed.autoReplyIds).toEqual([])
+    expect(changed.lastMessageAt).toBe(before.lastMessageAt)
+    expect(store.messages(owner, c.id)).toEqual(history)
+    expect(store.events(owner, 0).at(-1)).toMatchObject({ type: 'conversation.changed', data: { memberIds: [a.id, added.id] } })
+    store.updateConversation(owner, c.id, { administratorId: added.id })
+    expect(store.updateConversation(owner, c.id, { memberIds: [added.id] }).memberIds).toEqual([added.id])
+    expect(() => store.updateConversation(owner, c.id, { memberIds: [a.id] })).toThrow('当前管理员不能移除')
+  })
+  it('skips removed queued members and accepts a newly added member on the next request', async () => {
+    const a = agent('管理员'), b = agent('待回复'), added = agent('新成员')
+    const c = store.createGroup(owner, { name: '队列维护', memberIds: [a.id, b.id], administratorId: a.id, mode: 'free', autoReplyIds: [a.id, b.id] })
+    let turns = 0
+    reply = (socket, p) => {
+      if (turns++ === 0) store.updateConversation(owner, c.id, { memberIds: [a.id, added.id] })
+      socket.send(JSON.stringify({ method: 'event', params: { type: 'message.complete', session_id: p.session_id, payload: { text: '请@待回复继续' } } }))
+    }
+    await finished(runtime.send(owner, c.id, { requestId: randomUUID(), content: '开始' }).id)
+    expect(store.messages(owner, c.id).filter(m => m.role === 'assistant').map(m => m.agentId)).toEqual([a.id])
+    await finished(runtime.send(owner, c.id, { requestId: randomUUID(), content: '请@新成员继续' }).id)
+    expect(store.messages(owner, c.id).filter(m => m.role === 'assistant').map(m => m.agentId)).toEqual([a.id, added.id])
+  })
+  it('finishes an in-flight removed member reply without scheduling it again', async () => {
+    const a = agent('管理员'), b = agent('正在回复')
+    const c = store.createGroup(owner, { name: '回复中移除', memberIds: [a.id, b.id], administratorId: a.id })
+    let turns = 0
+    reply = (socket, p) => {
+      if (turns++ === 0) store.updateConversation(owner, c.id, { memberIds: [a.id] })
+      socket.send(JSON.stringify({ method: 'event', params: { type: 'message.complete', session_id: p.session_id, payload: { text: '请@正在回复继续' } } }))
+    }
+    await finished(runtime.send(owner, c.id, { requestId: randomUUID(), content: '@正在回复 开始' }).id)
+    expect(store.messages(owner, c.id).filter(m => m.role === 'assistant').map(m => m.agentId)).toEqual([b.id, a.id])
+    expect(() => runtime.send(owner, c.id, { requestId: randomUUID(), content: '继续', mentionIds: [b.id] })).toThrow('只能 @ 群内成员')
   })
   it('dispatches a request exactly once across retries and rejects payload reuse', async () => {
     const a = agent('编辑'),

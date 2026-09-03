@@ -285,7 +285,7 @@ async function save() {
         mode: form.mode,
         autoReplyIds: form.autoReplyIds,
         maxReplyRounds: form.maxReplyRounds,
-        ...(dialog.value === 'group' ? { memberIds: form.memberIds } : {}),
+        memberIds: form.memberIds,
       }
       const result = await apiRequest<{ conversation: Conversation }>(
         dialog.value === 'group'
@@ -474,7 +474,7 @@ onBeforeUnmount(() => {
     /></template>
     <section class="workspace-chat" aria-label="聊天">
       <MessageTimeline ref="timeline" :messages="uiMessages" :title="active?.name || '团队'"
-        :subtitle="active?.kind === 'group' ? `${members.length} 位成员 · 成员已固定` : ''"
+        :subtitle="active?.kind === 'group' ? `${members.length} 位成员` : ''"
         :loading="loading" :has-older="older && !!active" :connected="!error" :synced="!loading"
         :show-tools="showThinking" :allow-branch="false" :thinking="!!active?.activeRunId"
         :agent-avatars="Object.fromEntries(agents.map(a => [a.id, a.avatar]))"
@@ -554,21 +554,22 @@ onBeforeUnmount(() => {
           />
         </label>
         <fieldset v-if="!isAgentDialog">
-          <legend>{{ dialog === 'group' ? '选择成员（创建后不可变更）' : '固定成员' }}</legend>
+          <legend>选择成员</legend>
           <label
             v-for="a in agents.filter((a) =>
-              dialog === 'group' ? !a.archived : form.memberIds.includes(a.id),
+              !a.archived || (dialog === 'editGroup' && active?.memberIds.includes(a.id)),
             )"
             :key="a.id"
             ><input
               v-model="form.memberIds"
               type="checkbox"
               :value="a.id"
-              :disabled="dialog === 'editGroup'"
+              :disabled="busy || (dialog === 'editGroup' && (a.id === active?.administratorId || a.id === form.administratorId)) || (!form.memberIds.includes(a.id) && form.memberIds.length >= 8)"
             />{{ a.name }}</label
-          ><small v-if="agents.filter((a) => !a.archived).length < 2"
+          ><small v-if="dialog === 'group' && agents.filter((a) => !a.archived).length < 2"
             >至少需要两个 Agent 才能创建群聊。</small
           >
+          <small v-if="dialog === 'editGroup'">可增减成员，最多 8 位。当前管理员不能移除；如需移除，请先更换管理员并保存。</small>
         </fieldset>
         <template v-if="!isAgentDialog"
           ><label
@@ -605,7 +606,7 @@ onBeforeUnmount(() => {
         ></template>
         <footer>
           <button class="quiet-button" type="button" @click="closeDialog">取消</button
-          ><button class="solid-button" :disabled="busy || (!isAgentDialog && form.memberIds.length < 2)">
+          ><button class="solid-button" :disabled="busy || (!isAgentDialog && (form.memberIds.length < (dialog === 'group' ? 2 : 1) || form.memberIds.length > 8))">
             {{ busy ? '保存中…' : '保存' }}
           </button>
         </footer>
