@@ -197,7 +197,6 @@ function closeSettingsMenu() {
   void nextTick(() => { if (settingsTrigger?.isConnected) settingsTrigger.focus() })
 }
 async function openSettingsMenu(event: MouseEvent) {
-  if (applicationWorkspace.value) { openSettings('account-security', event); return }
   if (settingsMenuOpen.value) { closeSettingsMenu(); return }
   settingsTrigger = event.currentTarget as HTMLButtonElement
   const rect = settingsTrigger.getBoundingClientRect()
@@ -213,7 +212,7 @@ function chooseSettingsAction(action: 'settings' | 'bots') {
   if (action === 'bots') { switchInterfaceMode(); return }
   settingsReturnFocus.value = settingsTrigger?.closest('.mobile-drawer')
     ? mobileNavigationTrigger.value : settingsTrigger ?? undefined
-  openSettings('agent-identity')
+  openSettings(applicationWorkspace.value ? 'account-security' : 'agent-identity')
 }
 function switchInterfaceMode() {
   settingsOpen.value = false
@@ -377,7 +376,7 @@ onBeforeUnmount(() => {
       :inert="mobileDrawerOpen"
     >
       <div v-if="applicationWorkspace" class="bot-list-header">
-        <button class="bot-account-trigger" type="button" aria-label="设置" @click="openSettings('account-security', $event)"><AgentAvatar :name="userName" :size="40" /></button>
+        <button class="bot-logo-trigger sidebar-brand" type="button" aria-label="返回 Bot 列表" title="夭夭 Web" @click="navigate('/conversations')"><BrandMark :size="32" :label="false" compact bare /></button>
         <span class="bot-list-header__spacer" />
         <button class="bot-list-toolbar-button sidebar-search-trigger" type="button" aria-label="搜索" :aria-expanded="sidebarSearchOpen" @click="openSidebarSearch(desktopSidebarContext)"><AppIcon name="search" :size="21" /></button>
         <button class="bot-list-toolbar-button sidebar-create-trigger" type="button" aria-label="新建" aria-haspopup="menu" :aria-expanded="createMenuOpen" @click="openCreateMenu"><AppIcon name="plus" :size="23" /></button>
@@ -453,7 +452,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <div v-if="!applicationWorkspace" class="sidebar-footer">
+      <div class="sidebar-footer">
         <div class="sidebar-account-switcher">
           <button class="sidebar-account-switcher__main" type="button" :title="applicationWorkspace ? '当前账号' : `切换 Agent：${profileTitle(activeProfile)}`" :aria-haspopup="applicationWorkspace ? undefined : 'listbox'" :aria-expanded="applicationWorkspace ? undefined : profileMenuOpen" @click="applicationWorkspace ? openSettings('account-security', $event) : toggleProfileMenu($event)">
             <AgentAvatar :name="applicationWorkspace ? userName : profileTitle(activeProfile)" :avatar="applicationWorkspace ? '' : activeProfile?.agentAvatar || ''" :size="30" />
@@ -463,7 +462,7 @@ onBeforeUnmount(() => {
             </span>
             <AppIcon v-if="!applicationWorkspace" class="sidebar-account-switcher__chevron" name="chevron-down" :size="14" />
           </button>
-          <button class="sidebar-settings-trigger" type="button" :title="applicationWorkspace ? '设置中心' : '设置与模式'" :aria-label="applicationWorkspace ? '打开设置中心' : '设置与模式'" :aria-haspopup="applicationWorkspace ? undefined : 'menu'" :aria-expanded="applicationWorkspace ? undefined : settingsMenuOpen" @click="openSettingsMenu">
+          <button class="sidebar-settings-trigger" type="button" title="设置与模式" aria-label="设置与模式" aria-haspopup="menu" :aria-expanded="settingsMenuOpen" @click="openSettingsMenu">
             <AppIcon name="settings" :size="17" />
           </button>
           <Transition name="menu-fade">
@@ -569,7 +568,7 @@ onBeforeUnmount(() => {
             </span>
             <AppIcon v-if="!applicationWorkspace" class="sidebar-account-switcher__chevron" name="chevron-down" :size="14" />
           </button>
-          <button class="sidebar-settings-trigger" type="button" :title="applicationWorkspace ? '设置中心' : '设置与模式'" :aria-label="applicationWorkspace ? '打开设置中心' : '设置与模式'" :aria-haspopup="applicationWorkspace ? undefined : 'menu'" :aria-expanded="applicationWorkspace ? undefined : settingsMenuOpen" @click="openSettingsMenu">
+          <button class="sidebar-settings-trigger" type="button" title="设置与模式" aria-label="设置与模式" aria-haspopup="menu" :aria-expanded="settingsMenuOpen" @click="openSettingsMenu">
             <AppIcon name="settings" :size="17" />
           </button>
           <Transition name="menu-fade">
@@ -637,7 +636,7 @@ onBeforeUnmount(() => {
       <div v-if="settingsMenuOpen" class="workspace-create-dismiss" @pointerdown.self="closeSettingsMenu" @keydown.esc.prevent.stop="closeSettingsMenu">
         <div ref="settingsMenu" class="workspace-create-menu workspace-settings-menu" :style="settingsMenuPosition" role="menu" aria-label="设置与模式" @keydown="actionMenuKeydown">
           <button type="button" role="menuitem" @click="chooseSettingsAction('settings')"><AppIcon name="settings" :size="17" />进入设置</button>
-          <button type="button" role="menuitem" @click="chooseSettingsAction('bots')"><AppIcon name="users" :size="17" />进入 Bot 模式</button>
+          <button type="button" role="menuitem" @click="chooseSettingsAction('bots')"><AppIcon :name="applicationWorkspace ? 'chat' : 'users'" :size="17" />{{ applicationWorkspace ? '进入聊天模式' : '进入 Bot 模式' }}</button>
         </div>
       </div>
       <div v-if="createMenuOpen" class="workspace-create-dismiss" @pointerdown.self="closeCreateMenu" @keydown.esc.prevent.stop="closeCreateMenu">
@@ -662,7 +661,7 @@ onBeforeUnmount(() => {
   transition: grid-template-columns 180ms var(--ease-out);
 }
 
-.workspace-shell--conversations { grid-template-columns: 300px minmax(0, 1fr) auto; }
+.workspace-shell--conversations { grid-template-columns: 360px minmax(0, 1fr) auto; }
 .workspace-shell--collapsed { grid-template-columns: 68px minmax(0, 1fr) auto; }
 .mobile-header, .mobile-drawer, .drawer-scrim { display: none; }
 
@@ -880,7 +879,7 @@ onBeforeUnmount(() => {
 
 .bot-list-header{display:flex;align-items:center;gap:10px;padding:20px 20px 12px;min-height:74px}
 .bot-list-header__spacer{flex:1}
-.bot-account-trigger{display:grid;place-items:center;padding:0;border:0;background:transparent;cursor:pointer;border-radius:50%}
+.bot-logo-trigger{display:grid;place-items:center;padding:0;border:0;background:transparent;cursor:pointer;border-radius:50%}
 .bot-list-header .bot-list-toolbar-button{position:static;display:grid;place-items:center;width:42px;height:42px;min-height:42px;flex:0 0 42px;margin:0;padding:0;border:1px solid var(--line);border-radius:50%;background:var(--surface);color:var(--text-primary)}
 .workspace-shell--conversations .sidebar-context{margin-top:0}
 @media(max-width:900px){

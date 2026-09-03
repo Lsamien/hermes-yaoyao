@@ -42,8 +42,8 @@ function action(kind: 'pin' | 'archive') {
 .conversation-list :deep(.sidebar-list){padding:0 12px 18px;scrollbar-gutter:auto}
 .conversation-list :deep(.sidebar-item){min-height:76px;padding:14px 8px;gap:16px;border-radius:12px}
 .conversation-list :deep(.sidebar-item__icon){width:44px;height:44px;flex-basis:44px}
-.conversation-list :deep(.sidebar-item__row strong){font-size:17px;font-weight:600;line-height:24px}
-.conversation-list :deep(.sidebar-item__row--secondary){font-size:15px;line-height:21px;margin-top:4px}
-.conversation-list :deep(.sidebar-item__row small){font-size:12px;color:var(--text-muted)}
+.conversation-list :deep(.sidebar-item__row strong){font-size:15px;font-weight:600;line-height:22px}
+.conversation-list :deep(.sidebar-item__row--secondary){font-size:13px;line-height:19px;margin-top:4px}
+.conversation-list :deep(.sidebar-item__row small){font-size:10px;color:var(--text-muted)}
 .conversation-menu-dismiss{position:fixed;inset:0;z-index:200}.conversation-actions{position:absolute;display:grid;min-width:155px;padding:5px;border:1px solid var(--line);border-radius:10px;background:var(--surface-raised);box-shadow:var(--shadow-float)}.conversation-actions button{padding:9px 12px;border:0;border-radius:7px;background:transparent;color:var(--text-primary);text-align:left;cursor:pointer;font-size:12px}.conversation-actions button:hover{background:var(--surface-hover)}
 </style>
