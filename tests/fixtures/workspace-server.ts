@@ -23,10 +23,17 @@ const sessions = new Map<
   }
 >()
 const calls: Array<{ method: string; params: Record<string, unknown> }> = []
+const heldReplies: Array<() => void> = []
 const upstream = createServer((req, res) => {
   const url = new URL(req.url || '/', `http://127.0.0.1:${upstreamPort}`)
   res.setHeader('content-type', 'application/json')
   const send = (v: unknown) => res.end(JSON.stringify(v))
+  if (url.pathname === '/__release' && req.method === 'POST') {
+    const held = heldReplies.splice(0)
+    for (const complete of held) complete()
+    send({ released: held.length })
+    return
+  }
   if (url.pathname.includes('/plugins/')) {
     res.statusCode = 404
     send({ error: 'This fixture has no plugins' })
@@ -145,10 +152,12 @@ wss.on('connection', (socket) => {
       })
       respond({ status: 'streaming' })
       const name = /你是 (.*?)。/.exec(f.params.text)?.[1] || '助手'
-      const text = `我是${name}。已按角色规则处理这条消息。\n\n- 会话独立保存\n- 可以继续交流\n\n[报告](/tmp/workspace-report.txt)`
+      const requested = /本轮用户指定成员：([^\n]*)/.exec(f.params.text)?.[1] ?? ''
+      const delegates = f.params.text.includes('你是管理员。') && !f.params.text.includes('本批次执行结果：') && requested.startsWith('@')
+      const text = `我是${name}。已按角色规则处理这条消息。\n\n- 会话独立保存\n- 可以继续交流\n\n[报告](/tmp/workspace-report.txt)${delegates ? `\n请${requested}处理任务。` : ''}`
       event('message.start', {}, f.params.session_id)
       setTimeout(() => event('message.delta', { text: text.slice(0, 12) }, f.params.session_id), 80)
-      setTimeout(() => {
+      const complete = () => {
         stored!.running = false
         stored!.messages.push({
           id: randomUUID(),
@@ -157,7 +166,9 @@ wss.on('connection', (socket) => {
           timestamp: Date.now() / 1000,
         })
         event('message.complete', { text, status: 'complete' }, f.params.session_id)
-      }, 250)
+      }
+      if (f.params.text.includes('[hold-workspace]')) heldReplies.push(complete)
+      else setTimeout(complete, 250)
       return
     }
     if (f.method === 'session.interrupt' && stored) stored.running = false

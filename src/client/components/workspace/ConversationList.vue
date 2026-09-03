@@ -18,7 +18,7 @@ const rows = computed<SidebarItem[]>(() => props.conversations.filter(c => c.arc
     meta: formatMessageTime(c.lastMessageAt ?? c.createdAt),
     avatarKind: c.kind === 'direct' ? 'agent' : 'team',
     avatarState: workspaceAvatarState(c, c.memberIds[0] || ''),
-    unread: Math.max(0, c.lastSeq - c.readSeq), status: c.activeRunId ? 'working' : undefined })))
+    unread: c.unreadCount ?? Math.max(0, c.lastSeq - c.readSeq), status: c.activeRunId ? 'working' : undefined })))
 function openMenu(id: string, event: MouseEvent) {
   menuId.value = id
   menuPosition.value = { left: `${Math.max(8, Math.min(event.clientX, window.innerWidth - 170))}px`, top: `${Math.max(8, Math.min(event.clientY, window.innerHeight - 100))}px` }

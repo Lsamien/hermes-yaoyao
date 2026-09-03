@@ -59,7 +59,7 @@ export const groupInput = z
     administratorId: z.string().uuid(),
     mode: z.enum(['host', 'free']).default('host'),
     autoReplyIds: z.array(z.string().uuid()).max(8).default([]),
-    maxReplyRounds: z.number().int().min(1).max(100).default(3),
+    maxReplyRounds: z.union([z.literal(-1), z.number().int().min(1).max(100)]).default(3),
   })
   .strict()
 export const conversationPatch = z
@@ -72,7 +72,7 @@ export const conversationPatch = z
     administratorId: z.string().uuid().optional(),
     mode: z.enum(['host', 'free']).optional(),
     autoReplyIds: z.array(z.string().uuid()).max(8).optional(),
-    maxReplyRounds: z.number().int().min(1).max(100).optional(),
+    maxReplyRounds: z.union([z.literal(-1), z.number().int().min(1).max(100)]).optional(),
     archived: z.boolean().optional(),
     pinned: z.boolean().optional(),
   })
@@ -101,6 +101,9 @@ export class WorkspaceStore {
       CREATE TABLE IF NOT EXISTS workspace_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,owner TEXT NOT NULL,type TEXT NOT NULL,conversation_id TEXT,data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS workspace_events_owner ON workspace_events(owner,seq);
       CREATE TABLE IF NOT EXISTS workspace_commands(owner TEXT NOT NULL,id TEXT NOT NULL,fingerprint TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(owner,id));`)
+    this.db.exec(`CREATE INDEX IF NOT EXISTS workspace_turn_run ON workspace_entities(owner, json_extract(data,'$.runId')) WHERE kind='turn';
+      CREATE INDEX IF NOT EXISTS workspace_turn_status ON workspace_entities(owner, json_extract(data,'$.status'), json_extract(data,'$.planned')) WHERE kind='turn';
+      CREATE INDEX IF NOT EXISTS workspace_turn_conversation ON workspace_entities(owner, json_extract(data,'$.conversationId')) WHERE kind='turn';`)
     this.changes.setMaxListeners(0)
   }
   get<T>(owner: string, kind: string, id: string): T | undefined {
@@ -342,11 +345,12 @@ export class WorkspaceStore {
     conversationId: string,
     before = Number.MAX_SAFE_INTEGER,
     limit = 100,
+    includeHidden = false,
   ): Message[] {
     this.require(owner, 'conversation', conversationId)
     return this.db
       .prepare(
-        `SELECT data FROM workspace_entities WHERE owner=? AND kind='message' AND json_extract(data,'$.conversationId')=? AND json_extract(data,'$.seq')<? ORDER BY json_extract(data,'$.seq') DESC LIMIT ?`,
+        `SELECT data FROM workspace_entities WHERE owner=? AND kind='message' AND json_extract(data,'$.conversationId')=? AND json_extract(data,'$.seq')<? ${includeHidden ? '' : "AND coalesce(json_extract(data,'$.visible'),1) != 0"} ORDER BY json_extract(data,'$.seq') DESC LIMIT ?`,
       )
       .all(owner, conversationId, before, limit)
       .map((r) => JSON.parse(String(r.data)) as Message)
@@ -355,11 +359,15 @@ export class WorkspaceStore {
   saveMessage(owner: string, message: Message): void {
     this.atomic(() => {
       const c = this.require<Conversation>(owner, 'conversation', message.conversationId)
+      const previous = this.get<Message>(owner, 'message', message.id)
+      if (previous?.visible === false && message.visible !== false) message.seq = 0
       if (!message.seq) message.seq = c.lastSeq + 1
       c.lastSeq = Math.max(c.lastSeq, message.seq)
-      c.updatedAt = Date.now()
-      c.lastMessageAt = Math.max(c.lastMessageAt ?? 0, message.createdAt)
-      c.preview = notificationPlainText(message.content, { maximum: 160, fallback: '' })
+      if (message.visible !== false && (message.content.trim() || message.attachments.length)) {
+        c.updatedAt = Date.now()
+        c.lastMessageAt = Math.max(c.lastMessageAt ?? 0, message.createdAt)
+        c.preview = notificationPlainText(message.content, { maximum: 160, fallback: '' })
+      }
       this.put(owner, 'message', message.id, message)
       this.put(owner, 'conversation', c.id, c)
       this.event(owner, 'message.changed', message, c.id)
@@ -373,21 +381,31 @@ export class WorkspaceStore {
     const member = conversation.kind === 'direct' ? this.get<Agent>(owner, 'agent', conversation.memberIds[0] ?? '') : undefined
     return {
       ...conversation,
+      unreadCount: this.messages(owner, conversation.id, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER).filter(m => m.seq > conversation.readSeq).length,
       ...(member ? { avatar: this.agentSummary(member).avatar } : {}),
       lastMessageAt: conversation.lastMessageAt
         ?? (conversation.lastSeq > 0 ? this.messages(owner, conversation.id, Number.MAX_SAFE_INTEGER, 1).at(-1)?.createdAt : undefined)
         ?? conversation.createdAt,
     }
   }
+  hiddenMessageIds(owner: string, conversationId: string): string[] {
+    return this.messages(owner, conversationId, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, true).filter(m => m.visible === false).map(m => m.id)
+  }
   saveRun(owner: string, run: Run): void {
     this.atomic(() => {
       const c = this.require<Conversation>(owner, 'conversation', run.conversationId)
-      const terminal = ['complete', 'failed', 'interrupted'].includes(run.status)
-      c.activeRunId = terminal ? undefined : run.id
-      c.activeAgentId = terminal ? undefined : run.activeAgentId
-      c.activeRunStatus = terminal ? undefined : run.status
       run.updatedAt = Date.now()
       this.put(owner, 'run', run.id, run)
+      const roots = this.list<Run>(owner, 'run').filter(r => r.conversationId === c.id && !['complete', 'failed', 'interrupted'].includes(r.status))
+        .sort((a, b) => this.require<Message>(owner, 'message', a.messageId).seq - this.require<Message>(owner, 'message', b.messageId).seq)
+      const current = roots[0]
+      c.activeRunId = current?.id
+      c.activeAgentId = current?.activeAgentId
+      c.activeRunStatus = current?.status
+      const tasks = this.db.prepare("SELECT data FROM workspace_entities WHERE owner=? AND kind='turn' AND json_extract(data,'$.conversationId')=? AND json_extract(data,'$.status') IN ('running','waiting','uncertain')").all(owner, c.id)
+        .map(row => JSON.parse(String(row.data)) as { agentId: string; status: string })
+      c.activeAgentStates = Object.fromEntries(tasks.map(t => [t.agentId, t.status as 'running' | 'waiting' | 'uncertain']))
+      c.queuedMessageCount = roots.filter(r => r.status === 'queued').length
       this.put(owner, 'conversation', c.id, c)
       this.event(owner, 'run.changed', run, c.id)
       this.event(owner, 'conversation.changed', c, c.id)

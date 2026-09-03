@@ -365,7 +365,7 @@ export function artifactToUi(item: ConversationArtifact): UiLibraryItem {
 
 /** Adapt the Web-owned transcript to the existing chat presentation. */
 export function workspaceMessagesToUi(messages: import('@shared/workspace').WorkspaceMessage[]): UiMessage[] {
-  return messages.map(message => ({
+  return messages.filter(message => message.visible !== false).map(message => ({
     id: message.id, role: message.role, author: message.agentName,
     profile: message.agentId, createdAt: message.createdAt,
     content: message.content.replace(/(!?\[[^\]]*\])\(<?([^)>]+)>?\)/g, (whole, label: string, path: string) => {
@@ -400,6 +400,8 @@ export function workspaceAvatarMembers(memberIds: string[], agents: import('@sha
 
 
 export function workspaceAvatarState(conversation: import('@shared/workspace').WorkspaceConversation | undefined, agentId: string): 'idle' | 'working' | 'waiting' {
+  const state = conversation?.activeAgentStates?.[agentId]
+  if (state) return state === 'running' ? 'working' : 'waiting'
   if (!conversation?.activeRunId || conversation.activeAgentId !== agentId) return 'idle'
   return conversation.activeRunStatus === 'waiting' || conversation.activeRunStatus === 'uncertain' ? 'waiting' : 'working'
 }

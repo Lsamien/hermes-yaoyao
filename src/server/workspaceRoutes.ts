@@ -118,6 +118,7 @@ export function workspaceRouter(
     ctx.body = {
       conversation: store.conversationSummary(user, conversation),
       messages: store.messages(user, conversation.id),
+      hiddenMessageIds: store.hiddenMessageIds(user, conversation.id),
       run: conversation.activeRunId
         ? store.require<WorkspaceRun>(user, 'run', conversation.activeRunId)
         : null,
@@ -127,8 +128,15 @@ export function workspaceRouter(
       context: store.get(user, 'context', conversation.id) ?? null,
     }
   })
-  router.patch('/api/app/conversations/:id', (ctx) => {
-    ctx.body = { conversation: store.updateConversation(owner(ctx), ctx.params.id, body(ctx)) }
+  router.patch('/api/app/conversations/:id', async (ctx) => {
+    const user = owner(ctx), conversation = store.updateConversation(user, ctx.params.id, body(ctx))
+    if (conversation.archived) await runtime.stopConversation(user, conversation.id)
+    runtime.wake()
+    ctx.body = { conversation: store.require(user, 'conversation', conversation.id) }
+  })
+  router.post('/api/app/conversations/:id/agents/:agentId/stop', async (ctx) => {
+    await runtime.stopAgent(owner(ctx), ctx.params.id, ctx.params.agentId)
+    ctx.body = { ok: true }
   })
   router.get('/api/app/conversations/:id/messages', (ctx) => {
     ctx.body = {

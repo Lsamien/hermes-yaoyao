@@ -36,6 +36,9 @@ export interface WorkspaceConversation {
   activeRunId?: string
   activeAgentId?: string
   activeRunStatus?: WorkspaceRun['status']
+  activeAgentStates?: Record<string, 'running' | 'waiting' | 'uncertain'>
+  queuedMessageCount?: number
+  unreadCount?: number
   createdAt: number
   updatedAt: number
 }
@@ -61,6 +64,9 @@ export interface WorkspaceMessage {
   content: string
   reasoning: string
   runId?: string
+  taskId?: string
+  visible?: boolean
+  error?: string
   status: 'queued' | 'streaming' | 'complete' | 'failed' | 'interrupted' | 'uncertain'
   attachments: WorkspaceFile[]
   tools: Array<Record<string, unknown>>
@@ -75,6 +81,7 @@ export interface WorkspaceRun {
   status: 'queued' | 'running' | 'waiting' | 'complete' | 'failed' | 'interrupted' | 'uncertain'
   round: number
   error?: string
+  stopRequested?: boolean
   createdAt: number
   updatedAt: number
 }

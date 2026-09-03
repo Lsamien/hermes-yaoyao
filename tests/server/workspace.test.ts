@@ -25,7 +25,9 @@ let requests: Array<{ method: string; params: Record<string, any> }>,
   reply: (socket: WebSocket, params: Record<string, any>) => void
 let nodes: WorkspaceNodes
 let rejectPrompt: string | undefined
-let recoveryHistory: Array<{ role: string; content: string }>
+let rejectedInterrupts: number
+let recoveryHistory: Array<{ role: string; content: string; tool_calls?: unknown }>
+let storedByRuntime: Map<string, string>, recoveryByStored: Map<string, Array<{ role: string; content: string }>>
 const owner = 'first-user',
   other = 'second-user'
 beforeEach(async () => {
@@ -34,7 +36,9 @@ beforeEach(async () => {
   uploads = new UploadStore(home)
   requests = []
   recoveryHistory = []
+  storedByRuntime = new Map(); recoveryByStored = new Map()
   rejectPrompt = undefined
+  rejectedInterrupts = 0
   server = new WebSocketServer({ port: 0, host: '127.0.0.1' })
   await new Promise<void>((resolve) => server.once('listening', resolve))
   const address = server.address() as { port: number }
@@ -43,9 +47,9 @@ beforeEach(async () => {
     client: { directAgent: undefined },
     session: {
       webSocketCredential: async () => ({ name: 'ticket', value: 'test' }),
-      request: async () => ({
+      request: async (path: string, options?: {search?: URLSearchParams}) => ({
         status: 200,
-        body: Buffer.from(JSON.stringify({ messages: recoveryHistory })),
+        body: Buffer.from(JSON.stringify({ messages: (() => { const all = recoveryByStored.get(decodeURIComponent(path.split('/')[3]!)) ?? recoveryHistory; const offset = Number(options?.search?.get('offset') ?? 0); return all.slice(Math.max(0,all.length-offset-500), all.length-offset) })() })),
       }),
     },
   }
@@ -72,25 +76,17 @@ beforeEach(async () => {
       const frame = JSON.parse(String(data))
       requests.push(frame)
       const respond = (result: unknown) => socket.send(JSON.stringify({ id: frame.id, result }))
-      if (frame.method === 'session.create')
-        respond({
-          session_id: randomUUID(),
-          stored_session_id: randomUUID(),
-          info: { profile_name: frame.params.profile },
-          running: false,
-        })
-      else if (frame.method === 'session.resume')
-        respond({
-          session_id: randomUUID(),
-          stored_session_id: frame.params.session_id,
-          running: false,
-          info: { profile_name: frame.params.profile },
-        })
+      if (frame.method === 'session.create' || frame.method === 'session.resume') {
+        const runtimeId = randomUUID(), storedId = frame.method === 'session.resume' ? frame.params.session_id : randomUUID()
+        storedByRuntime.set(runtimeId, storedId)
+        respond({ session_id: runtimeId, stored_session_id: storedId, running: false, info: { profile_name: frame.params.profile } })
+      }
       else if (frame.method === 'prompt.submit') {
         if (rejectPrompt) { socket.send(JSON.stringify({id:frame.id,error:{code:4006,message:rejectPrompt}})); return }
         respond({ status: 'streaming' })
         reply(socket, frame.params)
       } else if (frame.method === 'session.usage') respond({ context_used: 400, context_max: 1000 })
+      else if (frame.method === 'session.interrupt' && rejectedInterrupts-- > 0) socket.send(JSON.stringify({id:frame.id,error:{code:500,message:'暂时不能中断'}}))
       else respond({ ok: true, status: 'interrupted' })
     })
   })
@@ -331,26 +327,26 @@ describe('Web-owned workspace', () => {
   it('skips removed queued members and accepts a newly added member on the next request', async () => {
     const a = agent('管理员'), b = agent('待回复'), added = agent('新成员')
     const c = store.createGroup(owner, { name: '队列维护', memberIds: [a.id, b.id], administratorId: a.id, mode: 'free', autoReplyIds: [a.id, b.id] })
-    let turns = 0
     reply = (socket, p) => {
-      if (turns++ === 0) store.updateConversation(owner, c.id, { memberIds: [a.id, added.id] })
       socket.send(JSON.stringify({ method: 'event', params: { type: 'message.complete', session_id: p.session_id, payload: { text: '请@待回复继续' } } }))
     }
-    await finished(runtime.send(owner, c.id, { requestId: randomUUID(), content: '开始' }).id)
+    const queued = runtime.send(owner, c.id, { requestId: randomUUID(), content: '开始' })
+    store.updateConversation(owner, c.id, { memberIds: [a.id, added.id] })
+    await finished(queued.id)
     expect(store.messages(owner, c.id).filter(m => m.role === 'assistant').map(m => m.agentId)).toEqual([a.id])
     await finished(runtime.send(owner, c.id, { requestId: randomUUID(), content: '请@新成员继续' }).id)
-    expect(store.messages(owner, c.id).filter(m => m.role === 'assistant').map(m => m.agentId)).toEqual([a.id, added.id])
+    expect(store.messages(owner, c.id).filter(m => m.role === 'assistant').map(m => m.agentId)).toEqual([a.id, added.id, a.id])
   })
   it('finishes an in-flight removed member reply without scheduling it again', async () => {
     const a = agent('管理员'), b = agent('正在回复')
     const c = store.createGroup(owner, { name: '回复中移除', memberIds: [a.id, b.id], administratorId: a.id })
     let turns = 0
     reply = (socket, p) => {
-      if (turns++ === 0) store.updateConversation(owner, c.id, { memberIds: [a.id] })
-      socket.send(JSON.stringify({ method: 'event', params: { type: 'message.complete', session_id: p.session_id, payload: { text: '请@正在回复继续' } } }))
+      if (turns++ === 1) store.updateConversation(owner, c.id, { memberIds: [a.id] })
+      socket.send(JSON.stringify({ method: 'event', params: { type: 'message.complete', session_id: p.session_id, payload: { text: turns === 1 ? '请@正在回复继续' : '已完成' } } }))
     }
     await finished(runtime.send(owner, c.id, { requestId: randomUUID(), content: '@正在回复 开始' }).id)
-    expect(store.messages(owner, c.id).filter(m => m.role === 'assistant').map(m => m.agentId)).toEqual([b.id, a.id])
+    expect(store.messages(owner, c.id).filter(m => m.role === 'assistant').map(m => m.agentId)).toEqual([a.id, b.id, a.id])
     expect(() => runtime.send(owner, c.id, { requestId: randomUUID(), content: '继续', mentionIds: [b.id] })).toThrow('只能 @ 群内成员')
   })
   it('dispatches a request exactly once across retries and rejects payload reuse', async () => {
@@ -453,11 +449,10 @@ describe('Web-owned workspace', () => {
     await vi.waitFor(() =>
       expect(store.require<WorkspaceRun>(owner, 'run', run.id).status).toBe('uncertain'),
     )
-    expect(() => runtime.send(owner, c.id, { requestId: randomUUID(), content: '重试' })).toThrow(
-      '当前回复',
-    )
+    const queued = runtime.send(owner, c.id, { requestId: randomUUID(), content: '后续请求' })
+    expect(queued.status).toBe('queued')
     expect(requests.filter((r) => r.method === 'prompt.submit')).toHaveLength(1)
-    await runtime.stop(owner, run.id)
+    await runtime.stopConversation(owner, c.id)
     expect(
       store.require<WorkspaceConversation>(owner, 'conversation', c.id).activeRunId,
     ).toBeUndefined()
@@ -525,7 +520,7 @@ it('publishes only the executing member and clears avatar activity when stopped'
   reply=(socket,p)=>socket.send(JSON.stringify({method:'event',params:{type:'approval.request',session_id:p.session_id,payload:{request_id:'approval-avatar',message:'需要确认'}}}))
   const run=runtime.send(owner,c.id,{requestId:randomUUID(),content:'处理任务',mentionIds:[b.id]})
   await vi.waitFor(()=>expect(store.require<WorkspaceRun>(owner,'run',run.id).status).toBe('waiting'))
-  expect(store.require<WorkspaceConversation>(owner,'conversation',c.id)).toMatchObject({activeAgentId:b.id,activeRunStatus:'waiting'})
+  expect(store.require<WorkspaceConversation>(owner,'conversation',c.id)).toMatchObject({activeAgentId:a.id,activeRunStatus:'waiting'})
   await runtime.stop(owner,run.id)
   const stopped=store.require<WorkspaceConversation>(owner,'conversation',c.id)
   expect(stopped.activeAgentId).toBeUndefined()
@@ -588,4 +583,286 @@ it('recognizes mentions inside Chinese sentences and ignores quoted code and ema
   expect(mentionedAgents('请**@瑶儿助手**继续',roster)).toEqual([c.id])
   expect(mentionedAgents('mail@Ann.com https://site/@竹儿 `@瑶儿` <quoted_message>@瑶儿</quoted_message>',roster)).toEqual([])
   expect(mentionedAgents('@Anna',roster)).toEqual([])
+})
+
+function completeReply(socket: WebSocket, p: Record<string, any>, text: string, status = 'complete') {
+  socket.send(JSON.stringify({ method: 'event', params: { type: 'message.complete', session_id: p.session_id, payload: { text, status, ...(status === 'failed' ? { error: text } : {}) } } }))
+}
+const speaker = (p: Record<string, any>) => /^你是 (.*?)。/.exec(p.text)?.[1]
+
+it('starts with the administrator, executes a batch concurrently, and reviews failures once without spending a round', async () => {
+  const a = agent('管理员'), b = agent('成员乙'), c = agent('成员丙')
+  const group = store.createGroup(owner, { name: '并行验收', memberIds: [a.id,b.id,c.id], administratorId: a.id, maxReplyRounds: 2 })
+  const pending = new Map<string, { socket: WebSocket; p: Record<string, any> }>()
+  let admin = 0, review = ''
+  reply = (socket,p) => {
+    if (speaker(p) === a.name) { if (admin++ === 0) completeReply(socket,p,'请@成员乙检查接口，@成员丙检查数据'); else { review=p.text; completeReply(socket,p,'汇总完成') } }
+    else pending.set(speaker(p)!, {socket,p})
+  }
+  const root = runtime.send(owner,group.id,{requestId:randomUUID(),content:'@成员乙 请处理'})
+  await vi.waitFor(()=>expect(pending.size).toBe(2))
+  expect(admin).toBe(1)
+  expect(store.require<WorkspaceConversation>(owner,'conversation',group.id).activeAgentStates).toEqual({[b.id]:'running',[c.id]:'running'})
+  completeReply(pending.get(c.name)!.socket,pending.get(c.name)!.p,'数据检查失败','failed')
+  await vi.waitFor(()=>expect(store.messages(owner,group.id).some(m=>m.status==='failed')).toBe(true))
+  expect(admin).toBe(1)
+  completeReply(pending.get(b.name)!.socket,pending.get(b.name)!.p,'接口正常')
+  await finished(root.id)
+  expect(admin).toBe(2)
+  expect(review).toContain('数据检查失败')
+  expect(review).toContain('接口正常')
+  expect(store.require<WorkspaceRun>(owner,'run',root.id).round).toBe(1)
+})
+
+it('allows successive dependent delegations and does not charge administrator reviews against the limit', async () => {
+  const a=agent('负责人'),b=agent('先做'),c=agent('后做')
+  const g=store.createGroup(owner,{name:'串行依赖',memberIds:[a.id,b.id,c.id],administratorId:a.id,maxReplyRounds:3})
+  const order:string[]=[];let admin=0
+  reply=(socket,p)=>{const name=speaker(p)!;order.push(name);completeReply(socket,p,name===a.name ? ['@先做 第一步','@后做 第二步','完成'][admin++]! : '结果已提交')}
+  await finished(runtime.send(owner,g.id,{requestId:randomUUID(),content:'执行'}).id)
+  expect(order).toEqual([a.name,b.name,a.name,c.name,a.name])
+})
+
+it('continues free discussion automatically and hides irrelevant automatic replies', async () => {
+  const a=agent('公开管理员'),b=agent('自动成员')
+  const g=store.createGroup(owner,{name:'自由讨论',memberIds:[a.id,b.id],administratorId:a.id,mode:'free',autoReplyIds:[b.id],maxReplyRounds:3})
+  reply=(socket,p)=>completeReply(socket,p,speaker(p)===a.name?'我来回答':'[[YAOYAO_NO_REPLY_V1]]')
+  const root=runtime.send(owner,g.id,{requestId:randomUUID(),content:'一个问题'})
+  await finished(root.id)
+  expect(requests.filter(r=>r.method==='prompt.submit'&&speaker(r.params)===b.name)).toHaveLength(2)
+  expect(store.messages(owner,g.id).map(m=>m.content)).toEqual(['一个问题','我来回答'])
+  expect(store.conversationSummary(owner,store.require(owner,'conversation',g.id)).unreadCount).toBe(2)
+  expect(store.hiddenMessageIds(owner,g.id)).toHaveLength(2)
+})
+
+it('requires a public administrator reply when the model tries to remain silent', async () => {
+  const a=agent('必须答复'),b=agent('旁观者'),g=store.createGroup(owner,{name:'公开答复',memberIds:[a.id,b.id],administratorId:a.id})
+  reply=(socket,p)=>completeReply(socket,p,'[[YAOYAO_NO_REPLY_V1]]')
+  await finished(runtime.send(owner,g.id,{requestId:randomUUID(),content:'帮助我'}).id)
+  const answer=store.messages(owner,g.id).at(-1)!
+  expect(answer.content).toContain('请补充具体目标')
+  expect(answer.content).not.toContain('YAOYAO_')
+})
+
+it('queues later user requests durably without leaking them into the preceding collaboration', async () => {
+  const a=agent('排队管理员'),b=agent('排队执行者'),g=store.createGroup(owner,{name:'消息排队',memberIds:[a.id,b.id],administratorId:a.id})
+  let first: {socket:WebSocket;p:Record<string,any>}|undefined
+  let admin=0;const prompts:string[]=[]
+  reply=(socket,p)=>{prompts.push(p.text);if(speaker(p)===a.name&&admin++===0)first={socket,p};else completeReply(socket,p,'已完成')}
+  const one=runtime.send(owner,g.id,{requestId:randomUUID(),content:'第一条任务'})
+  await vi.waitFor(()=>expect(first).toBeDefined())
+  const two=runtime.send(owner,g.id,{requestId:randomUUID(),content:'之后才处理的秘密标记'})
+  expect(two.status).toBe('queued')
+  expect(store.require<WorkspaceConversation>(owner,'conversation',g.id).activeRunId).toBe(one.id)
+  completeReply(first!.socket,first!.p,'请@排队执行者继续')
+  await finished(one.id);await finished(two.id)
+  expect(prompts).toHaveLength(4)
+  expect(prompts.slice(0,3).every(p=>!p.includes('之后才处理的秘密标记'))).toBe(true)
+  expect(prompts[3]).toContain('之后才处理的秘密标记')
+})
+
+it('stops one member while keeping its sibling running and returns the interrupted result for review', async () => {
+  const a=agent('停止管理员'),b=agent('停止乙'),c=agent('继续丙'),g=store.createGroup(owner,{name:'独立停止',memberIds:[a.id,b.id,c.id],administratorId:a.id})
+  const pending=new Map<string,{socket:WebSocket;p:Record<string,any>}>();let admin=0,review=''
+  reply=(socket,p)=>{if(speaker(p)===a.name){if(admin++===0)completeReply(socket,p,'@停止乙 @继续丙');else {review=p.text;completeReply(socket,p,'已汇总')}}else pending.set(speaker(p)!,{socket,p})}
+  const root=runtime.send(owner,g.id,{requestId:randomUUID(),content:'开始'})
+  await vi.waitFor(()=>expect(pending.size).toBe(2))
+  await runtime.stopAgent(owner,g.id,b.id)
+  expect(admin).toBe(1)
+  expect(store.require<WorkspaceConversation>(owner,'conversation',g.id).activeAgentStates?.[c.id]).toBe('running')
+  completeReply(pending.get(c.name)!.socket,pending.get(c.name)!.p,'丙完成')
+  await finished(root.id)
+  expect(review).toContain('interrupted')
+  expect(review).toContain('丙完成')
+})
+
+it('recovers a partially completed parallel batch after restart without resubmitting members or duplicating review', async () => {
+  const a=agent('恢复管理员'),b=agent('恢复乙'),c=agent('恢复丙'),g=store.createGroup(owner,{name:'批次恢复',memberIds:[a.id,b.id,c.id],administratorId:a.id})
+  let admin=0;const pending=new Map<string,{socket:WebSocket;p:Record<string,any>}>()
+  reply=(socket,p)=>{if(speaker(p)===a.name)completeReply(socket,p,admin++===0?'@恢复乙 @恢复丙':'复核完成');else pending.set(speaker(p)!,{socket,p})}
+  const root=runtime.send(owner,g.id,{requestId:randomUUID(),content:'并行执行'})
+  await vi.waitFor(()=>expect(pending.size).toBe(2))
+  completeReply(pending.get(b.name)!.socket,pending.get(b.name)!.p,'乙已完成')
+  const last=pending.get(c.name)!
+  recoveryByStored.set(storedByRuntime.get(last.p.session_id)!,[{role:'user',content:last.p.text},{role:'assistant',content:'丙已完成'}])
+  last.socket.terminate()
+  await vi.waitFor(()=>expect(store.require<WorkspaceRun>(owner,'run',root.id).status).toBe('uncertain'))
+  runtime.close();runtime=new WorkspaceRuntime(store,nodes,uploads);runtime.start()
+  await finished(root.id)
+  expect(admin).toBe(2)
+  expect(requests.filter(r=>r.method==='prompt.submit')).toHaveLength(4)
+  expect(store.list<any>(owner,'turn').filter(t=>t.reviewOf)).toHaveLength(1)
+})
+
+it('persists the next delegation when restarted between reply completion and cascade planning', async () => {
+  const a=agent('记录管理员'),b=agent('记录成员'),g=store.createGroup(owner,{name:'计划恢复',memberIds:[a.id,b.id],administratorId:a.id})
+  let admin=0
+  reply=(socket,p)=>completeReply(socket,p,speaker(p)===a.name&&admin++===0?'@记录成员 执行':'完成')
+  runtime.onMessage=async()=>{runtime.close()}
+  const root=runtime.send(owner,g.id,{requestId:randomUUID(),content:'执行一次'})
+  await vi.waitFor(()=>expect(store.list<any>(owner,'turn')[0]?.status).toBe('complete'))
+  runtime=new WorkspaceRuntime(store,nodes,uploads);runtime.start()
+  await finished(root.id)
+  expect(requests.filter(r=>r.method==='prompt.submit')).toHaveLength(3)
+})
+
+it('bounds long context while preserving the task beginning and ending', async () => {
+  const a=agent('长上下文'),b=agent('辅助'),g=store.createGroup(owner,{name:'上下文边界',memberIds:[a.id,b.id],administratorId:a.id})
+  const text='任务开始标记'+ '文'.repeat(60_000)+'任务结束标记'
+  await finished(runtime.send(owner,g.id,{requestId:randomUUID(),content:text}).id)
+  const prompt=requests.find(r=>r.method==='prompt.submit')!.params.text
+  expect(prompt).toContain('任务开始标记');expect(prompt).toContain('任务结束标记')
+  expect(prompt).toContain('保留首尾片段');expect(prompt.length).toBeLessThan(32_000)
+})
+
+it('enforces three tasks per group and four globally while preserving queued work', async () => {
+  const agents=['并发甲','并发乙','并发丙','并发丁','其他群'].map(n=>agent(n))
+  const group=store.createGroup(owner,{name:'并发限制',memberIds:agents.slice(0,4).map(a=>a.id),administratorId:agents[0]!.id,mode:'free',autoReplyIds:agents.slice(0,4).map(a=>a.id),maxReplyRounds:1})
+  const pending=new Map<string,{socket:WebSocket;p:Record<string,any>}>()
+  reply=(socket,p)=>pending.set(speaker(p)!,{socket,p})
+  const one=runtime.send(owner,group.id,{requestId:randomUUID(),content:'并发测试'})
+  const two=runtime.send(owner,direct(agents[4]!.id).id,{requestId:randomUUID(),content:'另一群'})
+  await vi.waitFor(()=>expect(pending.size).toBe(4))
+  expect(Object.keys(store.require<WorkspaceConversation>(owner,'conversation',group.id).activeAgentStates!)).toHaveLength(3)
+  expect(store.list<any>(owner,'turn').filter(t=>t.status==='running')).toHaveLength(4)
+  const released=[...pending.values()].find(v=>speaker(v.p)!==agents[4]!.name)!
+  completeReply(released.socket,released.p,'完成')
+  await vi.waitFor(()=>expect(pending.size).toBe(5))
+  expect(store.list<any>(owner,'turn').filter(t=>t.status==='running').length).toBeLessThanOrEqual(4)
+  for(const v of pending.values()) if(v!==released) completeReply(v.socket,v.p,'完成')
+  await finished(one.id);await finished(two.id)
+})
+
+it('supports unlimited rounds beyond the finite limit and still permits stopping', async () => {
+  const a=agent('不限甲'),b=agent('不限乙'),g=store.createGroup(owner,{name:'不限轮次',memberIds:[a.id,b.id],administratorId:a.id,mode:'free',autoReplyIds:[a.id],maxReplyRounds:-1})
+  let count=0
+  reply=(socket,p)=>{
+    if(count++===0){const work=store.list<any>(owner,'turn').find(t=>t.status==='running')!;work.depth=100;store.put(owner,'turn',work.id,work);completeReply(socket,p,'继续讨论')}
+    else completeReply(socket,p,'[[YAOYAO_NO_REPLY_V1]]')
+  }
+  const root=runtime.send(owner,g.id,{requestId:randomUUID(),content:'@不限乙 开始'})
+  await finished(root.id)
+  expect(count).toBe(2)
+  expect(store.require<WorkspaceRun>(owner,'run',root.id).round).toBe(101)
+  expect(()=>store.updateConversation(owner,g.id,{maxReplyRounds:0})).toThrow()
+})
+
+it('keeps parallel approval cards scoped to their member and deduplicates replayed requests and answers', async () => {
+  const a=agent('审批管理员'),b=agent('审批乙'),c=agent('审批丙'),g=store.createGroup(owner,{name:'并发审批',memberIds:[a.id,b.id,c.id],administratorId:a.id})
+  let admin=0
+  server.on('connection',socket=>socket.on('message',raw=>{const f=JSON.parse(String(raw));if(f.method==='approval.respond')completeReply(socket,f.params,'已确认')}))
+  reply=(socket,p)=>{
+    if(speaker(p)===a.name){completeReply(socket,p,admin++===0?'@审批乙 @审批丙':'汇总');return}
+    const frame=JSON.stringify({method:'event',params:{type:'approval.request',session_id:p.session_id,payload:{request_id:'same-request',message:'是否继续'}}})
+    socket.send(frame);socket.send(frame)
+  }
+  const root=runtime.send(owner,g.id,{requestId:randomUUID(),content:'开始'})
+  await vi.waitFor(()=>expect(store.list<WorkspaceInteraction>(owner,'interaction').filter(i=>!i.resolved)).toHaveLength(2))
+  const interactions=store.list<WorkspaceInteraction>(owner,'interaction')
+  expect(store.require<WorkspaceConversation>(owner,'conversation',g.id).activeAgentStates).toEqual({[b.id]:'waiting',[c.id]:'waiting'})
+  await runtime.respond(owner,interactions[0]!.id,'once')
+  await runtime.respond(owner,interactions[0]!.id,'once')
+  await expect(runtime.respond(owner,interactions[0]!.id,'deny')).rejects.toThrow('其他答复')
+  expect(admin).toBe(1)
+  await runtime.respond(owner,interactions[1]!.id,'once')
+  await finished(root.id)
+  expect(requests.filter(r=>r.method==='approval.respond')).toHaveLength(2)
+  expect(admin).toBe(2)
+})
+
+it('retries a rolled-back cascade plan without losing or duplicating delegation', async () => {
+  const a=agent('事务管理员'),b=agent('事务成员'),g=store.createGroup(owner,{name:'调度事务',memberIds:[a.id,b.id],administratorId:a.id})
+  const original=store.put.bind(store);let failed=false,admin=0
+  store.put=(user,kind,id,value)=>{if(!failed&&kind==='turn'&&(value as any).agentId===b.id){failed=true;throw new Error('模拟一次写入失败')}original(user,kind,id,value)}
+  reply=(socket,p)=>completeReply(socket,p,speaker(p)===a.name&&admin++===0?'@事务成员 继续':'完成')
+  const root=runtime.send(owner,g.id,{requestId:randomUUID(),content:'开始'})
+  await vi.waitFor(()=>expect(store.require<WorkspaceRun>(owner,'run',root.id).status).toBe('complete'),{timeout:4000})
+  expect(failed).toBe(true)
+  expect(store.list<any>(owner,'turn').filter(t=>t.agentId===b.id)).toHaveLength(1)
+  expect(requests.filter(r=>r.method==='prompt.submit')).toHaveLength(3)
+})
+
+it('upgrades an admitted v0.3.7 execution without submitting its prompt again', async () => {
+  const a=agent('升级执行'),c=direct(a.id)
+  reply=(socket,p)=>{recoveryHistory=[{role:'user',content:p.text},{role:'assistant',content:'升级前已完成'}];socket.terminate()}
+  const root=runtime.send(owner,c.id,{requestId:randomUUID(),content:'只执行一次'})
+  await vi.waitFor(()=>expect(store.require<WorkspaceRun>(owner,'run',root.id).status).toBe('uncertain'))
+  runtime.close()
+  const old=store.list<any>(owner,'turn')[0]!
+  for(const task of store.list<any>(owner,'turn'))store.remove(owner,'turn',task.id)
+  const legacy=store.require<any>(owner,'run',root.id)
+  Object.assign(legacy,{queue:[a.id],next:[],hostReturn:false,currentMessageId:old.currentMessageId,turnConfiguration:old.turnConfiguration})
+  store.put(owner,'run',root.id,legacy)
+  const binding=store.get<any>(owner,'binding',`${c.id}:${a.id}`)!
+  delete binding.taskId;store.put(owner,'binding',binding.id,binding)
+  runtime=new WorkspaceRuntime(store,nodes,uploads);runtime.start()
+  await finished(root.id)
+  expect(requests.filter(r=>r.method==='prompt.submit')).toHaveLength(1)
+  expect(store.messages(owner,c.id).at(-1)?.content).toBe('升级前已完成')
+})
+
+it('does not read unrelated or orphaned historical runs when projecting a group prompt', async () => {
+  const a=agent('上下文隔离'),b=agent('组内成员'),g=store.createGroup(owner,{name:'干净群',memberIds:[a.id,b.id],administratorId:a.id})
+  store.put(owner,'run','historical-orphan',{id:'historical-orphan',conversationId:'unrelated-conversation',messageId:'missing-history',mentionIds:[],status:'complete',round:0,createdAt:1,updatedAt:1})
+  await finished(runtime.send(owner,g.id,{requestId:randomUUID(),content:'当前群任务'}).id)
+  expect(requests.filter(r=>r.method==='prompt.submit')).toHaveLength(1)
+})
+
+it('pages backwards to find a long-running turn marker and never mistakes a tool call for a final answer', async () => {
+  const a=agent('分页恢复'),c=direct(a.id)
+  reply=(socket,p)=>{
+    recoveryHistory=[{role:'user',content:p.text},...Array.from({length:600},()=>({role:'tool',content:'工具结果'})),{role:'assistant',content:'最终结果'}]
+    socket.terminate()
+  }
+  await finished(runtime.send(owner,c.id,{requestId:randomUUID(),content:'长时间执行'}).id)
+  expect(store.messages(owner,c.id).at(-1)?.content).toBe('最终结果')
+  let submitted=''
+  reply=(socket,p)=>{submitted=p.text;recoveryHistory=[{role:'user',content:submitted},{role:'assistant',content:'准备调用工具',tool_calls:[{id:'tool'}]},{role:'tool',content:'工具输出'}];socket.terminate()}
+  const root=runtime.send(owner,c.id,{requestId:randomUUID(),content:'不要把过程当结论'})
+  await vi.waitFor(()=>expect(store.require<WorkspaceRun>(owner,'run',root.id).status).toBe('uncertain'))
+  await runtime.reconcile(owner,root.id)
+  await new Promise(resolve=>setTimeout(resolve,100))
+  expect(store.require<WorkspaceRun>(owner,'run',root.id).status).toBe('uncertain')
+  recoveryHistory.push({role:'assistant',content:'真正完成'})
+  await runtime.reconcile(owner,root.id)
+  await finished(root.id)
+  expect(requests.filter(r=>r.method==='prompt.submit')).toHaveLength(2)
+})
+
+it('keeps explicit replies visible and emits one notice when the configured cascade limit is reached', async () => {
+  const a=agent('轮数管理员'),b=agent('轮数成员'),g=store.createGroup(owner,{name:'有限轮次',memberIds:[a.id,b.id],administratorId:a.id,maxReplyRounds:2})
+  reply=(socket,p)=>completeReply(socket,p,speaker(p)===a.name?'@轮数成员 继续':'已完成本步')
+  const root=runtime.send(owner,g.id,{requestId:randomUUID(),content:'开始'})
+  await finished(root.id)
+  expect(requests.filter(r=>r.method==='prompt.submit')).toHaveLength(3)
+  expect(store.messages(owner,g.id).filter(m=>m.content.includes('轮数上限'))).toHaveLength(1)
+  store.updateConversation(owner,g.id,{mode:'free',autoReplyIds:[]})
+  reply=(socket,p)=>completeReply(socket,p,'[[YAOYAO_NO_REPLY_V1]]')
+  await finished(runtime.send(owner,g.id,{requestId:randomUUID(),content:'@轮数成员 显示这个字符串'}).id)
+  expect(store.messages(owner,g.id).at(-1)?.content).toBe('[[YAOYAO_NO_REPLY_V1]]')
+})
+
+it('retries a failed stop of a live task without falsely completing it or resubmitting work', async () => {
+  const a=agent('停止恢复'),c=direct(a.id)
+  reply=()=>{}
+  const root=runtime.send(owner,c.id,{requestId:randomUUID(),content:'等待停止'})
+  await vi.waitFor(()=>expect(requests.filter(r=>r.method==='prompt.submit')).toHaveLength(1))
+  rejectedInterrupts=1
+  await runtime.stop(owner,root.id)
+  expect(store.require<WorkspaceRun>(owner,'run',root.id).status).toBe('uncertain')
+  await vi.waitFor(()=>expect(store.require<WorkspaceRun>(owner,'run',root.id).status).toBe('interrupted'),{timeout:3000})
+  expect(requests.filter(r=>r.method==='session.interrupt')).toHaveLength(2)
+  expect(requests.filter(r=>r.method==='prompt.submit')).toHaveLength(1)
+})
+
+it('marks a stopped administrator as interrupted without sending a false completion notification', async () => {
+  const a=agent('管理员停止'),b=agent('普通成员'),g=store.createGroup(owner,{name:'停止管理员',memberIds:[a.id,b.id],administratorId:a.id})
+  reply=()=>{}
+  const notifications: string[]=[]
+  runtime.onNotify=(_owner,_c,run)=>notifications.push(run.status)
+  const root=runtime.send(owner,g.id,{requestId:randomUUID(),content:'等待'})
+  await vi.waitFor(()=>expect(requests.filter(r=>r.method==='prompt.submit')).toHaveLength(1))
+  await runtime.stopAgent(owner,g.id,a.id)
+  await vi.waitFor(()=>expect(store.require<WorkspaceRun>(owner,'run',root.id).status).toBe('interrupted'))
+  expect(notifications).toEqual([])
 })

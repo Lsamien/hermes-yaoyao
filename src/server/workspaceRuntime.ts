@@ -13,17 +13,11 @@ import type {
   WorkspaceInteraction,
 } from '../shared/workspace.js'
 
-type Run = WorkspaceRun & {
-  queue: string[]
-  next: string[]
-  hostReturn: boolean
-  currentMessageId?: string
-  turnConfiguration?: {
-    mode: 'host' | 'free'
-    administratorId: string
-    members: Array<Pick<Agent, 'id' | 'name'>>
-  }
-}
+import { WorkspaceScheduler, type Work, NO_REPLY, HOST_FALLBACK } from './workspaceScheduler.js'
+import { mentionedAgents } from './workspaceMentions.js'
+export { mentionedAgents } from './workspaceMentions.js'
+type Run = WorkspaceRun
+
 export interface WorkspaceBinding {
   id: string
   nodeId: string
@@ -33,12 +27,15 @@ export interface WorkspaceBinding {
   aliases: string[]
   runId: string
   messageId: string
+  taskId?: string
+  contextSeq?: number
 }
 interface LiveTurn {
   gateway: WorkspaceGateway
   runtimeId: string
   runId: string
   agentId: string
+  taskId: string
   done(error?: Error): void
 }
 export const sendInput = z
@@ -50,81 +47,14 @@ export const sendInput = z
   })
   .strict()
   .refine((b) => b.content.trim() || b.fileIds.length, '请输入消息或添加附件')
-export function mentionedAgents(text: string, agents: Array<Pick<Agent, 'id' | 'name'>>): string[] {
-  const plain = text
-    .replace(/<quoted_message\b[^>]*>[\s\S]*?<\/quoted_message>/gi, '')
-    .replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/g, '')
-    .replace(/`[^`]*`/g, '')
-    .replace(/https?:\/\/\S+/g, '')
-    .replace(/[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.[\p{L}]{2,}/gu, '')
-    .split('\n').filter(line => !line.trimStart().startsWith('>')).join('\n')
-  const names = [...agents].sort((a, b) => b.name.length - a.name.length)
-  const alternatives = [...names.map(a => a.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'all', '所有人']
-  const pattern = new RegExp(`(?<![A-Za-z0-9_.%+/@-])@(${alternatives.join('|')})(?![A-Za-z0-9_])`, 'giu')
-  const result = new Set<string>()
-  for (const match of plain.matchAll(pattern)) {
-    const name = match[1]!
-    if (/^(all|所有人)$/i.test(name)) { for (const a of agents) result.add(a.id) }
-    else { const a = agents.find(a => a.name.toLocaleLowerCase() === name.toLocaleLowerCase()); if (a) result.add(a.id) }
-  }
-  return [...result]
-}
-export class WorkspaceRuntime {
+export class WorkspaceRuntime extends WorkspaceScheduler {
   private live = new Map<string, LiveTurn>()
-  private executing = new Set<string>()
-  private closing = false
-  private recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  private recoveryAttempts = new Map<string, number>()
-  onMessage: (owner: string, message: Message) => Promise<void> = async () => {}
-  onNotify: (
-    owner: string,
-    c: Conversation,
-    run: Run,
-    message?: Message,
-    interaction?: WorkspaceInteraction,
-  ) => void = () => {}
-  private notify(
-    owner: string,
-    c: Conversation,
-    run: Run,
-    message?: Message,
-    interaction?: WorkspaceInteraction,
-  ): void {
-    try {
-      this.onNotify(owner, c, run, message, interaction)
-    } catch {
-      /* Optional push failures never change the durable execution result. */
-    }
-  }
-  constructor(
-    readonly store: WorkspaceStore,
-    readonly nodes: WorkspaceNodes,
-    readonly uploads: UploadStore,
-    readonly userActive: (owner: string) => boolean = () => true,
-  ) {
-    // An admitted but unacknowledged turn may already have executed a tool.
-    for (const owner of store.owners())
-      for (const run of store.list<Run>(owner, 'run')) {
-        if (['running', 'waiting'].includes(run.status)) {
-          run.status = 'uncertain'
-          run.error = '服务已重启，请核对运行状态'
-          store.saveRun(owner, run)
-        }
-      }
-  }
-  start(): void {
-    for (const owner of this.store.owners())
-      for (const run of this.store.list<Run>(owner, 'run')) {
-        if (run.status === 'queued') void this.execute(owner, run.id)
-        else if (run.status === 'uncertain') this.scheduleReconcile(owner, run.id)
-      }
-  }
+  constructor(store: WorkspaceStore, readonly nodes: WorkspaceNodes, readonly uploads: UploadStore, userActive: (owner: string) => boolean = () => true) { super(store, userActive) }
   send(owner: string, conversationId: string, input: unknown): Run {
     const body = parse(sendInput, input)
     const result = this.store.command(owner, body.requestId, { conversationId, ...body }, () => {
       const c = this.store.require<Conversation>(owner, 'conversation', conversationId)
       if (c.archived) throw new HttpError(409, '聊天已归档', 'conversation_archived')
-      if (c.activeRunId) throw new HttpError(409, '请等待当前回复结束或先停止', 'conversation_busy')
       if (body.mentionIds.some((a) => !c.memberIds.includes(a)))
         throw new HttpError(400, '只能 @ 群内成员', 'invalid_mentions')
       const records = this.uploads.records(body.fileIds, owner)
@@ -133,17 +63,9 @@ export class WorkspaceRuntime {
         agents = c.memberIds.map((id) => this.store.require<Agent>(owner, 'agent', id))
       const mentions = [
         ...new Set(
-          body.mentionIds.length ? body.mentionIds : mentionedAgents(body.content, agents),
+          [...body.mentionIds, ...mentionedAgents(body.content, agents)],
         ),
       ]
-      const queue =
-        c.kind === 'direct'
-          ? [...c.memberIds]
-          : mentions.length
-            ? mentions
-            : c.mode === 'free' && c.autoReplyIds.length
-              ? [...c.autoReplyIds]
-              : [c.administratorId]
       const message: Message = {
         id: randomUUID(),
         conversationId,
@@ -179,141 +101,32 @@ export class WorkspaceRuntime {
         conversationId,
         messageId: message.id,
         mentionIds: mentions,
-        activeAgentId: queue[0],
+        activeAgentId: c.administratorId,
         status: 'queued',
         round: 0,
-        queue,
-        next: [],
-        hostReturn: c.mode === 'host' && queue.some((id) => id !== c.administratorId),
         createdAt: now,
         updatedAt: now,
       }
-      this.store.saveRun(owner, run)
+      this.admit(owner, run, c, message)
       this.uploads.markReferenced(body.fileIds, owner)
       return run
     })
-    if (this.store.require<Run>(owner, 'run', result.id).status === 'queued')
-      void this.execute(owner, result.id)
+    this.wake()
     return this.store.require<Run>(owner, 'run', result.id)
   }
-  private async execute(owner: string, id: string): Promise<void> {
-    if (this.executing.has(id) || this.closing) return
-    this.executing.add(id)
-    try {
-      while (!this.closing) {
-        const run = this.store.require<Run>(owner, 'run', id)
-        if (!['queued', 'running'].includes(run.status)) break
-        if (!this.userActive(owner)) throw new HttpError(403, '账号已停用', 'account_disabled')
-        const c = this.store.require<Conversation>(owner, 'conversation', run.conversationId)
-        // A current reply may finish, but removed members must not start another turn.
-        run.queue = run.queue.filter(agentId => c.memberIds.includes(agentId))
-        run.next = run.next.filter(agentId => c.memberIds.includes(agentId))
-        if (!run.queue.length) {
-          if (
-            c.kind === 'direct' ||
-            run.round + 1 >= c.maxReplyRounds ||
-            (!run.next.length && !run.hostReturn)
-          ) {
-            run.status = 'complete'
-            this.store.saveRun(owner, run)
-            this.notify(
-              owner,
-              c,
-              run,
-              this.store
-                .messages(owner, c.id)
-                .filter((m) => m.runId === id && m.role === 'assistant')
-                .at(-1),
-            )
-            break
-          }
-          run.round += 1
-          run.queue = run.hostReturn ? [c.administratorId] : [...new Set(run.next)]
-          run.hostReturn = false
-          run.next = []
-          this.store.saveRun(owner, run)
-        }
-        const agent = this.store.require<Agent>(owner, 'agent', run.queue[0]!)
-        run.turnConfiguration = {
-          mode: c.mode,
-          administratorId: c.administratorId,
-          members: c.memberIds.map((id) => {
-            const a = this.store.require<Agent>(owner, 'agent', id)
-            return { id: a.id, name: a.name }
-          }),
-        }
-        run.status = 'running'
-        run.activeAgentId = agent.id
-        this.store.saveRun(owner, run)
-        const message = await this.turn(owner, c, agent, run)
-        await this.onMessage(owner, message).catch(() => {})
-        if (this.closing) return
-        this.advance(owner, run.id, agent.id, message)
-      }
-    } catch (error) {
-      if (!this.closing) {
-        const run = this.store.require<Run>(owner, 'run', id)
-        if (!['interrupted', 'uncertain'].includes(run.status)) {
-          run.status = 'failed'
-          run.error = (error instanceof Error ? error.message : '执行失败').slice(0, 1000)
-          this.store.saveRun(owner, run)
-          this.store.saveMessage(owner, {
-            id:randomUUID(), conversationId:run.conversationId, seq:0, role:'system',
-            content:`执行失败：${run.error}`, reasoning:'', runId:run.id, status:'failed',
-            attachments:[], tools:[], createdAt:Date.now(),
-          })
-          this.notify(owner, this.store.require(owner, 'conversation', run.conversationId), run)
-        }
-      }
-    } finally {
-      this.executing.delete(id)
-      this.scheduleReconcile(owner, id)
-    }
-  }
-  private advance(owner: string, runId: string, agentId: string, message: Message): void {
-    this.store.atomic(() => {
-      const run = this.store.require<Run>(owner, 'run', runId)
-      if (run.status === 'interrupted') return
-      const c = this.store.require<Conversation>(owner, 'conversation', run.conversationId)
-      const configuration = run.turnConfiguration
-      if (!configuration) throw new Error('运行配置缺失，已停止自动协作')
-      if (configuration.mode === 'free' || agentId === configuration.administratorId)
-        run.next.push(
-          ...mentionedAgents(message.content, configuration.members).filter(
-            id => id !== agentId && c.memberIds.includes(id),
-          ),
-        )
-      if (
-        c.kind === 'group' &&
-        configuration.mode === 'host' &&
-        agentId !== configuration.administratorId
-      )
-        run.hostReturn = true
-      if (run.queue[0] === agentId) run.queue.shift()
-      run.queue = run.queue.filter(id => c.memberIds.includes(id))
-      run.next = run.next.filter(id => c.memberIds.includes(id))
-      run.activeAgentId = run.queue[0]
-      run.currentMessageId = undefined
-      run.error = undefined
-      run.status = 'running'
-      this.store.saveRun(owner, run)
-    })
-  }
-  private async turn(
+  protected async performTurn(
     owner: string,
     c: Conversation,
     agent: Agent,
-    run: Run,
+    run: Work,
     recovering = false,
   ): Promise<Message> {
     const key = `${c.id}:${agent.id}`,
       target = this.nodes.target(owner, agent.nodeId)
     const gateway = new WorkspaceGateway(target)
-    run.activeAgentId = agent.id
-    this.store.saveRun(owner, run)
     let binding = this.store.get<WorkspaceBinding>(owner, 'binding', key)
     let message =
-      recovering && run.currentMessageId
+      run.currentMessageId
         ? this.store.require<Message>(owner, 'message', run.currentMessageId)
         : undefined
     if (!message) {
@@ -327,7 +140,9 @@ export class WorkspaceRuntime {
         content: '',
         reasoning: '',
         status: 'streaming',
-        runId: run.id,
+        runId: run.runId,
+        taskId: run.id,
+        visible: run.replyMode !== 'automatic' || run.requiredReply,
         tools: [],
         attachments: [],
         createdAt: Date.now(),
@@ -335,7 +150,7 @@ export class WorkspaceRuntime {
       run.currentMessageId = message.id
       this.store.atomic(() => {
         this.store.saveMessage(owner, message!)
-        this.store.saveRun(owner, run)
+        this.saveWork(owner, run)
       })
     }
     const resultMessage = message
@@ -356,23 +171,46 @@ export class WorkspaceRuntime {
       if (settled) return
       settled = true
       this.live.delete(key)
-      if (error) {
-        const current = this.store.require<Run>(owner, 'run', run.id)
-        resultMessage.status =
-          current.status === 'interrupted' ? 'interrupted' : submitted ? 'uncertain' : 'failed'
-        if (submitted && current.status !== 'interrupted') {
-          current.status = 'uncertain'
-          current.error = `执行状态待确认：${error.message.slice(0, 500)}（正在自动核对，不会重复提交）`
-          this.store.saveRun(owner, current)
+      try {
+        const current = this.getWork(owner, run.id)
+        if (error) {
+          current.status = current.status === 'interrupted' ? 'interrupted' : submitted ? 'uncertain' : 'failed'
+          current.error = error.message.slice(0, 1000)
+          resultMessage.status = current.status
+          resultMessage.error = current.error
+          const optionalUnpublished = current.replyMode === 'automatic' && !current.requiredReply && resultMessage.visible === false
+          resultMessage.visible = !optionalUnpublished && (submitted || current.status !== 'interrupted')
+          if (!resultMessage.content.trim() && current.status === 'failed') resultMessage.content = `执行失败：${current.error}`
+        } else {
+          const silent = (resultMessage.content.trim() === NO_REPLY || !resultMessage.content.trim()) && current.replyMode === 'automatic' && (!current.requiredReply || current.hadInteraction) && !resultMessage.tools.length && !resultMessage.attachments.length
+          current.silent = silent
+          if (current.replyMode === 'automatic') {
+            resultMessage.content = resultMessage.content.replace(/\[\[YAOYAO_[A-Z0-9_]*(?:\]\])?/g, '').trim()
+            resultMessage.reasoning = resultMessage.reasoning.replace(/\[\[YAOYAO_[A-Z0-9_]*(?:\]\])?/g, '')
+          }
+          if (current.requiredReply && !silent && !resultMessage.content) resultMessage.content = HOST_FALLBACK
+          if (!silent && !resultMessage.content && !resultMessage.attachments.length && !resultMessage.tools.length) {
+            current.status = 'failed'; current.error = '未返回有效回复'; resultMessage.content = '执行失败：未返回有效回复'
+          } else { current.status = 'complete'; current.error = undefined }
+          resultMessage.visible = !silent
+          if (silent) resultMessage.reasoning = ''
+          resultMessage.status = current.status
+          resultMessage.error = current.error
         }
-        this.store.saveMessage(owner, resultMessage)
-        rejectTurn(error)
-      } else {
-        resultMessage.status = 'complete'
-        this.store.saveMessage(owner, resultMessage)
-        resolveTurn(resultMessage)
-      }
-      gateway.close()
+        if (current.status !== 'uncertain') {
+          for (const tool of resultMessage.tools) {
+            if (!/complete|error|failed/.test(String(tool.status))) tool.status = current.status === 'complete' ? 'tool.complete' : 'tool.error'
+          }
+        }
+        this.store.atomic(() => {
+          this.store.saveMessage(owner, resultMessage)
+          this.saveWork(owner, current)
+          if (current.status !== 'uncertain') this.resolveInteractions(owner, current.id)
+        })
+        if (error) rejectTurn(error)
+        else resolveTurn(resultMessage)
+      } catch (failure) { rejectTurn(failure instanceof Error ? failure : new Error('无法保存执行状态')) }
+      finally { gateway.close() }
     }
     gateway.onDisconnect = () =>
       finish(completedEvidence ? undefined : new Error('Hermes 连接断开'))
@@ -380,12 +218,16 @@ export class WorkspaceRuntime {
       if (settled || !runtimeId || frame.session_id !== runtimeId) return
       const p = frame.payload ?? {},
         type = frame.type
-      if (type === 'message.delta') resultMessage.content += String(p.text ?? p.delta ?? '')
+      if (type === 'message.delta') {
+        resultMessage.content += String(p.text ?? p.delta ?? '')
+        if (resultMessage.content.trim() && !NO_REPLY.startsWith(resultMessage.content.trim()) && !resultMessage.content.trim().startsWith('[[YAOYAO_')) resultMessage.visible = true
+      }
       else if (type === 'reasoning.delta')
         resultMessage.reasoning += String(p.text ?? p.delta ?? '')
       else if (type === 'message.interim') {
         resultMessage.content += '\n\n'
       } else if (type.startsWith('tool.')) {
+        resultMessage.visible = true
         const id = String(p.tool_id ?? p.id ?? ''),
           index = resultMessage.tools.findIndex((t) => t.id === id)
         const value = { ...p, id, status: type }
@@ -397,10 +239,15 @@ export class WorkspaceRuntime {
         )
       ) {
         const upstreamId = String(p.request_id ?? p.requestId ?? p.id ?? '')
-        const interaction: WorkspaceInteraction = {
+        const previous = this.store.list<WorkspaceInteraction>(owner, 'interaction').find(i => {
+          const b = this.store.get<{ taskId: string; upstreamId: string }>(owner, 'interaction-binding', i.id)
+          return b?.taskId === run.id && b.upstreamId === upstreamId
+        })
+        if (previous?.resolved) return
+        const interaction: WorkspaceInteraction = previous ?? {
           id: randomUUID(),
           conversationId: c.id,
-          runId: run.id,
+          runId: run.runId,
           agentId: agent.id,
           kind: type.startsWith('approval') ? 'approval' : 'clarification',
           message: String(p.question ?? p.message ?? p.prompt ?? '需要确认'),
@@ -408,18 +255,20 @@ export class WorkspaceRuntime {
           resolved: false,
         }
         this.store.put(owner, 'interaction', interaction.id, interaction)
-        this.store.put(owner, 'interaction-binding', interaction.id, { key, upstreamId })
+        this.store.put(owner, 'interaction-binding', interaction.id, { key, upstreamId, taskId: run.id })
         this.store.event(owner, 'interaction.changed', interaction, c.id)
-        const current = this.store.require<Run>(owner, 'run', run.id)
+        const current = this.getWork(owner, run.id)
+        current.hadInteraction = true
         current.status = 'waiting'
-        this.store.saveRun(owner, current)
-        this.notify(owner, c, current, undefined, interaction)
+        this.saveWork(owner, current)
+        this.notify(owner, c, this.store.require<Run>(owner, 'run', run.runId), undefined, interaction)
       } else if (['message.complete', 'run.completed'].includes(type)) {
         if (typeof p.text === 'string') resultMessage.content = p.text
+        if (typeof p.reasoning === 'string') resultMessage.reasoning = p.reasoning
         if (p.status === 'interrupted') {
-          const current = this.store.require<Run>(owner, 'run', run.id)
+          const current = this.getWork(owner, run.id)
           current.status = 'interrupted'
-          this.store.saveRun(owner, current)
+          this.saveWork(owner, current)
           finish(new Error('已停止'))
         } else if (p.error || p.status === 'failed') {
           submitted = false
@@ -522,42 +371,49 @@ export class WorkspaceRuntime {
             storedId,
           ]),
         ],
-        runId: run.id,
+        runId: run.runId,
+        taskId: run.id,
+        contextSeq: binding?.contextSeq ?? 0,
         messageId: resultMessage.id,
       }
       this.store.put(owner, 'binding', key, binding)
-      this.live.set(key, { gateway, runtimeId, runId: run.id, agentId: agent.id, done: finish })
-      if (this.closing || this.store.require<Run>(owner, 'run', run.id).status === 'interrupted')
+      this.live.set(key, { gateway, runtimeId, runId: run.runId, taskId: run.id, agentId: agent.id, done: finish })
+      if (this.closing || this.getWork(owner, run.id).cancelRequested || this.getWork(owner, run.id).status === 'interrupted')
         throw new Error('运行已停止')
       if (recovering) {
         if (opened.running) {
-          const current = this.store.require<Run>(owner, 'run', run.id)
+          const current = this.getWork(owner, run.id)
           current.status = 'running'
-          this.store.saveRun(owner, current)
+          this.saveWork(owner, current)
         } else {
-          const response = await target.session.request(
-            `/api/sessions/${encodeURIComponent(storedId)}/messages`,
-            {
-              search: new URLSearchParams({
-                profile: agent.profile,
-                limit: '500',
-                order: 'latest',
-                include_compacted: 'true',
-              }),
-            },
-          )
-          if (response.status !== 200) throw new Error('无法核对历史')
-          const history = JSON.parse(response.body.toString()).messages ?? []
-          const marker = `[yaoyao-run:${run.id}:${resultMessage.id}]`
-          const index = history.findLastIndex(
-            (m: any) => m.role === 'user' && String(m.content ?? m.text).includes(marker),
-          )
-          const after = index >= 0 ? history.slice(index + 1) : []
-          const nextUser = after.findIndex((m: any) => m.role === 'user')
-          const answer = (nextUser >= 0 ? after.slice(0, nextUser) : after)
-            .filter((m: any) => m.role === 'assistant' && (m.content || m.text)).at(-1)
-          if (!answer) throw new Error('无法确认本轮是否执行完成，请检查后停止此轮')
+          const marker = `[yaoyao-run:${run.runId}:${resultMessage.id}]`
+          let answer: { content?: string; text?: string } | undefined
+          let found = false, seenLastEvent = false
+          for (let page = 0; page < 20 && !found; page++) {
+            const response = await target.session.request(`/api/sessions/${encodeURIComponent(storedId)}/messages`, {
+              search: new URLSearchParams({ profile: agent.profile, limit: '500', offset: String(page * 500), order: 'latest', include_compacted: 'true' }),
+              maxResponseBytes: 8 * 1024 * 1024,
+            })
+            if (response.status !== 200) throw new Error('无法核对历史')
+            const history = JSON.parse(response.body.toString()).messages
+            if (!Array.isArray(history)) throw new Error('历史响应无效')
+            for (const item of [...history].reverse()) {
+              if (item.role === 'user') {
+                if (String(item.content ?? item.text).includes(marker)) { found = true; break }
+                answer = undefined; seenLastEvent = false
+              } else if (!seenLastEvent && ['assistant', 'tool'].includes(item.role)) {
+                seenLastEvent = true
+                const calls = item.tool_calls
+                const hasCalls = Array.isArray(calls) ? calls.length > 0 : !!calls && calls !== '[]'
+                if (item.role === 'assistant' && !hasCalls && !item.function_call && item.finish_reason !== 'tool_calls' && (item.content || item.text)) answer = item
+              }
+            }
+            if (history.length < 500) break
+          }
+          if (!found || !answer) throw new Error('无法确认本轮的最终回复，正在核对原执行；不会重复提交')
           resultMessage.content = String(answer.content ?? answer.text)
+          binding.contextSeq = Math.max(binding.contextSeq ?? 0, run.contextThroughSeq ?? 0)
+          this.store.put(owner, 'binding', key, binding)
           finish()
         }
       } else {
@@ -592,30 +448,34 @@ export class WorkspaceRuntime {
           c.kind === 'group'
             ? `你正在群聊「${c.name}」发言。群成员：${members.map((a) => `@${a.name} (id=${a.id})`).join('、')}。\n群规则：${c.instructions}\n${c.mode === 'host' ? (agent.id === c.administratorId ? '你是管理员。必要时用精确 @成员名称 委派工作；收到结果后复核并给用户结论。任务完成时不要继续 @。' : '执行当前委派任务。公开给出结果，由管理员复核；不要安排其他成员。') : '按自己的职责回复，只在需要协作时 @成员。不要重复已完成的工作。'}`
             : '',
+          run.requiredReply ? '你必须公开处理本次消息，直接回答、委派或澄清；禁止静默。管理员可按依赖一次 @一人，也可同时 @多人并行执行，整批结束后系统统一交回复核。' : run.replyMode === 'automatic' ? `你按自动参与配置收到消息。若与职责无关，禁止调用工具、禁止 @，完整答复只能是 ${NO_REPLY}。有关时正常回答。` : '',
+          `本轮用户指定成员：${this.store.require<Run>(owner, 'run', run.runId).mentionIds.map(id => members.find(a => a.id === id)).filter(Boolean).map(a => '@' + a!.name).join('、') || '未指定'}`,
           '角色规则不赋予额外工具权限；仍遵守基础 Hermes 的工具和安全约束。',
-          `[yaoyao-run:${run.id}:${resultMessage.id}]`,
+          `[yaoyao-run:${run.runId}:${resultMessage.id}]`,
         ]
           .filter(Boolean)
           .join('\n\n')
-        const text =
-          c.kind === 'group'
-            ? this.store
-                .messages(owner, c.id)
-              .filter((m) => !['queued','streaming'].includes(m.status))
-                .map(
-                  (m) => `${m.role === 'user' ? '用户' : (m.agentName ?? 'Agent')}：${m.content}`,
-                )
-                .join('\n\n')
-            : trigger.content
+        const text = c.kind === 'group' ? this.contextText(owner, c, agent, run, binding.contextSeq ?? 0) : trigger.content
+        const admission = this.getWork(owner, run.id)
+        if (!this.store.require<Conversation>(owner, 'conversation', c.id).memberIds.includes(agent.id)) {
+          admission.status = 'interrupted'; admission.error = '执行前成员已移除'; this.saveWork(owner, admission)
+          throw new Error('执行前成员已移除')
+        }
+        if (admission.cancelRequested || admission.status === 'interrupted') throw new Error('运行已停止')
+        admission.contextThroughSeq = run.contextThroughSeq ?? run.triggerSeq
+        admission.submitted = true
+        this.saveWork(owner, admission)
         submitted = true
         try {
           await gateway.rpc('prompt.submit', {
             session_id: runtimeId,
             text: `${rules}\n\n${text}\n${attachmentRefs.join('\n')}`,
           })
+          binding.contextSeq = Math.max(binding.contextSeq ?? 0, admission.contextThroughSeq)
+          this.store.put(owner, 'binding', key, binding)
         } catch (error) {
           // A JSON-RPC error is a definitive rejection, not a lost receipt.
-          if (error instanceof HttpError && error.code === 'gateway_rejected') submitted = false
+          if (error instanceof HttpError && error.code === 'gateway_rejected') { submitted = false; const current = this.getWork(owner, run.id); current.submitted = false; this.saveWork(owner, current) }
           throw error
         }
       }
@@ -625,121 +485,109 @@ export class WorkspaceRuntime {
       return await completion
     }
   }
-  async respond(owner: string, id: string, answer: string): Promise<void> {
-    const interaction = this.store.require<WorkspaceInteraction>(owner, 'interaction', id)
-    if (interaction.resolved) return
-    const b = this.store.require<{ key: string; upstreamId: string }>(
-        owner,
-        'interaction-binding',
-        id,
-      ),
-      live = this.live.get(b.key)
-    if (!live || live.runId !== interaction.runId)
-      throw new HttpError(409, '请先恢复此轮连接', 'interaction_offline')
-    if (
-      interaction.kind === 'approval' &&
-      !['once', 'always', 'deny', 'allow', 'approve'].includes(answer)
-    )
-      throw new HttpError(400, '审批选项无效', 'invalid_approval')
-    await live.gateway.rpc(
-      interaction.kind === 'approval' ? 'approval.respond' : 'clarify.respond',
-      {
-        session_id: live.runtimeId,
-        request_id: b.upstreamId,
-        ...(interaction.kind === 'approval' ? { choice: answer } : { answer }),
-      },
-    )
-    interaction.resolved = true
-    this.store.put(owner, 'interaction', id, interaction)
-    this.store.event(owner, 'interaction.changed', interaction, interaction.conversationId)
-    const run = this.store.require<Run>(owner, 'run', interaction.runId)
-    run.status = 'running'
-    this.store.saveRun(owner, run)
+  private contextText(owner: string, c: Conversation, agent: Agent, work: Work, after: number): string {
+    const rootTrigger = this.store.require<Message>(owner, 'message', work.messageId)
+    const roots = new Map(this.store.list<Run>(owner, 'run').filter(r => r.conversationId === c.id).map(r => [r.id, this.store.get<Message>(owner, 'message', r.messageId)?.seq ?? 0]))
+    const history = this.store.messages(owner, c.id, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, true)
+    const unfinished = history.find(m => m.seq > after && m.seq <= work.triggerSeq && (['queued', 'streaming', 'uncertain'].includes(m.status) || (m.runId && (roots.get(m.runId) ?? 0) > rootTrigger.seq)))
+    work.contextThroughSeq = unfinished ? unfinished.seq - 1 : work.triggerSeq
+    const eligible = history
+      .filter(m => m.seq > after && m.seq <= work.triggerSeq && m.visible !== false && ['complete', 'failed', 'interrupted'].includes(m.status)
+        && !(m.role === 'assistant' && m.agentId === agent.id) && (!m.runId || (roots.get(m.runId) ?? 0) <= rootTrigger.seq))
+    const selected: string[] = []
+    let size = 0, omitted = 0
+    for (const message of [...eligible].reverse()) {
+      const files = message.attachments.map(f => `[附件 ${f.name}](${f.sourcePath || `/api/app/files/${f.id}/download`})`).join('\n')
+      const content = message.content.length > 24_000 ? message.content.slice(0, 12_000) + '\n[内容过长，保留首尾片段]\n' + message.content.slice(-12_000) : message.content
+      const reasoning = message.reasoning ? `\n思考摘要：${message.reasoning.slice(0, 2000)}` : ''
+      const tools = [...new Set(message.tools.map(t => String(t.name ?? t.tool_name ?? '')).filter(name => /^[A-Za-z0-9][A-Za-z0-9_.-]{0,119}$/.test(name)))].slice(0, 16)
+      const row = `${message.role === 'user' ? '用户' : message.agentName ?? '系统'}（${message.status}）：${content}${reasoning}${tools.length ? `\n使用工具：${tools.join('、')}` : ''}${message.error ? `\n错误：${message.error}` : ''}${files ? '\n' + files : ''}`
+      if (selected.length >= 50 || size + row.length > 30_000) { omitted++; continue }
+      selected.unshift(row); size += row.length
+    }
+    // Preserve a large trigger as a bounded excerpt rather than silently losing it.
+    if (!selected.length && eligible.length) selected.push(eligible.at(-1)!.content.slice(-30_000))
+    const batch = work.reviewOf ? this.works(owner, work.runId).filter(t => t.batchId === work.reviewOf).map(t => `${this.store.get<Agent>(owner, 'agent', t.agentId)?.name ?? t.agentId}：${t.status}${t.error ? `；${t.error}` : ''}`).join('\n') : ''
+    return `${batch ? `本批次执行结果：\n${batch}\n\n` : ''}${omitted ? `较早上下文有 ${omitted} 条因长度限制省略，请勿假定已完整读取。\n\n` : ''}${selected.join('\n\n')}`
   }
-  async stop(owner: string, id: string): Promise<void> {
-    const run = this.store.require<Run>(owner, 'run', id)
-    if (['complete', 'failed', 'interrupted'].includes(run.status)) return
-    let live = [...this.live.values()].find((t) => t.runId === id)
-    if (live) {
-      await live.gateway.rpc('session.interrupt', { session_id: live.runtimeId })
-      run.status = 'interrupted'
-      this.store.saveRun(owner, run)
-      live.done(new Error('已停止'))
-    } else {
-      const bindings = this.store
-        .list<WorkspaceBinding>(owner, 'binding')
-        .filter((b) => b.runId === id)
-      for (const b of bindings) {
-        const g = new WorkspaceGateway(this.nodes.target(owner, b.nodeId))
-        try {
-          await g.connect()
-          const s = await g.rpc('session.resume', {
-            profile: b.profile,
-            session_id: b.storedId,
-            close_on_disconnect: false,
-            omit_messages: true,
-          })
-          if (s.running) await g.rpc('session.interrupt', { session_id: s.session_id })
-        } finally {
-          g.close()
-        }
+  private resolveInteractions(owner: string, taskId: string): void {
+    for (const interaction of this.store.list<WorkspaceInteraction>(owner, 'interaction')) {
+      const binding = this.store.get<{ taskId?: string }>(owner, 'interaction-binding', interaction.id)
+      if (binding?.taskId === taskId && !interaction.resolved) {
+        interaction.resolved = true
+        this.store.put(owner, 'interaction', interaction.id, interaction)
+        this.store.event(owner, 'interaction.changed', interaction, interaction.conversationId)
       }
-      run.status = 'interrupted'
-      this.store.saveRun(owner, run)
-    }
-    for (const i of this.store
-      .list<WorkspaceInteraction>(owner, 'interaction')
-      .filter((i) => i.runId === id && !i.resolved)) {
-      i.resolved = true
-      this.store.put(owner, 'interaction', i.id, i)
-      this.store.event(owner, 'interaction.changed', i, i.conversationId)
     }
   }
-  private scheduleReconcile(owner: string, id: string): void {
-    if (this.closing || !this.userActive(owner) || this.recoveryTimers.has(id)) return
-    const run = this.store.get<Run>(owner, 'run', id)
-    if (run?.status !== 'uncertain' || !run.currentMessageId || !run.queue.length) {
-      this.recoveryAttempts.delete(id)
+  async respond(owner: string, id: string, answer: string): Promise<void> {
+    type Reply = WorkspaceInteraction & { answer?: string; responseState?: 'sending' | 'uncertain' | 'sent' }
+    const interaction = this.store.require<Reply>(owner, 'interaction', id)
+    if (interaction.resolved) {
+      if (interaction.answer && interaction.answer !== answer) throw new HttpError(409, '该请求已使用其他答复完成', 'interaction_answer_conflict')
       return
     }
-    const attempt = this.recoveryAttempts.get(id) ?? 0
-    this.recoveryAttempts.set(id, attempt + 1)
-    const timer = setTimeout(() => {
-      this.recoveryTimers.delete(id)
-      if (this.executing.has(id)) { this.scheduleReconcile(owner, id); return }
-      void this.reconcile(owner, id).catch(() => {})
-    }, Math.min(30_000, 500 * 2 ** Math.min(attempt, 6)))
-    timer.unref()
-    this.recoveryTimers.set(id, timer)
-  }
-  async reconcile(owner: string, id: string): Promise<void> {
-    if (this.executing.has(id) || this.closing || !this.userActive(owner)) return
-    const run = this.store.require<Run>(owner, 'run', id)
-    if (run.status !== 'uncertain' || !run.currentMessageId || !run.queue.length) return
-    const timer = this.recoveryTimers.get(id)
-    if (timer) clearTimeout(timer)
-    this.recoveryTimers.delete(id)
-    this.executing.add(id)
+    if (interaction.responseState === 'sending' || interaction.responseState === 'uncertain') throw new HttpError(409, '答复状态待确认，请核对原请求', 'interaction_uncertain')
+    const binding = this.store.require<{ key: string; upstreamId: string; taskId: string }>(owner, 'interaction-binding', id)
+    const live = this.live.get(binding.key)
+    if (!live || live.taskId !== binding.taskId || live.runId !== interaction.runId) throw new HttpError(409, '请先恢复此轮连接', 'interaction_offline')
+    if (interaction.kind === 'approval' && !['once', 'session', 'always', 'deny', 'allow', 'approve'].includes(answer)) throw new HttpError(400, '审批选项无效', 'invalid_approval')
+    interaction.answer = answer; interaction.responseState = 'sending'
+    this.store.put(owner, 'interaction', id, interaction)
     try {
-      const agent = this.store.require<Agent>(owner, 'agent', run.queue[0]!),
-        c = this.store.require<Conversation>(owner, 'conversation', run.conversationId)
-      const message = await this.turn(owner, c, agent, run, true)
-      this.advance(owner, id, agent.id, message)
-    } finally {
-      this.executing.delete(id)
-      this.scheduleReconcile(owner, id)
+      await live.gateway.rpc(interaction.kind === 'approval' ? 'approval.respond' : 'clarify.respond', {
+        session_id: live.runtimeId, request_id: binding.upstreamId,
+        ...(interaction.kind === 'approval' ? { choice: answer } : { answer }),
+      })
+    } catch (error) {
+      const latest = this.store.require<Reply>(owner, 'interaction', id)
+      if (!latest.resolved) {
+        latest.responseState = error instanceof HttpError && error.code === 'gateway_rejected' ? undefined : 'uncertain'
+        this.store.put(owner, 'interaction', id, latest)
+      }
+      throw error
     }
-    await this.execute(owner, id)
+    interaction.resolved = true; interaction.responseState = 'sent'
+    this.store.put(owner, 'interaction', id, interaction)
+    this.store.event(owner, 'interaction.changed', interaction, interaction.conversationId)
+    const current = this.getWork(owner, binding.taskId)
+    if (current.status === 'waiting') { current.status = 'running'; this.saveWork(owner, current) }
+  }
+  protected async interruptTurn(owner: string, work: Work): Promise<void> {
+    const key = `${work.conversationId}:${work.agentId}`
+    const live = this.live.get(key)
+    if (live?.taskId === work.id) {
+      await live.gateway.rpc('session.interrupt', { session_id: live.runtimeId })
+      const current = this.getWork(owner, work.id)
+      if (['complete', 'failed', 'interrupted'].includes(current.status)) return
+      current.status = 'interrupted'; current.error = '已停止'
+      this.saveWork(owner, current)
+      live.done(new Error('已停止'))
+    } else {
+      const binding = this.store.get<WorkspaceBinding>(owner, 'binding', key)
+      if (work.submitted) {
+        if (!binding || binding.taskId !== work.id) throw new Error('无法确认待停止成员的会话身份')
+        const gateway = new WorkspaceGateway(this.nodes.target(owner, binding.nodeId))
+        try {
+          await gateway.connect()
+          const opened = await gateway.rpc('session.resume', { profile: binding.profile, session_id: binding.storedId, omit_messages: true, close_on_disconnect: false })
+          if (opened.running) await gateway.rpc('session.interrupt', { session_id: opened.session_id })
+        } finally { gateway.close() }
+      }
+      const current = this.getWork(owner, work.id)
+      current.status = 'interrupted'; current.error = '已停止'
+      this.saveWork(owner, current)
+      if (current.currentMessageId) {
+        const message = this.store.require<Message>(owner, 'message', current.currentMessageId)
+        message.status = 'interrupted'; this.store.saveMessage(owner, message)
+      }
+    }
+    this.resolveInteractions(owner, work.id)
   }
   close(): void {
-    this.closing = true
-    for (const timer of this.recoveryTimers.values()) clearTimeout(timer)
-    this.recoveryTimers.clear()
-    this.recoveryAttempts.clear()
-    for (const t of this.live.values()) {
-      t.gateway.close()
-      t.done(new Error('服务关闭'))
-    }
+    this.closeScheduler()
+    for (const live of [...this.live.values()]) live.done(new Error('服务关闭'))
     this.live.clear()
   }
+
 }

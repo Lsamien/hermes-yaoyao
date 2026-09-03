@@ -174,6 +174,7 @@ async function load(id = selected.value, append = false) {
       run: Run | null
       interactions: Interaction[]
       context: Record<string, unknown> | null
+      hiddenMessageIds?: string[]
     }>(`/api/app/conversations/${id}`)
     if (disposed || own !== generation) return
     const atBottom = timeline.value?.isFollowingBottom() ?? true
@@ -183,6 +184,7 @@ async function load(id = selected.value, append = false) {
           (a, b) => a.seq - b.seq,
         )
       : r.messages
+    messages.value = messages.value.filter(m => m.visible !== false && !r.hiddenMessageIds?.includes(m.id))
     run.value = r.run
     interactions.value = r.interactions
     context.value = r.context
@@ -359,7 +361,7 @@ async function upload(event: Event) {
 }
 async function send() {
   const c = active.value
-  if (!c || busy.value || c.activeRunId || (!text.value.trim() && !files.value.length)) return
+  if (!c || busy.value || (!text.value.trim() && !files.value.length)) return
   busy.value = true
   error.value = ''
   const fingerprint = JSON.stringify([c.id, text.value, mentions.value, files.value.map(f => f.id)])
@@ -413,6 +415,13 @@ async function action(operation: 'pin' | 'archive', id = active.value?.id) {
   } catch (e) {
     error.value = String(e)
   }
+}
+async function stopMember(id: string) {
+  if (!active.value) return
+  try {
+    await apiRequest(`/api/app/conversations/${active.value.id}/agents/${id}/stop`, { method: 'POST', body: {} })
+    await load(); await refresh()
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '停止失败' }
 }
 async function control(action: 'stop' | 'reconcile') {
   if (!run.value) return
@@ -615,6 +624,7 @@ onBeforeUnmount(() => {
             >至少需要两个 Agent 才能创建群聊。</small
           >
           <small v-if="dialog === 'editGroup'">可增减成员，最多 8 位。当前管理员不能移除；如需移除，请先更换管理员并保存。</small>
+          <button v-for="a in agents.filter(a => active?.activeAgentStates?.[a.id])" :key="`stop:${a.id}`" type="button" @click="stopMember(a.id)">停止 {{ a.name }}</button>
         </fieldset>
         <fieldset v-if="dialog === 'editGroup' && Object.keys(form.memberRoles).length">
           <legend>角色分工</legend>
@@ -646,7 +656,8 @@ onBeforeUnmount(() => {
             >
           </fieldset>
           <label
-            >自动协作轮数<input
+            ><input type="checkbox" :checked="form.maxReplyRounds === -1" @change="form.maxReplyRounds = ($event.target as HTMLInputElement).checked ? -1 : 3" />不限制自动协作轮数</label>
+          <label v-if="form.maxReplyRounds !== -1">自动协作轮数<input
               v-model.number="form.maxReplyRounds"
               type="number"
               min="1"

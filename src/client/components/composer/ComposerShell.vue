@@ -89,7 +89,7 @@ let errorTimer: number | undefined
 const canSubmit = computed(() => !props.disabled && !props.sending && (text.value.trim().length > 0 || attachments.value.length > 0))
 // A running group still accepts new room messages. Only an ordinary session
 // turns its primary send affordance into an interrupt control.
-const showStop = computed(() => props.streaming && (props.stopWhileRunning || (props.mode === 'chat' && !canSubmit.value)))
+const showStop = computed(() => props.streaming && !text.value.trim() && !attachments.value.length && (props.stopWhileRunning || props.mode === 'chat'))
 const compactModel = computed(() => props.modelLabel.split('/').filter(Boolean).at(-1) || props.modelLabel)
 const contextPercent = computed(() => props.contextLimit > 0 ? Math.min(100, Math.round(props.contextUsed / props.contextLimit * 100)) : 0)
 const hasContext = computed(() => props.contextLimit > 0)
