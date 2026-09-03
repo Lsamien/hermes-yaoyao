@@ -17,7 +17,7 @@ import type { UiAgent, UiRoom } from '@/components/groups/types'
 import type { UiLibraryItem } from '@/components/library/types'
 import type { UiInteraction, UiMessage, UiMessageAttachment, UiToolCall } from '@/components/messages/types'
 import { normalizeAssistantMediaMarkdown } from '@/utils/mediaMarkdown'
-import { formatMessageTime } from '@/utils/messageTime'
+import { formatMessageTime, formatConversationTime } from '@/utils/messageTime'
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -412,7 +412,7 @@ export function workspaceConversationItem(c: import('@shared/workspace').Workspa
     id: c.id, title: c.name, subtitle: c.preview || '开始聊天', pinned: c.pinned,
     section: c.pinned ? '已置顶' : '聊天', avatar: c.kind === 'group' ? '' : c.avatar,
     avatarMembers: c.kind === 'group' ? workspaceAvatarMembers(c.memberIds, agents, c) : [],
-    meta: formatMessageTime(c.lastMessageAt ?? c.createdAt),
+    meta: formatConversationTime(c.lastMessageAt ?? c.createdAt),
     avatarKind: c.kind === 'direct' ? 'agent' : 'team',
     avatarState: workspaceAvatarState(c, c.memberIds[0] || ''),
     unread: c.unreadCount ?? Math.max(0, c.lastSeq - c.readSeq), status: c.activeRunId ? 'working' : undefined,

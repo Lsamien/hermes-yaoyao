@@ -16,3 +16,15 @@ export function formatMessageTime(value: string | number | Date | undefined, now
   const dateLabel = `${date.getMonth() + 1}月${date.getDate()}日`
   return date.getFullYear() === now.getFullYear() ? `${dateLabel} ${time}` : `${date.getFullYear()}年${dateLabel} ${time}`
 }
+
+/** Compact list timestamp, matching the native Bot roster. */
+export function formatConversationTime(value: string | number | Date | undefined, now = new Date()): string {
+  if (!value) return ''
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const days = Math.round((calendarStart(now) - calendarStart(date)) / 86_400_000)
+  if (days === 0) return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date)
+  if (days === 1) return '昨天'
+  if (days >= 2 && days < 7) return `星期${'日一二三四五六'[date.getDay()]}`
+  return `${date.getFullYear() === now.getFullYear() ? '' : date.getFullYear() + '年'}${date.getMonth() + 1}月${date.getDate()}日`
+}

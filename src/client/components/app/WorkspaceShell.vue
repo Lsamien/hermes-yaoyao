@@ -7,6 +7,7 @@ import type { ProfileIdentityInput } from '@/api/profiles'
 import AppIcon from '@/components/common/AppIcon.vue'
 import BrandMark from '@/components/common/BrandMark.vue'
 import SettingsCenterDialog from '@/components/app/SettingsCenterDialog.vue'
+import { rememberInterfacePath } from '@/utils/interfaceMode'
 import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 
 type NavItem = {
@@ -143,6 +144,7 @@ const hasPrimaryAction = computed(() => ['chat', 'groups', 'kanban', 'files'].in
 
 async function navigate(path: string) {
   mobileDrawerOpen.value = false
+  rememberInterfacePath(path)
   await router.push(path)
 }
 
@@ -208,10 +210,14 @@ async function openSettingsMenu(event: MouseEvent) {
 }
 function chooseSettingsAction(action: 'settings' | 'bots') {
   settingsMenuOpen.value = false
-  if (action === 'bots') { void navigate('/conversations'); return }
+  if (action === 'bots') { switchInterfaceMode(); return }
   settingsReturnFocus.value = settingsTrigger?.closest('.mobile-drawer')
     ? mobileNavigationTrigger.value : settingsTrigger ?? undefined
   openSettings('agent-identity')
+}
+function switchInterfaceMode() {
+  settingsOpen.value = false
+  void navigate(applicationWorkspace.value ? '/chat' : '/conversations')
 }
 function workspaceKeydown(event: KeyboardEvent) {
   if (!applicationWorkspace.value || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k' || settingsOpen.value || document.querySelector('dialog[open]')) return
@@ -351,12 +357,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="workspace-shell" :class="{ 'workspace-shell--collapsed': sidebarCollapsed, 'workspace-shell--sidebar-focused': sidebarFocusMode, 'workspace-shell--conversations': applicationWorkspace }" :inert="settingsOpen || (applicationWorkspace && sidebarSearchOpen)">
+  <div class="workspace-shell" :class="{ 'workspace-shell--collapsed': sidebarCollapsed && !applicationWorkspace, 'workspace-shell--sidebar-focused': sidebarFocusMode, 'workspace-shell--conversations': applicationWorkspace, 'workspace-shell--conversation-open': applicationWorkspace && !!route.params.id }" :inert="settingsOpen || (applicationWorkspace && sidebarSearchOpen)">
     <header class="mobile-header" :inert="mobileDrawerOpen">
       <button ref="mobileNavigationTrigger" class="icon-button" type="button" aria-label="打开导航" @click="openMobileDrawer">
         <AppIcon name="menu" :size="20" />
       </button>
-      <button class="mobile-brand" type="button" aria-label="返回聊天" @click="navigate('/conversations')">
+      <button class="mobile-brand" type="button" aria-label="返回聊天" @click="navigate(applicationWorkspace ? '/conversations' : '/chat')">
         <BrandMark :size="28" compact />
       </button>
       <button class="icon-button" type="button" :aria-label="theme === 'dark' ? '切换浅色主题' : '切换深色主题'" @click="emit('toggleTheme')">
@@ -366,16 +372,23 @@ onBeforeUnmount(() => {
 
     <aside
       class="desktop-sidebar rail"
-      :class="{ 'desktop-sidebar--collapsed': sidebarCollapsed }"
+      :class="{ 'desktop-sidebar--collapsed': sidebarCollapsed && !applicationWorkspace }"
       aria-label="主导航"
       :inert="mobileDrawerOpen"
     >
-      <div class="sidebar-brand-row">
-        <button class="rail__brand sidebar-brand" type="button" aria-label="返回聊天" title="夭夭 Web" @click="navigate('/conversations')">
+      <div v-if="applicationWorkspace" class="bot-list-header">
+        <button class="bot-account-trigger" type="button" aria-label="设置" @click="openSettings('account-security', $event)"><AgentAvatar :name="userName" :size="40" /></button>
+        <span class="bot-list-header__spacer" />
+        <button class="bot-list-toolbar-button sidebar-search-trigger" type="button" aria-label="搜索" :aria-expanded="sidebarSearchOpen" @click="openSidebarSearch(desktopSidebarContext)"><AppIcon name="search" :size="21" /></button>
+        <button class="bot-list-toolbar-button sidebar-create-trigger" type="button" aria-label="新建" aria-haspopup="menu" :aria-expanded="createMenuOpen" @click="openCreateMenu"><AppIcon name="plus" :size="23" /></button>
+      </div>
+      <div v-else class="sidebar-brand-row">
+        <button class="rail__brand sidebar-brand" type="button" aria-label="返回聊天" title="夭夭 Web" @click="navigate(applicationWorkspace ? '/conversations' : '/chat')">
           <BrandMark :size="sidebarCollapsed ? 26 : 32" :label="false" compact bare />
         </button>
       </div>
       <button
+        v-if="!applicationWorkspace"
         class="sidebar-collapse"
         :class="{ 'sidebar-collapse--collapsed': sidebarCollapsed }"
         type="button"
@@ -386,10 +399,9 @@ onBeforeUnmount(() => {
         <AppIcon name="chevron-left" :size="18" />
       </button>
 
-      <button v-if="applicationWorkspace" class="sidebar-create-trigger" type="button" aria-label="新建" title="新建" aria-haspopup="menu" :aria-expanded="createMenuOpen" @click="openCreateMenu" @keydown.down.prevent="openCreateMenu"><AppIcon name="plus" :size="19" /></button>
 
       <button
-        v-if="!['files', 'kanban'].includes(activeNav.key)"
+        v-if="!applicationWorkspace && !['files', 'kanban'].includes(activeNav.key)"
         class="sidebar-search-trigger"
         :class="{ 'sidebar-search-trigger--searching': sidebarSearchOpen && !applicationWorkspace }"
         type="button"
@@ -441,7 +453,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <div class="sidebar-footer">
+      <div v-if="!applicationWorkspace" class="sidebar-footer">
         <div class="sidebar-account-switcher">
           <button class="sidebar-account-switcher__main" type="button" :title="applicationWorkspace ? '当前账号' : `切换 Agent：${profileTitle(activeProfile)}`" :aria-haspopup="applicationWorkspace ? undefined : 'listbox'" :aria-expanded="applicationWorkspace ? undefined : profileMenuOpen" @click="applicationWorkspace ? openSettings('account-security', $event) : toggleProfileMenu($event)">
             <AgentAvatar :name="applicationWorkspace ? userName : profileTitle(activeProfile)" :avatar="applicationWorkspace ? '' : activeProfile?.agentAvatar || ''" :size="30" />
@@ -487,7 +499,7 @@ onBeforeUnmount(() => {
       :inert="!mobileDrawerOpen"
     >
       <div class="mobile-drawer__header">
-        <button class="sidebar-brand" type="button" aria-label="返回聊天" @click="navigate('/conversations')">
+        <button class="sidebar-brand" type="button" aria-label="返回聊天" @click="navigate(applicationWorkspace ? '/conversations' : '/chat')">
           <BrandMark :size="32" compact />
         </button>
         <div class="mobile-drawer__actions"><button ref="mobileDrawerClose" class="icon-button" type="button" aria-label="关闭导航" @click="closeMobileDrawer">
@@ -496,7 +508,7 @@ onBeforeUnmount(() => {
       </div>
 
       <button
-        v-if="!['files', 'kanban'].includes(activeNav.key)"
+        v-if="!applicationWorkspace && !['files', 'kanban'].includes(activeNav.key)"
         class="sidebar-search-trigger"
         :class="{ 'sidebar-search-trigger--searching': sidebarSearchOpen && !applicationWorkspace }"
         type="button"
@@ -599,6 +611,8 @@ onBeforeUnmount(() => {
 
     <SettingsCenterDialog
       :open="settingsOpen"
+      :bot-mode="applicationWorkspace"
+      @switch-mode="switchInterfaceMode"
       :initial-page="settingsPage"
       :user-name="userName"
       :pairing-user-name="pairingUserName"
@@ -863,4 +877,18 @@ onBeforeUnmount(() => {
 .workspace-create-menu{position:absolute;width:180px;padding:5px;border:1px solid var(--line);border-radius:11px;background:var(--surface-raised);box-shadow:var(--shadow-float)}
 .workspace-create-menu button{display:flex;width:100%;min-height:36px;align-items:center;gap:9px;padding:7px 10px;border:0;border-radius:7px;background:transparent;color:var(--text-primary);font:13px var(--font-ui);text-align:left;cursor:pointer}
 .workspace-create-menu button:hover,.workspace-create-menu button:focus-visible{outline:0;background:var(--surface-hover)}
+
+.bot-list-header{display:flex;align-items:center;gap:10px;padding:20px 20px 12px;min-height:74px}
+.bot-list-header__spacer{flex:1}
+.bot-account-trigger{display:grid;place-items:center;padding:0;border:0;background:transparent;cursor:pointer;border-radius:50%}
+.bot-list-header .bot-list-toolbar-button{position:static;display:grid;place-items:center;width:42px;height:42px;min-height:42px;flex:0 0 42px;margin:0;padding:0;border:1px solid var(--line);border-radius:50%;background:var(--surface);color:var(--text-primary)}
+.workspace-shell--conversations .sidebar-context{margin-top:0}
+@media(max-width:900px){
+ .workspace-shell--conversations{grid-template-rows:minmax(0,1fr);grid-template-columns:minmax(0,1fr)}
+ .workspace-shell--conversations>.mobile-header,.workspace-shell--conversations>.mobile-drawer{display:none}
+ .workspace-shell--conversations>.desktop-sidebar{display:flex;grid-row:1;border:0;padding-top:env(safe-area-inset-top)}
+ .workspace-shell--conversations>.workspace-main{display:none;grid-row:1}
+ .workspace-shell--conversation-open>.desktop-sidebar{display:none}
+ .workspace-shell--conversation-open>.workspace-main{display:flex}
+}
 </style>

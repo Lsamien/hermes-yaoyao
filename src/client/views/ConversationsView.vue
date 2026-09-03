@@ -514,7 +514,7 @@ onBeforeUnmount(() => {
       ><ConversationList :conversations="conversations" :agents="agents" :selected="selected" @select="select" @pin="action('pin', $event)" @archive="action('archive', $event)"
     /></template>
     <section class="workspace-chat" aria-label="聊天">
-      <MessageTimeline ref="timeline" :messages="uiMessages" :title="active?.name || '团队'"
+      <MessageTimeline ref="timeline" :messages="uiMessages" :title="active?.name || 'Bot 模式'"
         :subtitle="active?.kind === 'group' ? `${members.length} 位成员` : ''"
         :loading="loading" :has-older="older && !!active" :connected="!error" :synced="!loading"
         :show-tools="showThinking" :allow-branch="false" :thinking="!!active?.activeRunId"
@@ -527,6 +527,7 @@ onBeforeUnmount(() => {
         @load-older="loadOlder" @quote="quoted = $event" @preview="openPreview" @preview-file="openPreview"
         @approve="interactions[0] && respond(interactions[0], $event ? 'once' : 'deny')"
         @clarify="interactions[0] && respond(interactions[0], $event)">
+        <template #header-leading><button v-if="active" class="workspace-list-back icon-button" aria-label="返回 Bot 列表" @click="router.push('/conversations')"><AppIcon name="chevron-left" /></button></template>
         <template #header-actions>
           <div v-if="active" class="header-actions">
             <button class="icon-button" :aria-label="active.pinned ? '取消置顶' : '置顶聊天'" :title="active.pinned ? '取消置顶' : '置顶聊天'" @click="action('pin')"><AppIcon :name="active.pinned ? 'pin-off' : 'pin'" /></button>
@@ -723,4 +724,5 @@ onBeforeUnmount(() => {
 .status {
   margin-top: 8px;
 }
+.workspace-list-back{display:none}@media(max-width:900px){.workspace-list-back{display:grid}}
 </style>

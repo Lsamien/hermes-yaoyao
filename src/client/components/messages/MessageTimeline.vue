@@ -230,6 +230,7 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom, isFollowingBotto
 <template>
   <section class="timeline-frame" :class="{ 'timeline-frame--transparent': transparentHeader }">
     <header v-if="title || transparentHeader" class="timeline-header" :class="{ 'timeline-header--transparent': transparentHeader }">
+      <slot name="header-leading" />
       <div v-if="!transparentHeader"><h2>{{ title }}</h2><p v-if="subtitle">{{ subtitle }}</p></div>
       <div v-if="!transparentHeader" class="timeline-state" :title="connected ? (synced ? '实时连接与历史均已同步' : '实时连接已就绪，历史同步中') : '实时连接未就绪'">
         <span class="status-dot" :class="connected ? (synced ? 'status-dot--online' : 'status-dot--working') : ''" />

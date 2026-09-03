@@ -1,9 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { rememberInterfacePath, savedInterfacePath } from '@/utils/interfaceMode'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/conversations' },
+    { path: '/', redirect: () => savedInterfacePath() },
     { path: '/chat/:sessionId?', name: 'chat', component: () => import('@/views/ChatView.vue') },
     { path: '/conversations/:id?', name: 'conversations', component: () => import('@/views/ConversationsView.vue') },
     { path: '/kanban/:boardSlug?', name: 'kanban', component: () => import('@/views/KanbanView.vue') },
@@ -13,5 +14,6 @@ const router = createRouter({
   ],
   scrollBehavior: () => ({ top: 0 }),
 })
+router.afterEach(to => rememberInterfacePath(to.path))
 
 export default router

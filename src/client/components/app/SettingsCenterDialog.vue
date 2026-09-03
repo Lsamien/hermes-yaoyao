@@ -40,6 +40,7 @@ interface NavigationItem {
 
 const props = withDefaults(defineProps<{
   open: boolean
+  botMode?: boolean
   initialPage?: SettingsPage
   userName?: string
   pairingUserName?: string
@@ -77,6 +78,7 @@ const emit = defineEmits<{
   'select-profile': [profile: string]
   'save-identity': [input: ProfileIdentityInput]
   'set-theme': [theme: ThemePreference]
+  'switch-mode': []
 }>()
 
 const dialog = ref<HTMLElement>()
@@ -243,6 +245,10 @@ watch(() => [props.open, props.initialPage] as const, ([open, initialPage]) => {
   mobileDetailOpen.value = false
   void nextTick(() => dialog.value?.focus())
 }, { immediate: true })
+function requestModeSwitch() {
+  if (updateLocked.value || !confirmDiscard()) return
+  emit('switch-mode')
+}
 </script>
 
 <template>
@@ -282,6 +288,7 @@ watch(() => [props.open, props.initialPage] as const, ([open, initialPage]) => {
                 </div>
 
                 <nav>
+                  <section><button type="button" :disabled="updateLocked" @click="requestModeSwitch"><AppIcon :name="botMode ? 'chat' : 'users'" :size="18" /><span>{{ botMode ? '进入聊天模式' : '进入 Bot 模式' }}</span></button></section>
                   <section>
                     <h3>当前 Agent</h3>
                     <button v-for="item in agentItems" :key="item.key" type="button" :class="{ active: activePage === item.key }" :aria-current="activePage === item.key ? 'page' : undefined" @click="selectPage(item.key)"><AppIcon :name="item.icon" :size="20" /><span>{{ item.label }}</span></button>
