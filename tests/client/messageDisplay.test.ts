@@ -98,6 +98,39 @@ describe('displayContentForMessage', () => {
       '/Users/samien/.hermes/images/upload_2.jpeg',
     ])
   })
+
+  it('restores an entire batch of iOS Profile images with their original names', () => {
+    const names = ['照片-D2BE1E0F.png', '照片-8717030E.png', '中文 照片.heic']
+    const paths = names.map((_, index) => `/Users/samien/.hermes/profiles/yaoer/images/upload_20260815_233834_${index + 1}.png`)
+    const message = normalizeChatMessage({
+      id: 'ios-profile-images', role: 'user', timestamp: 1,
+      content: [
+        '读取图片中的提示词',
+        ...names.map(name => `[用户附加图片：${name}]`),
+        ...paths.map(path => `@image:${path}`),
+        ...paths.map(() => '[screenshot]'),
+      ].join('\n'),
+    }, 'session-1', 'yaoer')
+
+    expect(message.content).toBe('读取图片中的提示词')
+    expect(message.attachments?.map(({ name, path, url, kind }) => ({ name, path, url, kind })))
+      .toEqual(names.map((name, index) => ({ name, path: paths[index], url: paths[index], kind: 'image' })))
+  })
+
+  it.each([
+    '/Users/samien/.hermes/profiles/yaoer/config/image.png',
+    '/Users/samien/.hermes/profiles/../images/image.png',
+    '/Users/samien/.hermes/profiles/yaoer/images/%2e%2e/image.png',
+    '/Users/samien/.hermes/profiles/yaoer%2Fother/images/image.png',
+    '/Users/samien/.hermes/profiles/yaoer/images/nested%2F..%2Fimage.png',
+    '/Users/samien/.hermes/profiles/yaoer/images/image%5C.png',
+    '/Users/samien/.hermes/profiles/yaoer/images/image%00.png',
+  ])('keeps unsupported or unsafe image references as text: %s', path => {
+    const content = `[用户附加图片：照片.png]\n@image:${path}\n[screenshot]`
+    const message = normalizeChatMessage({ id: 'unsafe', role: 'user', content }, 'session-1', 'yaoer')
+    expect(message.content).toBe(content)
+    expect(message.attachments).toBeUndefined()
+  })
   it('hides expanded attached context while restoring a missing reference', () => {
     const content = [
       '帮我看看这个文件',

@@ -107,6 +107,7 @@ const sessions = [
   { id: 'session-demo', profile: 'yaoyao', source: 'web', title: '夭夭 Web 验收会话', preview: '文件库与群聊已经就绪', message_count: 4, tool_call_count: 1, started_at: now() - 3600, last_active_at: now(), pinned: true, model: 'gpt-5.6', provider: 'openai' },
   { id: 'session-yaoer', profile: 'yaoer', source: 'web', title: '瑶儿专属会话', message_count: 1, tool_call_count: 0, started_at: now() - 3500, last_active_at: now() - 20, model: 'gpt-5.6', provider: 'openai' },
   { id: 'session-media', profile: 'yaoer', source: 'web', title: '瑶儿生成图片验收', message_count: 1, tool_call_count: 0, started_at: now() - 3400, last_active_at: now() - 30, model: 'gpt-5.6', provider: 'openai' },
+  { id: 'session-user-media', profile: 'yaoer', source: 'web', title: '用户多图验收', message_count: 1, tool_call_count: 0, started_at: now() - 3300, last_active_at: now() - 40, model: 'gpt-5.6', provider: 'openai' },
   ...Array.from({ length: 101 }, (_, index) => ({ id: `session-page-${index + 1}`, profile: 'yaoyao', source: 'web', title: `分页会话 ${index + 1}`, message_count: 0, tool_call_count: 0, started_at: now() - 10_000 - index, last_active_at: now() - 10_000 - index })),
 ]
 const messages = [
@@ -132,6 +133,17 @@ const profileMediaPaths = [
   '/Users/samien/.hermes/profiles/yaoer/cache/images/openai_codex_gpt-image-2-high_20260902_194820_1d225f08.png',
   '/Users/samien/.hermes/profiles/yaoer/cache/images/国漫三视图.png',
 ]
+const userProfileMediaPaths = Array.from({ length: 9 }, (_, index) =>
+  `/Users/samien/.hermes/profiles/yaoer/images/upload_20260815_233834_${index + 1}.png`)
+const userProfileMediaMessages = [{
+  id: 'message-user-profile-media', role: 'user', timestamp: now() - 40,
+  content: [
+    '读取图片中的提示词',
+    ...userProfileMediaPaths.map((_, index) => `[用户附加图片：照片-${index + 1}.png]`),
+    ...userProfileMediaPaths.map(path => `@image:${path}`),
+    ...userProfileMediaPaths.map(() => '[screenshot]'),
+  ].join('\n'),
+}]
 const profileMediaPng = readFileSync(new URL('../../public/brand/AppIcon-1024.png', import.meta.url))
 const profileMediaMessages = [{
   id: 'message-profile-media', role: 'assistant', timestamp: now() - 30,
@@ -186,7 +198,7 @@ const server = createServer(async (request, response) => {
   if (!authenticated(request)) return json(response, 401, { detail: 'Unauthorized' })
   if (url.pathname === '/api/files/download' && request.method === 'GET') {
     const path = url.searchParams.get('path')
-    if (!profileMediaPaths.includes(path)) return json(response, 404, { detail: 'File not found' })
+    if (![...profileMediaPaths, ...userProfileMediaPaths].includes(path)) return json(response, 404, { detail: 'File not found' })
     response.writeHead(200, {
       'Content-Type': 'image/png',
       'Content-Length': profileMediaPng.length,
@@ -329,6 +341,7 @@ const server = createServer(async (request, response) => {
   if (/^\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
     const id = decodeURIComponent(url.pathname.split('/')[3])
     const scopedMessages = id === 'session-media' ? profileMediaMessages
+      : id === 'session-user-media' ? userProfileMediaMessages
       : id === 'session-yaoer' ? [{ id: 'yaoer-history', role: 'assistant', content: '瑶儿历史消息', timestamp: now() - 10 }] : messages
     return json(response, 200, { messages: scopedMessages, pagination: { total: scopedMessages.length, returned: scopedMessages.length, limit: 150, hasMore: false } })
   }

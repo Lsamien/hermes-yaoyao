@@ -201,8 +201,14 @@ function persistedImageUrl(path: string): { path: string; url: string } | undefi
   const normalizedSegments = segments.map(segment => {
     try { return decodeURIComponent(segment) } catch { return '' }
   })
-  if (segments.length < 5 || segments[0] !== 'Users' || normalizedSegments[2] !== '.hermes' || normalizedSegments[3] !== 'images'
-    || normalizedSegments.some(segment => !segment || segment === '.' || segment === '..')) return undefined
+  const rootImages = normalizedSegments[3] === 'images' && segments.length >= 5
+  const profileImages = normalizedSegments[3] === 'profiles'
+    && normalizedSegments[5] === 'images' && segments.length >= 7
+  // User uploads belong to either the default Hermes home or the selected
+  // Profile. Keep the full path so the Web media route reaches that Profile.
+  if (normalizedSegments[0] !== 'Users' || normalizedSegments[2] !== '.hermes'
+    || (!rootImages && !profileImages)
+    || normalizedSegments.some(segment => !segment || segment === '.' || segment === '..' || /[/\\\u0000-\u001f\u007f]/.test(segment))) return undefined
   return { path, url: `/${segments.map(encodeURIComponent).join('/')}` }
 }
 
