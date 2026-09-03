@@ -24,6 +24,7 @@ let home: string,
 let requests: Array<{ method: string; params: Record<string, any> }>,
   reply: (socket: WebSocket, params: Record<string, any>) => void
 let nodes: WorkspaceNodes
+let rejectPrompt: string | undefined
 let recoveryHistory: Array<{ role: string; content: string }>
 const owner = 'first-user',
   other = 'second-user'
@@ -33,6 +34,7 @@ beforeEach(async () => {
   uploads = new UploadStore(home)
   requests = []
   recoveryHistory = []
+  rejectPrompt = undefined
   server = new WebSocketServer({ port: 0, host: '127.0.0.1' })
   await new Promise<void>((resolve) => server.once('listening', resolve))
   const address = server.address() as { port: number }
@@ -85,6 +87,7 @@ beforeEach(async () => {
           info: { profile_name: frame.params.profile },
         })
       else if (frame.method === 'prompt.submit') {
+        if (rejectPrompt) { socket.send(JSON.stringify({id:frame.id,error:{code:4006,message:rejectPrompt}})); return }
         respond({ status: 'streaming' })
         reply(socket, frame.params)
       } else if (frame.method === 'session.usage') respond({ context_used: 400, context_max: 1000 })
@@ -349,7 +352,7 @@ describe('Web-owned workspace', () => {
       })
     let turns = 0
     reply = (socket, p) => {
-      const text = turns++ === 0 ? '请协作 @开发者' : '任务完成'
+      const text = turns++ === 0 ? '我已整理需求，现在请@开发者继续实现。' : '任务完成'
       setTimeout(
         () =>
           socket.send(
@@ -470,4 +473,54 @@ it('stores the expanded avatar shapes for cross-client role settings', () => {
     const avatar=`yaoyao-mascot:v1:${shape}:ff2dab:curious`
     expect(store.updateAgent(owner,agent.id,{avatar}).avatar).toBe(avatar)
   }
+})
+
+
+it('automatically reconciles lost completion without submitting the prompt again', async () => {
+  const a=agent('自动恢复'),c=direct(a.id)
+  reply=(socket,p)=>{recoveryHistory=[{role:'user',content:p.text},{role:'assistant',content:'已完成一次'}];socket.terminate()}
+  const run=runtime.send(owner,c.id,{requestId:randomUUID(),content:'执行一次'})
+  await vi.waitFor(()=>expect(store.require<WorkspaceRun>(owner,'run',run.id).status).toBe('complete'),{timeout:5000})
+  expect(requests.filter(r=>r.method==='prompt.submit')).toHaveLength(1)
+  expect(store.messages(owner,c.id).at(-1)).toMatchObject({content:'已完成一次',status:'complete'})
+})
+it('reports a rejected prompt as failed instead of leaving it uncertain', async () => {
+  rejectPrompt='本轮请求被明确拒绝'
+  const a=agent('拒绝测试'),c=direct(a.id)
+  const run=runtime.send(owner,c.id,{requestId:randomUUID(),content:'执行'})
+  await vi.waitFor(()=>expect(store.require<WorkspaceRun>(owner,'run',run.id).status).toBe('failed'))
+  expect(store.require<WorkspaceConversation>(owner,'conversation',c.id).activeRunId).toBeUndefined()
+  expect(store.messages(owner,c.id).some(m=>m.status==='uncertain')).toBe(false)
+})
+it('keeps an unconfirmed turn separate from a later reply and retries history without resubmitting', async () => {
+  const a = agent('恢复边界'), c = direct(a.id)
+  let prompt = ''
+  reply = (socket, p) => {
+    prompt = p.text
+    recoveryHistory = [{ role: 'user', content: prompt }, { role: 'user', content: '另一个请求' }, { role: 'assistant', content: '另一轮回复' }]
+    socket.terminate()
+  }
+  const run = runtime.send(owner, c.id, { requestId: randomUUID(), content: '只执行一次' })
+  await vi.waitFor(() => expect(requests.filter(r => r.method === 'session.resume').length).toBeGreaterThanOrEqual(1), { timeout: 3000 })
+  expect(store.require<WorkspaceRun>(owner, 'run', run.id).status).toBe('uncertain')
+  expect(store.messages(owner, c.id).at(-1)?.content).not.toBe('另一轮回复')
+  recoveryHistory = [{ role: 'user', content: prompt }, { role: 'assistant', content: '本轮结果' }]
+  await vi.waitFor(() => expect(store.require<WorkspaceRun>(owner, 'run', run.id).status).toBe('complete'), { timeout: 4000 })
+  expect(requests.filter(r => r.method === 'prompt.submit')).toHaveLength(1)
+  expect(store.messages(owner, c.id).at(-1)).toMatchObject({ content: '本轮结果', status: 'complete' })
+})
+it('uses one canonical default avatar for the agent and its direct conversation',()=>{
+  const a=agent('默认头像'),c=direct(a.id)
+  expect(a.avatar).toBe('')
+  expect(store.agentSummary(a).avatar).toBe(store.conversationSummary(owner,c).avatar)
+  const changed=store.updateAgent(owner,a.id,{name:'换个名称'})
+  expect(store.agentSummary(changed).avatar).toBe(store.agentSummary(a).avatar)
+})
+it('recognizes mentions inside Chinese sentences and ignores quoted code and emails',()=>{
+  const a=agent('瑶儿'),b=agent('竹儿'),c=agent('瑶儿助手'),d=agent('Ann')
+  const roster=[a,b,c,d]
+  expect(mentionedAgents('先整理，再请@瑶儿帮忙，最后由（@竹儿）复核。',roster)).toEqual([a.id,b.id])
+  expect(mentionedAgents('请**@瑶儿助手**继续',roster)).toEqual([c.id])
+  expect(mentionedAgents('mail@Ann.com https://site/@竹儿 `@瑶儿` <quoted_message>@瑶儿</quoted_message>',roster)).toEqual([])
+  expect(mentionedAgents('@Anna',roster)).toEqual([])
 })

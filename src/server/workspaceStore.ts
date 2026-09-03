@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events'
 import { z } from 'zod'
 import { HttpError } from './errors.js'
 import { notificationPlainText } from './notificationText.js'
-import { decodeAgentMascotAvatar, isAgentImageAvatar } from '../shared/agentIdentity.js'
+import { decodeAgentMascotAvatar, isAgentImageAvatar, defaultAgentIdentity, encodeAgentAvatar } from '../shared/agentIdentity.js'
 import type {
   WorkspaceAgent as Agent,
   WorkspaceConversation as Conversation,
@@ -342,9 +342,14 @@ export class WorkspaceStore {
       this.event(owner, 'conversation.changed', c, c.id)
     })
   }
+  agentSummary(agent: Agent): Agent {
+    return { ...agent, avatar: agent.avatar || encodeAgentAvatar(defaultAgentIdentity(agent.id, agent.name)) }
+  }
   conversationSummary(owner: string, conversation: Conversation): Conversation {
+    const member = conversation.kind === 'direct' ? this.get<Agent>(owner, 'agent', conversation.memberIds[0] ?? '') : undefined
     return {
       ...conversation,
+      ...(member ? { avatar: this.agentSummary(member).avatar } : {}),
       lastMessageAt: conversation.lastMessageAt
         ?? (conversation.lastSeq > 0 ? this.messages(owner, conversation.id, Number.MAX_SAFE_INTEGER, 1).at(-1)?.createdAt : undefined)
         ?? conversation.createdAt,

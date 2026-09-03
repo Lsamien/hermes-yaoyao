@@ -52,23 +52,29 @@ export const sendInput = z
   .refine((b) => b.content.trim() || b.fileIds.length, '请输入消息或添加附件')
 export function mentionedAgents(text: string, agents: Array<Pick<Agent, 'id' | 'name'>>): string[] {
   const plain = text
-    .replace(/```[\s\S]*?```/g, '')
+    .replace(/<quoted_message\b[^>]*>[\s\S]*?<\/quoted_message>/gi, '')
+    .replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/g, '')
     .replace(/`[^`]*`/g, '')
-    .split('\n')
-    .filter((l) => !l.trimStart().startsWith('>'))
-    .join('\n')
-  if (/(?:^|\s)@all(?=$|[\s，。,:：!！?？])/i.test(plain)) return agents.map((a) => a.id)
-  return agents
-    .filter((a) => {
-      const escaped = a.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      return new RegExp(`(?:^|\\s)@${escaped}(?=$|[\\s，。,:：!！?？])`, 'u').test(plain)
-    })
-    .map((a) => a.id)
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.[\p{L}]{2,}/gu, '')
+    .split('\n').filter(line => !line.trimStart().startsWith('>')).join('\n')
+  const names = [...agents].sort((a, b) => b.name.length - a.name.length)
+  const alternatives = [...names.map(a => a.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'all', '所有人']
+  const pattern = new RegExp(`(?<![A-Za-z0-9_.%+/@-])@(${alternatives.join('|')})(?![A-Za-z0-9_])`, 'giu')
+  const result = new Set<string>()
+  for (const match of plain.matchAll(pattern)) {
+    const name = match[1]!
+    if (/^(all|所有人)$/i.test(name)) { for (const a of agents) result.add(a.id) }
+    else { const a = agents.find(a => a.name.toLocaleLowerCase() === name.toLocaleLowerCase()); if (a) result.add(a.id) }
+  }
+  return [...result]
 }
 export class WorkspaceRuntime {
   private live = new Map<string, LiveTurn>()
   private executing = new Set<string>()
   private closing = false
+  private recoveryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private recoveryAttempts = new Map<string, number>()
   onMessage: (owner: string, message: Message) => Promise<void> = async () => {}
   onNotify: (
     owner: string,
@@ -110,7 +116,7 @@ export class WorkspaceRuntime {
     for (const owner of this.store.owners())
       for (const run of this.store.list<Run>(owner, 'run')) {
         if (run.status === 'queued') void this.execute(owner, run.id)
-        else if (run.status === 'uncertain') void this.reconcile(owner, run.id).catch(() => {})
+        else if (run.status === 'uncertain') this.scheduleReconcile(owner, run.id)
       }
   }
   send(owner: string, conversationId: string, input: unknown): Run {
@@ -258,6 +264,7 @@ export class WorkspaceRuntime {
       }
     } finally {
       this.executing.delete(id)
+      this.scheduleReconcile(owner, id)
     }
   }
   private advance(owner: string, runId: string, agentId: string, message: Message): void {
@@ -348,7 +355,7 @@ export class WorkspaceRuntime {
           current.status === 'interrupted' ? 'interrupted' : submitted ? 'uncertain' : 'failed'
         if (submitted && current.status !== 'interrupted') {
           current.status = 'uncertain'
-          current.error = '执行状态待确认，未自动重发'
+          current.error = `执行状态待确认：${error.message.slice(0, 500)}（正在自动核对，不会重复提交）`
           this.store.saveRun(owner, current)
         }
         this.store.saveMessage(owner, resultMessage)
@@ -538,13 +545,10 @@ export class WorkspaceRuntime {
           const index = history.findLastIndex(
             (m: any) => m.role === 'user' && String(m.content ?? m.text).includes(marker),
           )
-          const answer =
-            index >= 0
-              ? history
-                  .slice(index + 1)
-                  .filter((m: any) => m.role === 'assistant' && (m.content || m.text))
-                  .at(-1)
-              : undefined
+          const after = index >= 0 ? history.slice(index + 1) : []
+          const nextUser = after.findIndex((m: any) => m.role === 'user')
+          const answer = (nextUser >= 0 ? after.slice(0, nextUser) : after)
+            .filter((m: any) => m.role === 'assistant' && (m.content || m.text)).at(-1)
           if (!answer) throw new Error('无法确认本轮是否执行完成，请检查后停止此轮')
           resultMessage.content = String(answer.content ?? answer.text)
           finish()
@@ -591,10 +595,16 @@ export class WorkspaceRuntime {
                 .join('\n\n')
             : trigger.content
         submitted = true
-        await gateway.rpc('prompt.submit', {
-          session_id: runtimeId,
-          text: `${rules}\n\n${text}\n${attachmentRefs.join('\n')}`,
-        })
+        try {
+          await gateway.rpc('prompt.submit', {
+            session_id: runtimeId,
+            text: `${rules}\n\n${text}\n${attachmentRefs.join('\n')}`,
+          })
+        } catch (error) {
+          // A JSON-RPC error is a definitive rejection, not a lost receipt.
+          if (error instanceof HttpError && error.code === 'gateway_rejected') submitted = false
+          throw error
+        }
       }
       return await completion
     } catch (error) {
@@ -672,10 +682,30 @@ export class WorkspaceRuntime {
       this.store.event(owner, 'interaction.changed', i, i.conversationId)
     }
   }
+  private scheduleReconcile(owner: string, id: string): void {
+    if (this.closing || !this.userActive(owner) || this.recoveryTimers.has(id)) return
+    const run = this.store.get<Run>(owner, 'run', id)
+    if (run?.status !== 'uncertain' || !run.currentMessageId || !run.queue.length) {
+      this.recoveryAttempts.delete(id)
+      return
+    }
+    const attempt = this.recoveryAttempts.get(id) ?? 0
+    this.recoveryAttempts.set(id, attempt + 1)
+    const timer = setTimeout(() => {
+      this.recoveryTimers.delete(id)
+      if (this.executing.has(id)) { this.scheduleReconcile(owner, id); return }
+      void this.reconcile(owner, id).catch(() => {})
+    }, Math.min(30_000, 500 * 2 ** Math.min(attempt, 6)))
+    timer.unref()
+    this.recoveryTimers.set(id, timer)
+  }
   async reconcile(owner: string, id: string): Promise<void> {
-    if (this.executing.has(id) || this.closing) return
+    if (this.executing.has(id) || this.closing || !this.userActive(owner)) return
     const run = this.store.require<Run>(owner, 'run', id)
     if (run.status !== 'uncertain' || !run.currentMessageId || !run.queue.length) return
+    const timer = this.recoveryTimers.get(id)
+    if (timer) clearTimeout(timer)
+    this.recoveryTimers.delete(id)
     this.executing.add(id)
     try {
       const agent = this.store.require<Agent>(owner, 'agent', run.queue[0]!),
@@ -684,11 +714,15 @@ export class WorkspaceRuntime {
       this.advance(owner, id, agent.id, message)
     } finally {
       this.executing.delete(id)
+      this.scheduleReconcile(owner, id)
     }
     await this.execute(owner, id)
   }
   close(): void {
     this.closing = true
+    for (const timer of this.recoveryTimers.values()) clearTimeout(timer)
+    this.recoveryTimers.clear()
+    this.recoveryAttempts.clear()
     for (const t of this.live.values()) {
       t.gateway.close()
       t.done(new Error('服务关闭'))

@@ -258,8 +258,8 @@ function updateMenu() {
     return
   }
   if (props.mode === 'group' && props.mentionOptions.length) {
-    const match = before.match(/(?:^|\s)@([^\s@]*)$/u)
-    if (match && !/https?:\/\/\S*$/u.test(before) && !/\S+@\S*$/u.test(before)) {
+    const match = before.match(/(?<![A-Za-z0-9_.%+/@-])@([^\s@]*)$/u)
+    if (match && !/https?:\/\/\S*$/u.test(before)) {
       menuKind.value = 'mention'
       menuQuery.value = match[1] ?? ''
       menuIndex.value = 0
@@ -281,8 +281,8 @@ function selectOption(option: ComposerOption) {
     text.value = replacement + after
     nextTick(() => el.setSelectionRange(replacement.length, replacement.length))
   } else {
-    const match = before.match(/(?:^|\s)@([^\s@]*)$/u)
-    const start = match ? cursor - match[0].trimStart().length : cursor
+    const match = before.match(/(?<![A-Za-z0-9_.%+/@-])@([^\s@]*)$/u)
+    const start = match ? cursor - match[0].length : cursor
     const prefix = text.value.slice(0, start)
     const replacement = `@${option.label} `
     text.value = prefix + replacement + after

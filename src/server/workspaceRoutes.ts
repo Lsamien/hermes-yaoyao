@@ -72,7 +72,7 @@ export function workspaceRouter(
     ctx.body = await nodes.sources(owner(ctx))
   })
   router.get('/api/app/agents', (ctx) => {
-    ctx.body = { agents: store.list<WorkspaceAgent>(owner(ctx), 'agent') }
+    ctx.body = { agents: store.list<WorkspaceAgent>(owner(ctx), 'agent').map(agent => store.agentSummary(agent)) }
   })
   router.post('/api/app/agents', async (ctx) => {
     const user = owner(ctx),
@@ -80,11 +80,11 @@ export function workspaceRouter(
       sources = await nodes.sources(user)
     if (!sources.sources.some((s) => s.nodeId === input.nodeId && s.profile === input.profile))
       throw new HttpError(409, '基础 Agent 当前不可用', 'source_unavailable')
-    ctx.body = { agent: store.createAgent(user, input) }
+    ctx.body = { agent: store.agentSummary(store.createAgent(user, input)) }
     ctx.status = 201
   })
   router.patch('/api/app/agents/:id', (ctx) => {
-    ctx.body = { agent: store.updateAgent(owner(ctx), ctx.params.id, body(ctx)) }
+    ctx.body = { agent: store.agentSummary(store.updateAgent(owner(ctx), ctx.params.id, body(ctx))) }
   })
   router.get('/api/app/conversations', (ctx) => {
     const user = owner(ctx)
@@ -116,7 +116,7 @@ export function workspaceRouter(
     const user = owner(ctx),
       conversation = store.require<WorkspaceConversation>(user, 'conversation', ctx.params.id)
     ctx.body = {
-      conversation,
+      conversation: store.conversationSummary(user, conversation),
       messages: store.messages(user, conversation.id),
       run: conversation.activeRunId
         ? store.require<WorkspaceRun>(user, 'run', conversation.activeRunId)

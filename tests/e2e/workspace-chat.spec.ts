@@ -13,6 +13,8 @@ async function createAgent(page: Page, name: string) {
   await dialog
     .getByRole('textbox', { name: '角色提示词与规则', exact: true })
     .fill(`你是${name}，每次回复给出验收证据。`)
+  await dialog.getByRole('button', { name: `使用颜色 ${name === '产品经理' ? '#e78531' : '#0ea5c6'}`, exact: true }).click()
+  await dialog.locator('.mascot-grid--shape button').filter({ hasText: name === '产品经理' ? '圆形' : '小三角' }).first().click()
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByRole('heading', { name, exact: true })).toBeVisible()
 }
@@ -51,6 +53,17 @@ test('created roles and immutable teams share a durable chat list without plugin
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByRole('heading', { name: '产品开发团队', exact: true })).toBeVisible()
   await expect(page.locator('.desktop-sidebar .sidebar-item')).toHaveCount(3)
+  // Every cluster portrait must be the same portrait shown in that member's direct chat.
+  const groupRow = page.locator('.desktop-sidebar .sidebar-item').filter({ hasText: '产品开发团队' })
+  await expect(groupRow.locator('.team-avatar__member')).toHaveCount(2)
+  for (const name of ['产品经理', '开发工程师']) {
+    const portrait = `.agent-avatar[aria-label="${name} 的头像"]`
+    const direct = page.locator('.desktop-sidebar .sidebar-item').filter({ hasText: name }).filter({ hasNot: page.locator('.team-avatar') }).locator(portrait)
+    const member = groupRow.locator(portrait)
+    await expect(member.locator('stop[offset="0.5"]')).toHaveAttribute('stop-color', await direct.locator('stop[offset="0.5"]').getAttribute('stop-color') || '')
+    expect(await member.locator('.agent-avatar__body > :first-child').evaluate(el => el.tagName))
+      .toBe(await direct.locator('.agent-avatar__body > :first-child').evaluate(el => el.tagName))
+  }
   await expect(page.locator('.desktop-sidebar')).not.toContainText('话题')
   await expect(page.locator('.desktop-sidebar .sidebar-account-switcher')).not.toContainText(
     '通用助手',
@@ -59,9 +72,10 @@ test('created roles and immutable teams share a durable chat list without plugin
   await expect(dialog.getByRole('checkbox', { name: '产品经理', exact: true })).toBeDisabled()
   await expect(dialog.getByRole('checkbox', { name: '开发工程师', exact: true })).toBeDisabled()
   await dialog.getByRole('button', { name: '取消', exact: true }).click()
-  await page.getByPlaceholder('输入消息，Enter 发送，Shift + Enter 换行').fill('@开发工程师 给出实现结果')
+  await page.getByPlaceholder('输入消息，Enter 发送，Shift + Enter 换行').fill('请@开发工程师给出实现结果')
   await page.getByRole('button', { name: '发送消息', exact: true }).click()
   await expect(page.locator('.message--assistant')).toHaveCount(2)
+  await expect(page.locator('.message--assistant').first()).toContainText('我是开发工程师')
   await expect(page.locator('.run-status')).toHaveCount(0)
   const second = await context.newPage()
   await second.goto(page.url())
