@@ -20,17 +20,18 @@ const SettingsCenterDialogStub = defineComponent({
   template: '<div v-if="open" data-testid="settings-center" :data-page="initialPage"><button data-testid="close-settings" type="button" @click="$emit(\'close\')">close</button></div>',
 })
 
-async function mountShell() {
+async function mountShell(start = '/chat') {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
       { path: '/chat', component: { template: '<div></div>' } },
+      { path: '/conversations', component: { template: '<div></div>' } },
       { path: '/groups', component: { template: '<div></div>' } },
       { path: '/kanban', component: { template: '<div></div>' } },
       { path: '/files', component: { template: '<div></div>' } },
     ],
   })
-  await router.push('/chat')
+  await router.push(start)
   await router.isReady()
   return mount(WorkspaceShell, {
     attachTo: document.body,
@@ -130,4 +131,24 @@ describe('Workspace shell account controls', () => {
 
     wrapper.unmount()
   })
+})
+
+it('keeps the conversation sidebar focused with a two-item create menu and modal search while collapsed', async () => {
+  const wrapper = await mountShell('/conversations')
+  const rail = wrapper.get('.desktop-sidebar')
+  expect(rail.find('.sidebar-feature-nav').exists()).toBe(false)
+  expect(rail.find('.sidebar-primary-action').exists()).toBe(false)
+  expect(rail.find('.sidebar-footer').exists()).toBe(true)
+  await rail.get('.sidebar-create-trigger').trigger('click')
+  const items = document.querySelectorAll<HTMLButtonElement>('.workspace-create-menu [role="menuitem"]')
+  expect([...items].map(item => item.textContent?.trim())).toEqual(['新建 Bot', '新建群聊'])
+  items[0]?.click()
+  await wrapper.vm.$nextTick()
+  expect(wrapper.emitted('createAgent')).toHaveLength(1)
+  await rail.get('.sidebar-collapse').trigger('click')
+  await rail.get('.sidebar-search-trigger').trigger('click')
+  expect(wrapper.classes()).toContain('workspace-shell--collapsed')
+  document.dispatchEvent(new CustomEvent('hermes-yaoyao:sidebar-search-close'))
+  await wrapper.vm.$nextTick()
+  wrapper.unmount()
 })

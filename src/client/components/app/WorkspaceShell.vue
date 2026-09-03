@@ -83,6 +83,8 @@ const emit = defineEmits<{
   selectProfile: [profile: string]
   saveIdentity: [input: ProfileIdentityInput]
   closeInspector: []
+  createAgent: []
+  createGroup: []
 }>()
 
 const route = useRoute()
@@ -97,6 +99,10 @@ const mobileDrawerClose = ref<HTMLButtonElement>()
 const profileMenuTrigger = ref<HTMLButtonElement>()
 const sidebarCollapsed = ref(false)
 const sidebarSearchOpen = ref(false)
+const createMenuOpen = ref(false)
+const createMenu = ref<HTMLElement | null>(null)
+let createTrigger: HTMLElement | null = null
+const createPosition = ref({ left: '8px', top: '58px' })
 const desktopSidebarContext = ref<HTMLElement | null>(null)
 const mobileSidebarContext = ref<HTMLElement | null>(null)
 
@@ -149,6 +155,40 @@ function closeMobileDrawer() {
 function closeMenus(event: MouseEvent) {
   const target = event.target as HTMLElement
   if (!target.closest('.sidebar-account-switcher')) profileMenuOpen.value = false
+  if (!target.closest('.workspace-create-menu, .sidebar-create-trigger')) createMenuOpen.value = false
+}
+function closeCreateMenu() {
+  createMenuOpen.value = false
+  void nextTick(() => { if (createTrigger?.isConnected) createTrigger.focus() })
+}
+async function openCreateMenu(event: Event) {
+  if (createMenuOpen.value) { closeCreateMenu(); return }
+  createTrigger = event.currentTarget as HTMLElement
+  const rect = createTrigger.getBoundingClientRect()
+  createPosition.value = { left: `${Math.max(8, Math.min(rect.left, window.innerWidth - 192))}px`, top: `${Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - 96))}px` }
+  profileMenuOpen.value = false
+  createMenuOpen.value = true
+  await nextTick()
+  createMenu.value?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+}
+function chooseCreate(kind: 'agent' | 'group') {
+  closeCreateMenu()
+  mobileDrawerOpen.value = false
+  if (kind === 'agent') emit('createAgent')
+  else emit('createGroup')
+}
+function createMenuKeydown(event: KeyboardEvent) {
+  if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const buttons = [...(createMenu.value?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])]
+  const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+  buttons[event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length]?.focus()
+}
+function workspaceKeydown(event: KeyboardEvent) {
+  if (!applicationWorkspace.value || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k' || settingsOpen.value || document.querySelector('dialog[open]')) return
+  event.preventDefault()
+  if (sidebarSearchOpen.value) document.dispatchEvent(new CustomEvent(SIDEBAR_SEARCH_CLOSE_EVENT))
+  else void openSidebarSearch(null)
 }
 
 function toggleProfileMenu(event: MouseEvent) {
@@ -207,6 +247,7 @@ function closeSettings() {
 }
 
 function toggleSidebar() {
+  createMenuOpen.value = false
   sidebarCollapsed.value = !sidebarCollapsed.value
   try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0') } catch { /* optional persistence */ }
 }
@@ -216,6 +257,12 @@ function navIcon(key: NavItem['key']): 'chat' | 'folder' | 'people' | 'board' {
 }
 
 async function openSidebarSearch(host: HTMLElement | null) {
+  if (applicationWorkspace.value) {
+    createMenuOpen.value = false
+    sidebarSearchOpen.value = true
+    document.dispatchEvent(new CustomEvent(SIDEBAR_SEARCH_EVENT, { detail: { section: 'groups' } }))
+    return
+  }
   if (sidebarCollapsed.value) {
     sidebarCollapsed.value = false
     try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, '0') } catch { /* optional persistence */ }
@@ -254,7 +301,7 @@ function handleSidebarFocusout(event: FocusEvent) {
 
 function handleSidebarSearchClosed() { sidebarSearchOpen.value = false }
 
-watch(() => route.fullPath, () => { mobileDrawerOpen.value = false })
+watch(() => route.fullPath, () => { mobileDrawerOpen.value = false; createMenuOpen.value = false })
 watch(() => activeNav.value.key, () => {
   sidebarSearchOpen.value = false
   profileMenuOpen.value = false
@@ -264,15 +311,17 @@ onMounted(() => {
   try { sidebarCollapsed.value = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1' } catch { /* optional persistence */ }
   document.addEventListener('mousedown', closeMenus)
   document.addEventListener(SIDEBAR_SEARCH_CLOSE_EVENT, handleSidebarSearchClosed)
+  document.addEventListener('keydown', workspaceKeydown)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', closeMenus)
   document.removeEventListener(SIDEBAR_SEARCH_CLOSE_EVENT, handleSidebarSearchClosed)
+  document.removeEventListener('keydown', workspaceKeydown)
 })
 </script>
 
 <template>
-  <div class="workspace-shell" :class="{ 'workspace-shell--collapsed': sidebarCollapsed, 'workspace-shell--sidebar-focused': sidebarFocusMode }" :inert="settingsOpen">
+  <div class="workspace-shell" :class="{ 'workspace-shell--collapsed': sidebarCollapsed, 'workspace-shell--sidebar-focused': sidebarFocusMode, 'workspace-shell--conversations': applicationWorkspace }" :inert="settingsOpen || (applicationWorkspace && sidebarSearchOpen)">
     <header class="mobile-header" :inert="mobileDrawerOpen">
       <button ref="mobileNavigationTrigger" class="icon-button" type="button" aria-label="打开导航" @click="openMobileDrawer">
         <AppIcon name="menu" :size="20" />
@@ -307,27 +356,29 @@ onBeforeUnmount(() => {
         <AppIcon name="chevron-left" :size="18" />
       </button>
 
+      <button v-if="applicationWorkspace" class="sidebar-create-trigger" type="button" aria-label="新建" title="新建" aria-haspopup="menu" :aria-expanded="createMenuOpen" @click="openCreateMenu" @keydown.down.prevent="openCreateMenu"><AppIcon name="plus" :size="19" /></button>
+
       <button
         v-if="!['files', 'kanban'].includes(activeNav.key)"
         class="sidebar-search-trigger"
-        :class="{ 'sidebar-search-trigger--searching': sidebarSearchOpen }"
+        :class="{ 'sidebar-search-trigger--searching': sidebarSearchOpen && !applicationWorkspace }"
         type="button"
         aria-label="搜索"
         title="搜索"
         :aria-expanded="sidebarSearchOpen"
-        :aria-hidden="sidebarSearchOpen ? 'true' : undefined"
-        :tabindex="sidebarSearchOpen ? -1 : 0"
+        :aria-hidden="sidebarSearchOpen && !applicationWorkspace ? 'true' : undefined"
+        :tabindex="sidebarSearchOpen && !applicationWorkspace ? -1 : 0"
         @click="openSidebarSearch(desktopSidebarContext)"
       >
         <YaoYaoSidebarIcon name="search" />
         <span>搜索</span>
       </button>
 
-      <div v-if="hasPrimaryAction" class="sidebar-primary-action">
+      <div v-if="hasPrimaryAction && !applicationWorkspace" class="sidebar-primary-action">
         <slot name="sidebar-action" />
       </div>
 
-      <nav class="sidebar-feature-nav" aria-label="功能入口">
+      <nav v-if="!applicationWorkspace" class="sidebar-feature-nav" aria-label="功能入口">
         <button
           v-for="item in featureNavItems"
           :key="item.key"
@@ -409,32 +460,32 @@ onBeforeUnmount(() => {
         <button class="sidebar-brand" type="button" aria-label="返回聊天" @click="navigate('/conversations')">
           <BrandMark :size="32" compact />
         </button>
-        <button ref="mobileDrawerClose" class="icon-button" type="button" aria-label="关闭导航" @click="closeMobileDrawer">
+        <div class="mobile-drawer__actions"><button ref="mobileDrawerClose" class="icon-button" type="button" aria-label="关闭导航" @click="closeMobileDrawer">
           <AppIcon name="close" />
-        </button>
+        </button><button v-if="applicationWorkspace" class="sidebar-create-trigger" type="button" aria-label="新建" title="新建" aria-haspopup="menu" :aria-expanded="createMenuOpen" @click="openCreateMenu"><AppIcon name="plus" :size="19" /></button></div>
       </div>
 
       <button
         v-if="!['files', 'kanban'].includes(activeNav.key)"
         class="sidebar-search-trigger"
-        :class="{ 'sidebar-search-trigger--searching': sidebarSearchOpen }"
+        :class="{ 'sidebar-search-trigger--searching': sidebarSearchOpen && !applicationWorkspace }"
         type="button"
         aria-label="搜索"
         title="搜索"
         :aria-expanded="sidebarSearchOpen"
-        :aria-hidden="sidebarSearchOpen ? 'true' : undefined"
-        :tabindex="sidebarSearchOpen ? -1 : 0"
+        :aria-hidden="sidebarSearchOpen && !applicationWorkspace ? 'true' : undefined"
+        :tabindex="sidebarSearchOpen && !applicationWorkspace ? -1 : 0"
         @click="openSidebarSearch(mobileSidebarContext)"
       >
         <AppIcon name="search" :size="18" />
         <span>搜索</span>
       </button>
 
-      <div v-if="hasPrimaryAction" class="sidebar-primary-action">
+      <div v-if="hasPrimaryAction && !applicationWorkspace" class="sidebar-primary-action">
         <slot name="sidebar-action" />
       </div>
 
-      <nav class="sidebar-feature-nav" aria-label="功能入口">
+      <nav v-if="!applicationWorkspace" class="sidebar-feature-nav" aria-label="功能入口">
         <button
           v-for="item in featureNavItems"
           :key="item.key"
@@ -538,6 +589,14 @@ onBeforeUnmount(() => {
       @save-identity="emit('saveIdentity', $event)"
       @set-theme="emit('setTheme', $event)"
     />
+    <Teleport to="body">
+      <div v-if="createMenuOpen" class="workspace-create-dismiss" @pointerdown.self="closeCreateMenu" @keydown.esc.prevent.stop="closeCreateMenu">
+        <div ref="createMenu" class="workspace-create-menu" :style="createPosition" role="menu" aria-label="新建聊天" @keydown="createMenuKeydown">
+          <button type="button" role="menuitem" @click="chooseCreate('agent')"><AppIcon name="users" :size="17" />新建 Bot</button>
+          <button type="button" role="menuitem" @click="chooseCreate('group')"><AppIcon name="groups" :size="17" />新建群聊</button>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -669,7 +728,7 @@ onBeforeUnmount(() => {
 .sidebar-context__body :deep(.sidebar-item.sidebar-item--single-line) { min-height: 31px; padding: 1px 7px; }
 .sidebar-context__body :deep(.sidebar-item--single-line .sidebar-item__row strong) { font-size: 14px; font-weight: 400; }
 .sidebar-context__body :deep(.sidebar-item__icon) { width: 25px; height: 25px; flex-basis: 25px; border: 0; border-radius: 7px; background: transparent; }
-.sidebar-context__body :deep(.sidebar-item__icon--avatar) { background: var(--surface-soft); color: var(--text-secondary); }
+.sidebar-context__body :deep(.sidebar-item__icon--avatar) { background: transparent; color: var(--text-secondary); }
 .sidebar-context__body :deep(.sidebar-item__row strong) { font-size: 13px; }
 .sidebar-context__body :deep(.sidebar-item.sidebar-item--topic .sidebar-item__row strong) { font-size: 14px; font-weight: 450; }
 .sidebar-context__body :deep(.library-sidebar) { padding-top: 1px; }
@@ -690,7 +749,7 @@ onBeforeUnmount(() => {
 .sidebar-settings-trigger { display: grid; width: 38px; min-width: 38px; height: 38px; flex: 0 0 38px; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .sidebar-settings-trigger:hover { background: var(--surface-soft); color: var(--text-primary); }
 .sidebar-settings-trigger:focus-visible { outline: 0; box-shadow: inset 0 0 0 1px var(--line-strong), 0 0 0 3px var(--focus-ring); }
-.sidebar-account__avatar { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border-radius: 50%; background: #c91e55; color: #fff; font-size: 13px; font-weight: 700; }
+.sidebar-account__avatar { display: grid; width: 30px; height: 30px; flex: 0 0 30px; place-items: center; border-radius: 50%; background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 700; }
 .sidebar-account-switcher__chevron { flex: 0 0 auto; color: var(--text-muted); }
 .profile-menu { position: absolute; right: 0; bottom: calc(100% + 6px); left: 0; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); box-shadow: var(--shadow-float); }
 .profile-menu__heading { display: block; padding: 8px 8px 5px; color: var(--text-muted); font-size: 11px; font-weight: 650; }
@@ -757,4 +816,14 @@ onBeforeUnmount(() => {
 
 .drawer-fade-enter-active, .drawer-fade-leave-active { transition: opacity 160ms ease; }
 .drawer-fade-enter-from, .drawer-fade-leave-to { opacity: 0; }
+.sidebar-create-trigger{display:grid;width:34px;height:34px;flex:0 0 34px;place-items:center;padding:0;border:0;border-radius:9px;background:transparent;color:var(--text-muted);cursor:pointer}
+.sidebar-create-trigger:hover,.sidebar-create-trigger[aria-expanded="true"]{background:var(--surface-hover);color:var(--text-primary)}
+.workspace-shell--conversations .desktop-sidebar:not(.desktop-sidebar--collapsed) .sidebar-collapse{right:49px}
+.desktop-sidebar > .sidebar-create-trigger{position:absolute;top:12px;right:11px}
+.desktop-sidebar--collapsed > .sidebar-create-trigger{position:static;width:42px;height:36px;flex-basis:36px;align-self:center;margin:0 auto 4px}
+.mobile-drawer__actions{display:flex;align-items:center;gap:4px}
+.workspace-create-dismiss{position:fixed;inset:0;z-index:80}
+.workspace-create-menu{position:absolute;width:180px;padding:5px;border:1px solid var(--line);border-radius:11px;background:var(--surface-raised);box-shadow:var(--shadow-float)}
+.workspace-create-menu button{display:flex;width:100%;min-height:36px;align-items:center;gap:9px;padding:7px 10px;border:0;border-radius:7px;background:transparent;color:var(--text-primary);font:13px var(--font-ui);text-align:left;cursor:pointer}
+.workspace-create-menu button:hover,.workspace-create-menu button:focus-visible{outline:0;background:var(--surface-hover)}
 </style>

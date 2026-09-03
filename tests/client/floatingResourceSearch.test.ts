@@ -69,3 +69,30 @@ describe('FloatingResourceSearch', () => {
     wrapper.unmount()
   })
 })
+
+it('keeps the query across archived categories and renders direct Agent portraits rather than a group cluster', async () => {
+  const trigger = document.createElement('button')
+  document.body.append(trigger); trigger.focus()
+  const wrapper = mount(FloatingResourceSearch, { attachTo: document.body, props: {
+    section: 'groups', label: '搜索聊天', tabbed: true,
+    items: [
+      {id:'open',title:'未归档',children:[{id:'a',title:'测试角色',avatarKind:'agent',avatar:'yaoyao-mascot:v1:circle:e78531:friendly'}]},
+      {id:'archive',title:'已归档',children:[{id:'b',title:'测试归档',avatarKind:'agent',avatar:'yaoyao-mascot:v1:square:377fe6:friendly'}]},
+    ],
+  } })
+  document.dispatchEvent(new CustomEvent('hermes-yaoyao:sidebar-search', {detail:{section:'groups'}}))
+  await wrapper.vm.$nextTick()
+  const input = document.querySelector<HTMLInputElement>('[role="dialog"] input')!
+  input.value = '测试'; input.dispatchEvent(new Event('input', {bubbles:true}))
+  await wrapper.vm.$nextTick()
+  document.querySelector<HTMLButtonElement>('[role="tab"][aria-label="已归档"]')!.click()
+  await wrapper.vm.$nextTick()
+  expect(input.value).toBe('测试')
+  expect(document.querySelector('[role="option"]')?.textContent).toContain('测试归档')
+  expect(document.querySelector('[role="dialog"] .agent-avatar')).not.toBeNull()
+  expect(document.querySelector('[role="dialog"] .team-avatar')).toBeNull()
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭搜索"]')!.click()
+  await wrapper.vm.$nextTick()
+  expect(document.activeElement).toBe(trigger)
+  wrapper.unmount()
+})

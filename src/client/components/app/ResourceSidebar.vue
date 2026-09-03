@@ -215,7 +215,7 @@ defineExpose({ focusSearch })
 .sidebar-item__expand { display: grid; width: 18px; height: 24px; flex: 0 0 18px; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); cursor: pointer; }.sidebar-item__expand:hover, .sidebar-item__expand:focus-visible { outline: 0; background: var(--surface-hover); color: var(--text-primary); }.sidebar-item__expand :deep(.app-icon) { transition: transform 120ms ease; }.sidebar-item__expand--collapsed :deep(.app-icon) { transform: rotate(-90deg); }
 .sidebar-item__icon { position: relative; display: grid; place-items: center; width: 23px; height: 23px; flex: 0 0 23px; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; }
 .sidebar-item.active .sidebar-item__icon, .sidebar-item:hover .sidebar-item__icon { color: var(--text-secondary); }
-.sidebar-item__icon--avatar { background: var(--surface-hover); color: var(--text-secondary); font-size: 10px; font-weight: 700; }
+.sidebar-item__icon--avatar { background: transparent; color: var(--text-secondary); font-size: 10px; font-weight: 700; }
 .presence { position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; border: 2px solid var(--surface); border-radius: 50%; background: var(--text-muted); }
 .presence--online { background: var(--success); }.presence--working { background: var(--warning); }.presence--offline { background: var(--text-muted); }
 .sidebar-item__copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 1px; }

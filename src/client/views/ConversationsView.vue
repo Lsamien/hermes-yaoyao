@@ -3,7 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router'
 import WorkspaceShell from '@/components/app/WorkspaceShell.vue'
 import ConversationList from '@/components/workspace/ConversationList.vue'
-import WorkspaceNodesPanel from '@/components/workspace/WorkspaceNodesPanel.vue'
+import FloatingResourceSearch from '@/components/app/FloatingResourceSearch.vue'
+import type { SidebarItem } from '@/components/app/types'
 import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import { createUuid } from '@/utils/id'
 import MessageTimeline from '@/components/messages/MessageTimeline.vue'
@@ -20,7 +21,7 @@ import TeamPresetPicker from '@/components/workspace/TeamPresetPicker.vue'
 import { TEAM_PRESETS, type TeamPreset } from '@/components/groups/teamPresets'
 import type { WorkspaceMemberRole } from '@shared/workspace'
 import AppIcon from '@/components/common/AppIcon.vue'
-import { workspaceAvatarMembers, workspaceAvatarState, workspaceMessagesToUi } from '@/components/workspace/viewModels'
+import { workspaceAvatarMembers, workspaceAvatarState, workspaceConversationItem, workspaceMessagesToUi } from '@/components/workspace/viewModels'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 import { apiRequest } from '@/api/client'
@@ -54,7 +55,10 @@ const text = ref(''),
   files = ref<WorkspaceFile[]>([]),
   mentions = ref<string[]>([]),
   older = ref(true)
-const showNodes = ref(false)
+const searchItems = computed<SidebarItem[]>(() => [false, true].map(archived => {
+  const items = conversations.value.filter(c => c.archived === archived).map(c => workspaceConversationItem(c, agents.value))
+  return { id: archived ? 'archived' : 'unarchived', title: archived ? '已归档' : '未归档', children: items, emptyText: archived ? '没有已归档聊天' : '没有未归档聊天' }
+}))
 const composer = ref<InstanceType<typeof ComposerShell>>()
 const timeline = ref<InstanceType<typeof MessageTimeline>>()
 const quoted = ref<UiMessage | null>(null)
@@ -500,14 +504,9 @@ onBeforeUnmount(() => {
     @select-profile="auth.selectProfile"
     @toggle-theme="theme.toggle"
     @set-theme="theme.setTheme"
+    @create-agent="openDialog('agent')"
+    @create-group="openDialog('group')"
   >
-    <template #sidebar-action
-      ><div class="new-actions">
-        <button @click="openDialog('agent')">＋ 创建 Agent</button
-        ><button @click="openDialog('group')">＋ 创建群聊</button
-        ><button @click="showNodes = true">节点</button>
-      </div></template
-    >
     <template #sidebar
       ><ConversationList :conversations="conversations" :agents="agents" :selected="selected" @select="select" @pin="action('pin', $event)" @archive="action('archive', $event)"
     /></template>
@@ -543,17 +542,9 @@ onBeforeUnmount(() => {
         :mention-options="active.kind === 'group' ? members.map(a => ({id:a.id,label:a.name,insertText:`@${a.name} `})) : []"
         @send="sendFromComposer" @stop="control('stop')" @tool-trace-toggle="showThinking = !showThinking" @clear-reference="quoted = null" @error="error = $event" />
     </section>
+    <FloatingResourceSearch section="groups" label="搜索聊天" :items="searchItems" tabbed @select="select" />
     <PreviewModal v-if="preview" :item="preview" :items="media" @close="preview = null" />
     <ImagePreviewLightbox v-model="mediaIndex" :images="lightboxMedia" />
-    <div
-      v-if="showNodes"
-      class="nodes-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label="节点管理"
-    >
-      <div><button @click="showNodes = false">关闭</button><WorkspaceNodesPanel /></div>
-    </div>
     <dialog v-if="dialog" ref="dialogElement" class="editor" @cancel.prevent="closeDialog">
       <form @submit.prevent="save">
         <header>
