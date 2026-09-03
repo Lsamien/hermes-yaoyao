@@ -583,6 +583,12 @@ export class WorkspaceRuntime {
         const members = run.turnConfiguration!.members
         const rules = [
           `你是 ${agent.name}。以下是用户为这个独立 Agent 配置的角色与规则（版本 ${agent.revision}）：\n${agent.instructions}`,
+          c.kind === 'group' && Object.keys(c.memberRoles ?? {}).length
+            ? `本群角色分工（仅在本群生效）：\n${members.flatMap(member => {
+                const role = c.memberRoles?.[member.id]
+                return role ? [`@${member.name}：${role.name}；${role.description}`] : []
+              }).join('\n')}\n协作时使用上面的真实成员名称进行 @，不要使用职责名称代替成员名称。`
+            : '',
           c.kind === 'group'
             ? `你正在群聊「${c.name}」发言。群成员：${members.map((a) => `@${a.name} (id=${a.id})`).join('、')}。\n群规则：${c.instructions}\n${c.mode === 'host' ? (agent.id === c.administratorId ? '你是管理员。必要时用精确 @成员名称 委派工作；收到结果后复核并给用户结论。任务完成时不要继续 @。' : '执行当前委派任务。公开给出结果，由管理员复核；不要安排其他成员。') : '按自己的职责回复，只在需要协作时 @成员。不要重复已完成的工作。'}`
             : '',

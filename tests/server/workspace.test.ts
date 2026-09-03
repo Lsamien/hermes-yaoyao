@@ -365,6 +365,25 @@ describe('Web-owned workspace', () => {
     expect(requests.filter((r) => r.method === 'prompt.submit')).toHaveLength(1)
     expect(store.messages(owner, c.id).map((m) => m.role)).toEqual(['user', 'assistant'])
   })
+  it('keeps template responsibilities inside their group and follows Agent identity after rename', async () => {
+    const a = agent('现有甲'), b = agent('现有乙')
+    const before = store.require<WorkspaceAgent>(owner, 'agent', a.id)
+    const c = store.createGroup(owner, { name: '模板群', memberIds: [a.id, b.id], administratorId: a.id, memberRoles: {
+      [a.id]: { name: '调研负责人', description: '汇总可信结论' },
+      [b.id]: { name: '事实核验', description: '交叉验证来源' },
+    } })
+    expect(store.require<WorkspaceAgent>(owner, 'agent', a.id)).toEqual(before)
+    store.updateAgent(owner, a.id, { name: '改名后的甲' })
+    await finished(runtime.send(owner, c.id, { requestId: randomUUID(), content: '开始调研' }).id)
+    const groupPrompt = requests.filter(r => r.method === 'prompt.submit').at(-1)!.params.text
+    expect(groupPrompt).toContain('@改名后的甲：调研负责人；汇总可信结论')
+    expect(groupPrompt).toContain('@现有乙：事实核验；交叉验证来源')
+    await finished(runtime.send(owner, direct(a.id).id, { requestId: randomUUID(), content: '单聊' }).id)
+    expect(requests.filter(r => r.method === 'prompt.submit').at(-1)!.params.text).not.toContain('汇总可信结论')
+    const changed = store.updateConversation(owner, c.id, { memberIds: [a.id] })
+    expect(changed.memberRoles).toEqual({ [a.id]: { name: '调研负责人', description: '汇总可信结论' } })
+    expect(() => store.updateConversation(owner, c.id, { memberRoles: { [b.id]: { name: '已移除', description: '' } } })).toThrow('群成员或管理员无效')
+  })
   it('isolates roles over the same profile and applies edited rules on the next turn', async () => {
     const a = agent('编辑'),
       b = agent('审查'),

@@ -16,6 +16,9 @@ import type { UiLibraryItem } from '@/components/library/types'
 import type { UiMessage } from '@/components/messages/types'
 import AgentIdentityPanel from '@/components/app/AgentIdentityPanel.vue'
 import TeamAvatar from '@/components/common/TeamAvatar.vue'
+import TeamPresetPicker from '@/components/workspace/TeamPresetPicker.vue'
+import { TEAM_PRESETS, type TeamPreset } from '@/components/groups/teamPresets'
+import type { WorkspaceMemberRole } from '@shared/workspace'
 import AppIcon from '@/components/common/AppIcon.vue'
 import { workspaceAvatarMembers, workspaceAvatarState, workspaceMessagesToUi } from '@/components/workspace/viewModels'
 import { useAuthStore } from '@/stores/auth'
@@ -101,11 +104,36 @@ const form = reactive({
   instructions: '',
   source: '',
   memberIds: [] as string[],
+  memberRoles: {} as Record<string, WorkspaceMemberRole>,
   administratorId: '',
   mode: 'host' as 'host' | 'free',
   autoReplyIds: [] as string[],
   maxReplyRounds: 3,
 })
+const selectedPresetId = ref('custom')
+const selectedPreset = computed(() => dialog.value === 'group' ? TEAM_PRESETS.find(p => p.id === selectedPresetId.value) : undefined)
+function applyPresetRoles(preset: TeamPreset) {
+  form.memberRoles = Object.fromEntries(preset.roles.flatMap((role, index) => {
+    const id = form.memberIds[index]
+    return id ? [[id, { name: role.name, description: role.description }]] : []
+  }))
+  form.administratorId = form.memberIds[Math.max(0, preset.roles.findIndex(role => role.host))] ?? ''
+}
+function choosePreset(preset?: TeamPreset) {
+  const available = agents.value.filter(a => !a.archived)
+  if (preset && available.length < preset.roles.length) return
+  selectedPresetId.value = preset?.id ?? 'custom'
+  Object.assign(form, { name: preset?.name ?? '', instructions: preset?.instructions ?? '', memberIds: preset ? available.slice(0, preset.roles.length).map(a => a.id) : [], memberRoles: {}, administratorId: '', mode: 'host', autoReplyIds: [], maxReplyRounds: 3 })
+  if (preset) applyPresetRoles(preset)
+}
+function assignPresetRole(index: number, id: string) {
+  if (!selectedPreset.value) return
+  const next = [...form.memberIds], previous = next[index], occupied = next.indexOf(id)
+  next[index] = id
+  if (occupied >= 0 && occupied !== index && previous) next[occupied] = previous
+  form.memberIds = next
+  applyPresetRoles(selectedPreset.value)
+}
 const answers = reactive<Record<string, string>>({})
 let cursor = 0,
   disposed = false,
@@ -212,12 +240,14 @@ async function openDialog(kind: NonNullable<typeof dialog.value>) {
   error.value = ''
   dialog.value = kind
   editingId.value = ''
+  selectedPresetId.value = 'custom'
   Object.assign(form, {
     name: '',
     avatar: '',
     instructions: '',
     source: '',
     memberIds: [],
+    memberRoles: {},
     administratorId: '',
     mode: 'host',
     autoReplyIds: [],
@@ -240,6 +270,7 @@ async function openDialog(kind: NonNullable<typeof dialog.value>) {
       Object.assign(form, active.value, {
         memberIds: [...active.value.memberIds],
         autoReplyIds: [...active.value.autoReplyIds],
+        memberRoles: Object.fromEntries(Object.entries(active.value.memberRoles ?? {}).map(([id, role]) => [id, { ...role }])),
       })
     }
     await nextTick()
@@ -258,6 +289,7 @@ watch(
   (ids) => {
     if (!ids.includes(form.administratorId)) form.administratorId = ids[0] ?? ''
     form.autoReplyIds = form.autoReplyIds.filter((id) => ids.includes(id))
+    form.memberRoles = Object.fromEntries(Object.entries(form.memberRoles).filter(([id]) => ids.includes(id)))
   },
 )
 async function save() {
@@ -286,6 +318,7 @@ async function save() {
         autoReplyIds: form.autoReplyIds,
         maxReplyRounds: form.maxReplyRounds,
         memberIds: form.memberIds,
+        memberRoles: form.memberRoles,
       }
       const result = await apiRequest<{ conversation: Conversation }>(
         dialog.value === 'group'
@@ -521,6 +554,7 @@ onBeforeUnmount(() => {
           <button type="button" aria-label="关闭" @click="closeDialog">×</button>
         </header>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <TeamPresetPicker v-if="dialog === 'group'" :selected="selectedPresetId" :available="agents.filter(a => !a.archived).length" @select="choosePreset" />
         <label>名称<input v-model="form.name" required maxlength="100" /></label>
         <AgentIdentityPanel v-if="isAgentDialog" :key="`${dialog}:${editingId}`" :profile="avatarProfile" embedded :show-name="false" :show-default-model="false" :show-actions="false" @avatar-change="form.avatar = $event" />
         <div v-else class="team-avatar-settings">
@@ -553,7 +587,18 @@ onBeforeUnmount(() => {
             "
           />
         </label>
-        <fieldset v-if="!isAgentDialog">
+        <fieldset v-if="selectedPreset" class="preset-role-mapping">
+          <legend>角色分配</legend>
+          <label v-for="(role, index) in selectedPreset.roles" :key="role.name">
+            {{ role.name }}{{ role.host ? ' · 管理员' : '' }}
+            <select :value="form.memberIds[index]" :aria-label="`${role.name}对应的 Agent`" @change="assignPresetRole(index, ($event.target as HTMLSelectElement).value)">
+              <option v-for="a in agents.filter(a => !a.archived)" :key="a.id" :value="a.id">{{ a.name }}</option>
+            </select>
+            <small>{{ role.description }}</small>
+          </label>
+          <small>角色分工仅在本群生效，聊天中保留 Agent 的名称和头像。</small>
+        </fieldset>
+        <fieldset v-else-if="!isAgentDialog">
           <legend>选择成员</legend>
           <label
             v-for="a in agents.filter((a) =>
@@ -570,6 +615,10 @@ onBeforeUnmount(() => {
             >至少需要两个 Agent 才能创建群聊。</small
           >
           <small v-if="dialog === 'editGroup'">可增减成员，最多 8 位。当前管理员不能移除；如需移除，请先更换管理员并保存。</small>
+        </fieldset>
+        <fieldset v-if="dialog === 'editGroup' && Object.keys(form.memberRoles).length">
+          <legend>角色分工</legend>
+          <p v-for="(role, id) in form.memberRoles" :key="id">{{ agents.find(a => a.id === id)?.name }} · {{ role.name }}<br /><small>{{ role.description }}</small></p>
         </fieldset>
         <template v-if="!isAgentDialog"
           ><label

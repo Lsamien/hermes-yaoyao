@@ -11,12 +11,17 @@ export interface WorkspaceAgent {
   createdAt: number
   updatedAt: number
 }
+export interface WorkspaceMemberRole {
+  name: string
+  description: string
+}
 export interface WorkspaceConversation {
   id: string
   kind: 'direct' | 'group'
   name: string
   avatar: string
   memberIds: string[]
+  memberRoles?: Record<string, WorkspaceMemberRole>
   instructions: string
   administratorId: string
   mode: 'host' | 'free'

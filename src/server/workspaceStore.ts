@@ -45,11 +45,16 @@ export const agentPatch = z
     archived: z.boolean().optional(),
   })
   .strict()
+const memberRoles = z.record(z.string().uuid(), z.object({
+  name: z.string().trim().min(1).max(100),
+  description: z.string().max(500),
+}).strict()).refine(value => Object.keys(value).length <= 8, '最多 8 个群内角色')
 export const groupInput = z
   .object({
     name,
     avatar: avatar.default(''),
     memberIds: z.array(z.string().uuid()).min(2).max(8),
+    memberRoles: memberRoles.default({}),
     instructions: z.string().max(24_000).default(''),
     administratorId: z.string().uuid(),
     mode: z.enum(['host', 'free']).default('host'),
@@ -63,6 +68,7 @@ export const conversationPatch = z
     avatar: avatar.optional(),
     instructions: z.string().max(24_000).optional(),
     memberIds: z.array(z.string().uuid()).min(1).max(8).optional(),
+    memberRoles: memberRoles.optional(),
     administratorId: z.string().uuid().optional(),
     mode: z.enum(['host', 'free']).optional(),
     autoReplyIds: z.array(z.string().uuid()).max(8).optional(),
@@ -272,7 +278,8 @@ export class WorkspaceStore {
     if (
       ids.size !== body.memberIds.length ||
       !ids.has(body.administratorId) ||
-      body.autoReplyIds.some((id) => !ids.has(id))
+      body.autoReplyIds.some((id) => !ids.has(id)) ||
+      Object.keys(body.memberRoles).some(id => !ids.has(id))
     )
       throw new HttpError(400, '群成员或管理员无效', 'invalid_members')
     for (const id of ids)
@@ -309,7 +316,8 @@ export class WorkspaceStore {
     if (
       members.size !== memberIds.length ||
       !members.has(patch.administratorId ?? c.administratorId) ||
-      patch.autoReplyIds?.some((a) => !members.has(a) && !c.memberIds.includes(a))
+      patch.autoReplyIds?.some((a) => !members.has(a) && !c.memberIds.includes(a)) ||
+      Object.keys(patch.memberRoles ?? {}).some(a => !members.has(a) && !c.memberIds.includes(a))
     )
       throw new HttpError(400, '群成员或管理员无效', 'invalid_members')
     for (const memberId of memberIds) {
@@ -320,6 +328,7 @@ export class WorkspaceStore {
     const next = {
       ...c, ...patch, memberIds,
       autoReplyIds: (patch.autoReplyIds ?? c.autoReplyIds).filter(a => members.has(a)),
+      memberRoles: Object.fromEntries(Object.entries(patch.memberRoles ?? c.memberRoles ?? {}).filter(([id]) => members.has(id))),
       updatedAt: Date.now(),
     }
     this.atomic(() => {
