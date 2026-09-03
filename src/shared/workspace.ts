@@ -33,10 +33,12 @@ export interface WorkspaceConversation {
   lastSeq: number
   lastMessageAt?: number
   preview: string
+  previewAgentId?: string
   activeRunId?: string
   activeAgentId?: string
   activeRunStatus?: WorkspaceRun['status']
-  activeAgentStates?: Record<string, 'running' | 'waiting' | 'uncertain'>
+  activeAgentStates?: Record<string, 'running' | 'waiting' | 'uncertain' | 'queued'>
+  avatarSignals?: Record<string, { id: string; state: 'success' | 'failure'; at: number }>
   queuedMessageCount?: number
   unreadCount?: number
   createdAt: number

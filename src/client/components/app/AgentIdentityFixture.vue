@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import TeamAvatar from '@/components/common/TeamAvatar.vue'
+import { defaultAgentIdentity, encodeAgentAvatar, type AgentMascotShape } from '@shared/agentIdentity'
+const avatar = (shape: AgentMascotShape) => encodeAgentAvatar({...defaultAgentIdentity('preview'), shape})
 
 const shapes = [
-  { name: '圆圆', avatar: 'yaoyao-mascot:v1:circle:0ea5c6:friendly' },
-  { name: '方方', avatar: 'yaoyao-mascot:v1:square:8057c8:friendly' },
-  { name: '小三角', avatar: 'yaoyao-mascot:v1:triangle:009957:curious' },
+  { name: '圆圆', avatar: avatar('circle') },
+  { name: '方方', avatar: avatar('square') },
+  { name: '小三角', avatar: avatar('triangle') },
 ] as const
 
 const states = [
-  { name: '工作中', detail: '状态驱动的眼睛和身体动作', avatar: 'yaoyao-mascot:v1:triangle:377fe6:focused', state: 'working' },
-  { name: '有新消息', detail: '头像弹跳并提醒', avatar: 'yaoyao-mascot:v1:triangle:d94b52:curious', state: 'notifying' },
-  { name: '等待你操作', detail: '状态驱动的眼睛和身体动作', avatar: 'yaoyao-mascot:v1:square:377fe6:curious', state: 'waiting' },
+  { name: '工作中', detail: '状态驱动的眼睛和身体动作', avatar: avatar('triangle'), state: 'working' },
+  { name: '有新消息', detail: '头像弹跳并提醒', avatar: avatar('triangle'), state: 'notifying' },
+  { name: '等待你操作', detail: '状态驱动的眼睛和身体动作', avatar: avatar('square'), state: 'waiting' },
 ] as const
 
 const teamMembers = shapes.map(item => ({ name: item.name, avatar: item.avatar }))
@@ -22,7 +24,7 @@ const teamMembers = shapes.map(item => ({ name: item.name, avatar: item.avatar }
     <header>
       <span>跨端角色系统</span>
       <h1>自定义 Agent 角色</h1>
-      <p>三种形状保持统一视觉面积；短三角不再使用细长指针轮廓。</p>
+      <p>采用 OpenMausBot 的纯色轮廓、五官与状态动画。</p>
     </header>
     <section class="shape-row" aria-label="三种头像形状">
       <article v-for="item in shapes" :key="item.name">

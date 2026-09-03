@@ -5,6 +5,7 @@ import { ChatRpcSocket } from './realtime'
 import {
   AGENT_MASCOT_EXPRESSIONS,
   AGENT_MASCOT_SHAPES,
+  AGENT_MASCOT_BODIES, AGENT_IMAGE_CROPS,
   YAOYAO_AGENT_IDENTITY_NAMESPACE,
   agentIdentityFromProfile,
   agentIdentityMetadata,
@@ -24,6 +25,8 @@ export type ProfileIdentityInput = {
   shape: AgentMascotShape
   color: string
   expression: AgentMascotExpression
+  bodyId?: import("@shared/agentIdentity").AgentMascotBody | null
+  imageCrop?: import("@shared/agentIdentity").AgentImageCrop
   avatarDataURL?: string | null
 }
 
@@ -51,6 +54,8 @@ function validateIdentity(input: ProfileIdentityInput): ProfileIdentityInput {
   }
   if (!AGENT_MASCOT_SHAPES.includes(input.shape)) throw new Error('请选择有效的头像形状')
   if (!AGENT_MASCOT_EXPRESSIONS.includes(input.expression)) throw new Error('请选择有效的基础表情')
+  if (input.bodyId != null && !AGENT_MASCOT_BODIES.includes(input.bodyId)) throw new Error('请选择有效的造型')
+  if (input.imageCrop != null && !AGENT_IMAGE_CROPS.includes(input.imageCrop)) throw new Error('请选择有效的裁剪')
   if (!/^#[0-9a-f]{6}$/i.test(input.color)) throw new Error('请选择有效的头像颜色')
   return {
     title,
@@ -58,6 +63,7 @@ function validateIdentity(input: ProfileIdentityInput): ProfileIdentityInput {
     shape: input.shape,
     color: input.color.toLowerCase(),
     expression: input.expression,
+    bodyId: input.bodyId ?? null, imageCrop: input.imageCrop ?? 'rounded',
     avatarDataURL,
   }
 }
@@ -86,6 +92,8 @@ export async function updateProfileIdentity(profile: Profile, input: ProfileIden
       shape: identity.shape,
       color: identity.color,
       expression: identity.expression,
+      bodyId: identity.bodyId ?? null,
+      imageCrop: identity.imageCrop ?? 'rounded',
       ...(identity.avatarDataURL ? { imageDataURL: identity.avatarDataURL } : {}),
     }
     if (!identity.avatarDataURL) delete nextIdentity.imageDataURL

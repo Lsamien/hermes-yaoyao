@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
 
 describe('ResourceSidebar', () => {
-  it('keeps fallback avatars stable across topics from the same team', () => {
+  it('uses a neutral group placeholder without inventing members', () => {
     const wrapper = mount(ResourceSidebar, {
       props: {
         items: [
@@ -13,13 +13,12 @@ describe('ResourceSidebar', () => {
       },
     })
 
-    const signatures = wrapper.findAll('.team-avatar').map(team => team.findAll('.agent-avatar').map(agent => {
-      const shape = agent.find('.agent-avatar__body').element.firstElementChild?.tagName
-      const color = agent.find('stop[offset="0.5"]').attributes('stop-color')
-      return `${shape}:${color}`
-    }))
-    expect(signatures).toHaveLength(2)
-    expect(signatures[0]).toHaveLength(3)
-    expect(signatures[1]).toEqual(signatures[0])
+    const groups = wrapper.findAll('.team-avatar')
+    expect(groups).toHaveLength(2)
+    for (const group of groups) {
+      expect(group.findAll('.team-avatar__member')).toHaveLength(0)
+      expect(group.find('.app-icon').exists()).toBe(true)
+    }
+    wrapper.unmount()
   })
 })

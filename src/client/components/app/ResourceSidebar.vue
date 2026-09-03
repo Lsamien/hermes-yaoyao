@@ -152,7 +152,7 @@ defineExpose({ focusSearch })
               <AppIcon name="chevron-down" :size="13" />
             </button>
             <span v-if="!singleLine" class="sidebar-item__icon" :class="{ 'sidebar-item__icon--avatar': !row.item.icon }">
-              <AgentAvatar v-if="row.item.avatarKind === 'agent'" :name="row.item.title" :avatar="row.item.avatar" :state="row.item.avatarState" :size="avatarSize" />
+              <AgentAvatar v-if="row.item.avatarKind === 'agent'" :name="row.item.title" :avatar="row.item.avatar" :state="row.item.avatarState" :activity-key="row.item.avatarActivityKey" :size="avatarSize" />
               <TeamAvatar v-else-if="row.item.avatar !== undefined || row.item.avatarMembers?.length" :name="row.item.title" :avatar="row.item.avatar || ''" :members="row.item.avatarMembers || []" :fallback-key="row.item.avatarFallbackKey || row.item.id" :size="avatarSize" />
               <AppIcon v-else-if="row.item.icon" :name="row.item.icon" :size="row.item.topic ? 14 : 15" />
               <template v-else>{{ row.item.title.slice(0, 1).toUpperCase() }}</template>

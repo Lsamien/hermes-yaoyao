@@ -395,15 +395,18 @@ export function workspaceAvatarMembers(memberIds: string[], agents: import('@sha
   const byId = new Map(agents.map(agent => [agent.id, agent]))
   return memberIds.flatMap(id => {
     const agent = byId.get(id)
-    return agent ? [{ name: agent.name, avatar: agent.avatar, state: workspaceAvatarState(conversation, agent.id) }] : []
+    return agent ? [{ name: agent.name, avatar: agent.avatar, state: workspaceAvatarState(conversation, agent.id), activityKey: conversation?.lastSeq }] : []
   })
 }
 
 
-export function workspaceAvatarState(conversation: import('@shared/workspace').WorkspaceConversation | undefined, agentId: string): 'idle' | 'working' | 'waiting' {
+export function workspaceAvatarState(conversation: import('@shared/workspace').WorkspaceConversation | undefined, agentId: string): 'idle' | 'working' | 'waiting' | 'loading' | 'success' | 'failure' | 'notifying' {
   const state = conversation?.activeAgentStates?.[agentId]
-  if (state) return state === 'running' ? 'working' : 'waiting'
-  if (!conversation?.activeRunId || conversation.activeAgentId !== agentId) return 'idle'
+  if (state) return state === 'running' ? 'working' : state === 'queued' ? 'loading' : 'waiting'
+  const signal = conversation?.avatarSignals?.[agentId]
+  if (signal && Date.now() - signal.at < 2000) return signal.state
+  if (conversation?.activeRunStatus === 'queued' && conversation.memberIds[0] === agentId) return 'loading'
+  if (!conversation?.activeRunId || conversation.activeAgentId !== agentId) return conversation?.previewAgentId === agentId && (conversation.unreadCount ?? Math.max(0, conversation.lastSeq - conversation.readSeq)) > 0 ? 'notifying' : 'idle'
   return conversation.activeRunStatus === 'waiting' || conversation.activeRunStatus === 'uncertain' ? 'waiting' : 'working'
 }
 
@@ -414,7 +417,7 @@ export function workspaceConversationItem(c: import('@shared/workspace').Workspa
     avatarMembers: c.kind === 'group' ? workspaceAvatarMembers(c.memberIds, agents, c) : [],
     meta: formatConversationTime(c.lastMessageAt ?? c.createdAt),
     avatarKind: c.kind === 'direct' ? 'agent' : 'team',
-    avatarState: workspaceAvatarState(c, c.memberIds[0] || ''),
+    avatarState: workspaceAvatarState(c, c.memberIds[0] || ''), avatarActivityKey: c.lastSeq,
     unread: c.unreadCount ?? Math.max(0, c.lastSeq - c.readSeq), status: c.activeRunId ? 'working' : undefined,
   }
 }

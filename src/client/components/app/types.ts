@@ -15,10 +15,11 @@ export type SidebarItemBase = {
   status?: 'online' | 'working' | 'offline'
   icon?: 'chat' | 'groups' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'artifacts' | 'branch' | 'topic' | 'chevron-left' | 'plus' | 'archive'
   avatarKind?: 'agent' | 'team'
-  avatarState?: 'idle' | 'working' | 'waiting'
+  avatarActivityKey?: number
+  avatarState?: 'idle' | 'working' | 'waiting' | 'loading' | 'success' | 'failure' | 'notifying'
   avatar?: string
   avatarFallbackKey?: string
-  avatarMembers?: Array<{ name: string; avatar?: string; state?: 'idle' | 'working' | 'waiting' }>
+  avatarMembers?: Array<{ activityKey?: number; name: string; avatar?: string; state?: 'idle' | 'working' | 'waiting' | 'loading' | 'success' | 'failure' | 'notifying' }>
   emptyText?: string
 }
 

@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events'
 import { z } from 'zod'
 import { HttpError } from './errors.js'
 import { notificationPlainText } from './notificationText.js'
-import { decodeAgentMascotAvatar, isAgentImageAvatar, defaultAgentIdentity, encodeAgentAvatar } from '../shared/agentIdentity.js'
+import { decodeAgentMascotAvatar, isAgentImageAvatar, defaultAgentIdentity, encodeAgentAvatar, normalizeAvatar, MAX_AVATAR_DESCRIPTOR_LENGTH } from '../shared/agentIdentity.js'
 import type {
   WorkspaceAgent as Agent,
   WorkspaceConversation as Conversation,
@@ -23,7 +23,7 @@ const name = z
   .refine((v) => !/[\u0000-\u001f@]/.test(v), '名称不能包含 @ 或控制字符')
 const avatar = z
   .string()
-  .max(2_800_000)
+  .max(MAX_AVATAR_DESCRIPTOR_LENGTH)
   .refine(
     (v) => !v || isAgentImageAvatar(v) || !!decodeAgentMascotAvatar(v) || /^builtin:team-animal:(fox|whale|owl|rabbit|bear)$/.test(v),
     '请选择有效的内置头像或 PNG、JPEG、WebP 图片',
@@ -105,6 +105,21 @@ export class WorkspaceStore {
       CREATE INDEX IF NOT EXISTS workspace_turn_status ON workspace_entities(owner, json_extract(data,'$.status'), json_extract(data,'$.planned')) WHERE kind='turn';
       CREATE INDEX IF NOT EXISTS workspace_turn_conversation ON workspace_entities(owner, json_extract(data,'$.conversationId')) WHERE kind='turn';`)
     this.changes.setMaxListeners(0)
+    this.atomic(() => {
+      this.db.exec('CREATE TABLE IF NOT EXISTS workspace_migrations(id TEXT PRIMARY KEY)')
+      if (this.db.prepare('SELECT id FROM workspace_migrations WHERE id=?').get('avatar-v2')) return
+      for (const owner of this.owners()) {
+        for (const agent of this.list<Agent>(owner, 'agent')) {
+          this.put(owner, 'agent', agent.id, { ...agent, avatar: normalizeAvatar(agent.avatar) })
+        }
+        for (const conversation of this.list<Conversation>(owner, 'conversation')) {
+          if (conversation.kind !== 'direct') continue
+          const agent = this.get<Agent>(owner, 'agent', conversation.memberIds[0] || '')
+          this.put(owner, 'conversation', conversation.id, { ...conversation, avatar: agent?.avatar ?? normalizeAvatar(conversation.avatar) })
+        }
+      }
+      this.db.prepare('INSERT INTO workspace_migrations VALUES(?)').run('avatar-v2')
+    })
   }
   get<T>(owner: string, kind: string, id: string): T | undefined {
     const row = this.db
@@ -219,6 +234,7 @@ export class WorkspaceStore {
         id = randomUUID()
       const agent: Agent = {
         ...body,
+        avatar: normalizeAvatar(body.avatar),
         id,
         archived: false,
         revision: 1,
@@ -253,6 +269,7 @@ export class WorkspaceStore {
   }
   updateAgent(owner: string, id: string, input: unknown): Agent {
     const patch = parse(agentPatch, input)
+    if (patch.avatar !== undefined) patch.avatar = normalizeAvatar(patch.avatar)
     return this.atomic(() => {
       const agent = this.require<Agent>(owner, 'agent', id)
       if (
@@ -367,6 +384,7 @@ export class WorkspaceStore {
         c.updatedAt = Date.now()
         c.lastMessageAt = Math.max(c.lastMessageAt ?? 0, message.createdAt)
         c.preview = notificationPlainText(message.content, { maximum: 160, fallback: '' })
+        c.previewAgentId = message.role === 'assistant' ? message.agentId : undefined
       }
       this.put(owner, 'message', message.id, message)
       this.put(owner, 'conversation', c.id, c)
@@ -402,9 +420,12 @@ export class WorkspaceStore {
       c.activeRunId = current?.id
       c.activeAgentId = current?.activeAgentId
       c.activeRunStatus = current?.status
-      const tasks = this.db.prepare("SELECT data FROM workspace_entities WHERE owner=? AND kind='turn' AND json_extract(data,'$.conversationId')=? AND json_extract(data,'$.status') IN ('running','waiting','uncertain')").all(owner, c.id)
+      const tasks = this.db.prepare("SELECT data FROM workspace_entities WHERE owner=? AND kind='turn' AND json_extract(data,'$.conversationId')=? AND json_extract(data,'$.status') IN ('running','waiting','uncertain','queued') AND (json_extract(data,'$.status') != 'queued' OR json_extract(data,'$.planned')=1) ORDER BY CASE json_extract(data,'$.status') WHEN 'queued' THEN 0 WHEN 'running' THEN 1 ELSE 2 END").all(owner, c.id)
         .map(row => JSON.parse(String(row.data)) as { agentId: string; status: string })
-      c.activeAgentStates = Object.fromEntries(tasks.map(t => [t.agentId, t.status as 'running' | 'waiting' | 'uncertain']))
+      c.activeAgentStates = Object.fromEntries(tasks.map(t => [t.agentId, t.status as 'running' | 'waiting' | 'uncertain' | 'queued']))
+      const outcomes = this.db.prepare("SELECT data FROM workspace_entities WHERE owner=? AND kind='turn' AND json_extract(data,'$.conversationId')=? AND json_extract(data,'$.status') IN ('complete','failed') AND json_extract(data,'$.updatedAt')>=? ORDER BY json_extract(data,'$.updatedAt') ASC").all(owner, c.id, Date.now() - 2000)
+        .map(row => JSON.parse(String(row.data)) as {id:string;agentId:string;status:string;updatedAt:number})
+      c.avatarSignals = Object.fromEntries(outcomes.filter(t => Date.now() - t.updatedAt < 2000).map(t => [t.agentId, { id:t.id, state:t.status === 'failed' ? 'failure' as const : 'success' as const, at:t.updatedAt }]))
       c.queuedMessageCount = roots.filter(r => r.status === 'queued').length
       this.put(owner, 'conversation', c.id, c)
       this.event(owner, 'run.changed', run, c.id)

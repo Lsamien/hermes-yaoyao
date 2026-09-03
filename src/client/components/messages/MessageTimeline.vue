@@ -32,7 +32,7 @@ const props = withDefaults(defineProps<{
   interaction?: UiInteraction | null
   mentionNames?: string[]
   agentAvatars?: Record<string, string>
-  agentStates?: Record<string, 'idle' | 'working' | 'waiting'>
+  agentStates?: Record<string, 'idle' | 'working' | 'waiting' | 'loading' | 'success' | 'failure' | 'notifying'>
   thinking?: boolean
   allowBranch?: boolean
 }>(), {
@@ -88,10 +88,12 @@ let thinkingStartedAt = 0
 
 const formatTime = formatMessageTime
 
-function avatarState(message: UiMessage): 'idle' | 'working' | 'waiting' | 'failure' {
+function avatarState(message: UiMessage): 'idle' | 'working' | 'waiting' | 'loading' | 'success' | 'failure' | 'notifying' {
   if (message.status === 'streaming') return (message.profile && props.agentStates[message.profile]) || 'working'
   if (message.status === 'pending' || message.status === 'unknown-receipt') return 'waiting'
   if (message.status === 'failed') return 'failure'
+  const outcome = message.profile ? props.agentStates[message.profile] : undefined
+  if ((outcome === 'success' || outcome === 'failure') && [...props.messages].reverse().find(m => m.profile === message.profile && m.role === 'assistant')?.id === message.id) return outcome
   return 'idle'
 }
 

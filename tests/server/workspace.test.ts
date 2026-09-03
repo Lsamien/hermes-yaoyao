@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
+import { defaultAgentIdentity, encodeAgentAvatar, decodeAgentAvatar } from '../../src/shared/agentIdentity'
 import { WorkspaceStore } from '../../src/server/workspaceStore'
 import { WorkspaceRuntime, mentionedAgents } from '../../src/server/workspaceRuntime'
 import { WorkspaceNodes } from '../../src/server/workspaceGateway'
@@ -480,14 +481,14 @@ describe('Web-owned workspace', () => {
 
 
 it('pins a direct chat without injecting or clearing optional profile fields', () => {
-  const avatar = 'yaoyao-mascot:v1:triangle:0ea5c6:curious'
+  const avatar = encodeAgentAvatar({...defaultAgentIdentity('reviewer'),shape:'triangle',color:'#00b9ac',expression:'curious'})
   const agent = store.createAgent(owner, { name: '审查员', profile: 'default', avatar })
   const chat = store.list<WorkspaceConversation>(owner, 'conversation')[0]!
   expect(store.updateConversation(owner, chat.id, { pinned: true }).pinned).toBe(true)
   expect(store.updateConversation(owner, chat.id, { pinned: false }).pinned).toBe(false)
   expect(store.require<WorkspaceConversation>(owner, 'conversation', chat.id).avatar).toBe(avatar)
   expect(store.updateAgent(owner, agent.id, { instructions: '请检查边界' }).avatar).toBe(avatar)
-  expect(store.updateAgent(owner, agent.id, { avatar: '' }).avatar).toBe('')
+  expect(decodeAgentAvatar(store.updateAgent(owner, agent.id, { avatar: '' }).avatar)).toMatchObject({shape:'circle',color:'#00c875'})
 })
 
 it('accepts the existing cross-client mascot and team avatar formats', () => {
@@ -529,8 +530,8 @@ it('publishes only the executing member and clears avatar activity when stopped'
 
 it('stores the expanded avatar shapes for cross-client role settings', () => {
   const agent=store.createAgent(owner,{name:'扩展头像验收',profile:'default'})
-  for(const shape of ['ellipse','capsule','hexagon','cloud','droplet']) {
-    const avatar=`yaoyao-mascot:v1:${shape}:ff2dab:curious`
+  for(const shape of ['ellipse','capsule','hexagon','cloud','droplet'] as const) {
+    const avatar=encodeAgentAvatar({...defaultAgentIdentity('bot'),shape,color:'#f52ba5',expression:'curious'})
     expect(store.updateAgent(owner,agent.id,{avatar}).avatar).toBe(avatar)
   }
 })
@@ -571,7 +572,7 @@ it('keeps an unconfirmed turn separate from a later reply and retries history wi
 })
 it('uses one canonical default avatar for the agent and its direct conversation',()=>{
   const a=agent('默认头像'),c=direct(a.id)
-  expect(a.avatar).toBe('')
+  expect(decodeAgentAvatar(a.avatar)).toMatchObject({version:2,color:'#00c875'})
   expect(store.agentSummary(a).avatar).toBe(store.conversationSummary(owner,c).avatar)
   const changed=store.updateAgent(owner,a.id,{name:'换个名称'})
   expect(store.agentSummary(changed).avatar).toBe(store.agentSummary(a).avatar)
@@ -865,4 +866,42 @@ it('marks a stopped administrator as interrupted without sending a false complet
   await runtime.stopAgent(owner,g.id,a.id)
   await vi.waitFor(()=>expect(store.require<WorkspaceRun>(owner,'run',root.id).status).toBe('interrupted'))
   expect(notifications).toEqual([])
+})
+
+it('migrates old internal avatars and photos once, synchronizing direct snapshots without changing conversations',()=>{
+  const a=store.createAgent(owner,{name:'旧头像',profile:'default',instructions:'保留规则'})
+  const photo='data:image/png;base64,aGVsbG8='
+  const b=store.createAgent(owner,{name:'照片',profile:'default',avatar:photo})
+  store.put(owner,'agent',a.id,{...a,avatar:'yaoyao-mascot:v1:triangle:ff0000:friendly'})
+  store.put(owner,'agent',b.id,{...b,avatar:photo})
+  store.db.prepare('DELETE FROM workspace_migrations WHERE id=?').run('avatar-v2')
+  const migrated=new WorkspaceStore(home)
+  const next=migrated.require<any>(owner,'agent',a.id)
+  expect(next.instructions).toBe('保留规则')
+  expect(decodeAgentAvatar(next.avatar)).toMatchObject({shape:'circle',color:'#00c875',expression:'idle'})
+  const image=migrated.require<any>(owner,'agent',b.id)
+  expect(decodeAgentAvatar(image.avatar)).toMatchObject({avatarMode:'image',imageDataURL:photo,imageCrop:'rounded'})
+  for(const c of migrated.list<WorkspaceConversation>(owner,'conversation')) expect(c.avatar).toBe(migrated.require<any>(owner,'agent',c.memberIds[0]!).avatar)
+  const customized=encodeAgentAvatar({...defaultAgentIdentity('bot'),bodyId:'star',expression:'proud',color:'#1488ff'})
+  migrated.updateAgent(owner,a.id,{avatar:customized})
+  migrated.close()
+  const reopened=new WorkspaceStore(home)
+  expect(reopened.require<any>(owner,'agent',a.id).avatar).toBe(customized)
+  reopened.close()
+})
+
+// A member can have a queued follow-up while their current task needs approval.
+it('keeps active avatar state ahead of queued work and publishes only recent outcomes', () => {
+  const a=agent('状态优先级'), c=direct(a.id), now=Date.now()
+  const run: WorkspaceRun={id:'avatar-run',conversationId:c.id,messageId:'unused',mentionIds:[],status:'complete',round:1,createdAt:now,updatedAt:now}
+  for (const [id,status] of [['current','waiting'],['next','queued']] as const)
+    store.put(owner,'turn',id,{id,conversationId:c.id,agentId:a.id,status,planned:true,updatedAt:now})
+  store.put(owner,'turn','result',{id:'result',conversationId:c.id,agentId:a.id,status:'failed',updatedAt:now})
+  store.saveRun(owner,run)
+  let summary=store.require<WorkspaceConversation>(owner,'conversation',c.id)
+  expect(summary.activeAgentStates).toEqual({[a.id]:'waiting'})
+  expect(summary.avatarSignals?.[a.id]).toMatchObject({id:'result',state:'failure'})
+  store.put(owner,'turn','result',{id:'result',conversationId:c.id,agentId:a.id,status:'complete',updatedAt:now-3000})
+  store.saveRun(owner,run)
+  expect(store.require<WorkspaceConversation>(owner,'conversation',c.id).avatarSignals).toEqual({})
 })

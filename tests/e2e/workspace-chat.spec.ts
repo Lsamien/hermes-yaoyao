@@ -17,7 +17,7 @@ async function createAgent(page: Page, name: string) {
   await dialog
     .getByRole('textbox', { name: '角色提示词与规则', exact: true })
     .fill(`你是${name}，每次回复给出验收证据。`)
-  await dialog.getByRole('button', { name: `使用颜色 ${name === '产品经理' ? '#e78531' : '#0ea5c6'}`, exact: true }).click()
+  await dialog.getByRole('button', { name: `使用颜色 ${name === '产品经理' ? '#ff6b00' : '#00b9ac'}`, exact: true }).click()
   await dialog.locator('.mascot-grid--shape button').filter({ hasText: name === '产品经理' ? '圆形' : '小三角' }).first().click()
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByRole('heading', { name, exact: true })).toBeVisible()
@@ -70,6 +70,40 @@ test('created roles and editable teams share a durable chat list without plugin 
   await page.addInitScript(() => { Object.defineProperty(crypto, 'randomUUID', { value: undefined, configurable: true }) })
   await page.reload()
   await createAgent(page, '产品经理')
+  await page.getByRole('button', {name:'聊天设置',exact:true}).click()
+  const avatarEditor = page.getByRole('dialog')
+  await expect(avatarEditor.locator('.color-grid button')).toHaveCount(11)
+  await expect(avatarEditor.locator('.mascot-grid--expression button')).toHaveCount(10)
+  await avatarEditor.getByRole('button', {name:'造型：星星',exact:true}).click()
+  await avatarEditor.locator('.mascot-grid--expression button').filter({hasText:'自豪'}).click()
+  await avatarEditor.getByRole('button', {name:'使用颜色 #000000',exact:true}).click()
+  await avatarEditor.getByRole('button', {name:'保存',exact:true}).click()
+  const identities = await (await page.request.get('/api/app/agents')).json()
+  const edited = identities.agents.find((a: {name:string}) => a.name === '产品经理')
+  expect(JSON.parse(edited.avatar.slice('yaoyao-avatar:v2:'.length))).toMatchObject({version:2,bodyId:'star',expression:'proud',color:'#000000'})
+  await page.reload()
+  await page.getByRole('button', {name:'聊天设置',exact:true}).click()
+  await expect(avatarEditor.getByRole('button', {name:'造型：星星',exact:true})).toHaveAttribute('aria-pressed','true')
+  await avatarEditor.locator('input[type=file]').setInputFiles({name:'avatar.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')})
+  await expect(avatarEditor.getByText('图片裁剪',{exact:true})).toBeVisible()
+  let photoBytes=''
+  for(const [label,crop] of [['圆形','circle'],['方形','square'],['圆角方形','rounded']]){
+    await avatarEditor.getByRole('button',{name:label,exact:true}).click()
+    await avatarEditor.getByRole('button',{name:'保存',exact:true}).click()
+    const payload=await (await page.request.get('/api/app/agents')).json()
+    const avatar=JSON.parse(payload.agents.find((a:{name:string})=>a.name==='产品经理').avatar.slice('yaoyao-avatar:v2:'.length))
+    expect(avatar).toMatchObject({avatarMode:'image',imageCrop:crop})
+    if(photoBytes)expect(avatar.imageDataURL).toBe(photoBytes)
+    else photoBytes=avatar.imageDataURL
+    await page.getByRole('button',{name:'聊天设置',exact:true}).click()
+  }
+  await avatarEditor.getByRole('button',{name:'动态吉祥物',exact:true}).click()
+
+  await avatarEditor.locator('.mascot-grid--shape button').filter({hasText:'圆形'}).first().click()
+  await avatarEditor.getByRole('button', {name:'使用颜色 #ff6b00',exact:true}).click()
+  await avatarEditor.locator('.mascot-grid--expression button').filter({hasText:'默认'}).click()
+  await avatarEditor.getByRole('button', {name:'保存',exact:true}).click()
+
   await expect(rail.getByText('聊天', { exact: true })).toHaveCount(0)
   await expect(rail.getByText('聊天列表', { exact: true })).toHaveCount(0)
   await expect(rail.locator('.sidebar-item__row strong').first()).toHaveCSS('font-size', '15px')
@@ -119,9 +153,9 @@ test('created roles and editable teams share a durable chat list without plugin 
     const portrait = `.agent-avatar[aria-label="${name} 的头像"]`
     const direct = page.locator('.desktop-sidebar .sidebar-item').filter({ hasText: name }).filter({ hasNot: page.locator('.team-avatar') }).locator(portrait)
     const member = groupRow.locator(portrait)
-    await expect(member.locator('stop[offset="0.5"]')).toHaveAttribute('stop-color', await direct.locator('stop[offset="0.5"]').getAttribute('stop-color') || '')
-    expect(await member.locator('.agent-avatar__body > :first-child').evaluate(el => el.tagName))
-      .toBe(await direct.locator('.agent-avatar__body > :first-child').evaluate(el => el.tagName))
+    await expect(member.locator('[data-part=outline] > :first-child')).toHaveAttribute('fill', await direct.locator('[data-part=outline] > :first-child').getAttribute('fill') || '')
+    expect(await member.locator('[data-part=outline] > :first-child').evaluate(el => el.tagName))
+      .toBe(await direct.locator('[data-part=outline] > :first-child').evaluate(el => el.tagName))
   }
   await expect(page.locator('.desktop-sidebar')).not.toContainText('话题')
   await expect(page.locator('.desktop-sidebar .sidebar-account-switcher__main')).not.toContainText(

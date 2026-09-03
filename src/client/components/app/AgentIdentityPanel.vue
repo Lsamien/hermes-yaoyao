@@ -6,12 +6,14 @@ import AppIcon from '@/components/common/AppIcon.vue'
 import { listModelCatalog } from '@/api/agentManagement'
 import type { ProfileIdentityInput } from '@/api/profiles'
 import {
-  AGENT_MASCOT_COLORS,
+  AGENT_MASCOT_COLORS, AGENT_MASCOT_COLOR_LABELS,
   AGENT_MASCOT_EXPRESSIONS,
   AGENT_MASCOT_SHAPES,
   AGENT_MASCOT_SHAPE_OPTIONS,
   agentIdentityFromProfile,
-  decodeAgentMascotAvatar,
+  decodeAgentAvatar,
+  AGENT_MASCOT_BODIES, AGENT_MASCOT_BODY_LABELS, AGENT_MASCOT_EXPRESSION_LABELS, AGENT_IMAGE_CROPS,
+  type AgentMascotBody, type AgentImageCrop,
   defaultAgentIdentity,
   encodeAgentAvatar,
   type AgentAvatarMode,
@@ -51,8 +53,10 @@ const title = ref('')
 const avatarDataURL = ref<string | null>(null)
 const avatarMode = ref<AgentAvatarMode>('mascot')
 const shape = ref<AgentMascotShape>('circle')
-const color = ref('#009957')
-const expression = ref<AgentMascotExpression>('friendly')
+const color = ref('#00c875')
+const bodyId = ref<AgentMascotBody | null>(null)
+const imageCrop = ref<AgentImageCrop>('rounded')
+const expression = ref<AgentMascotExpression>('idle')
 const localError = ref('')
 const fileInput = ref<HTMLInputElement>()
 const baseline = ref('')
@@ -67,6 +71,7 @@ function currentFingerprint(): string {
     shape: shape.value,
     color: color.value,
     expression: expression.value,
+  bodyId: bodyId.value, imageCrop: imageCrop.value,
     avatarDataURL: avatarDataURL.value,
   })
 }
@@ -75,11 +80,13 @@ function resetFromProfile() {
   profileGeneration += 1
   const profile = props.profile
   const nextTitle = profile.agentName || profile.displayName || profile.name || ''
-  const mascot = decodeAgentMascotAvatar(profile.agentAvatar)
+  const mascot = decodeAgentAvatar(profile.agentAvatar)
   const fallback = defaultAgentIdentity(profile.name, nextTitle)
   title.value = nextTitle
-  avatarDataURL.value = profile.agentAvatar?.startsWith('data:image/') ? profile.agentAvatar : null
-  avatarMode.value = avatarDataURL.value ? 'image' : 'mascot'
+  avatarDataURL.value = mascot?.imageDataURL ?? null
+  bodyId.value = mascot?.bodyId ?? null
+  imageCrop.value = mascot?.imageCrop ?? 'rounded'
+  avatarMode.value = mascot?.avatarMode ?? (avatarDataURL.value ? 'image' : 'mascot')
   shape.value = mascot?.shape ?? fallback.shape
   color.value = mascot?.color ?? fallback.color
   expression.value = mascot?.expression ?? fallback.expression
@@ -110,6 +117,7 @@ const previewAvatar = computed(() => encodeAgentAvatar({
   shape: shape.value,
   color: color.value,
   expression: expression.value,
+  bodyId: bodyId.value, imageCrop: imageCrop.value,
   ...(avatarDataURL.value ? { imageDataURL: avatarDataURL.value } : {}),
 }))
 watch(previewAvatar, value => emit('avatarChange', value), { immediate: true })
@@ -118,14 +126,13 @@ const dirty = computed(() => identityFingerprint.value !== baseline.value)
 watch(dirty, value => emit('dirty-change', value), { immediate: true })
 
 const shapeLabel: Record<AgentMascotShape, string> = { circle: '圆形', square: '圆角方形', triangle: '小三角', ellipse: '椭圆', capsule: '胶囊', hexagon: '六边形', cloud: '云朵', droplet: '水滴' }
-const expressionLabel: Record<AgentMascotExpression, string> = {
-  friendly: '友好', focused: '专注', curious: '好奇', calm: '沉稳',
-}
+const expressionLabel = AGENT_MASCOT_EXPRESSION_LABELS
 
 function mascotPreview(overrides: Partial<{
   shape: AgentMascotShape
   color: string
   expression: AgentMascotExpression
+  bodyId: AgentMascotBody | null
 }> = {}): string {
   return encodeAgentAvatar({
     ...agentIdentityFromProfile({ name: props.profile.name, display_name: title.value }),
@@ -134,6 +141,7 @@ function mascotPreview(overrides: Partial<{
     shape: overrides.shape ?? shape.value,
     color: overrides.color ?? color.value,
     expression: overrides.expression ?? expression.value,
+    bodyId: overrides.bodyId === undefined ? bodyId.value : overrides.bodyId,
   })
 }
 
@@ -186,6 +194,7 @@ async function chooseAvatar(event: Event) {
 
 function randomizeAvatar() {
   avatarMode.value = 'mascot'
+  bodyId.value = null
   shape.value = AGENT_MASCOT_SHAPES[Math.floor(Math.random() * AGENT_MASCOT_SHAPES.length)]!
   color.value = AGENT_MASCOT_COLORS[Math.floor(Math.random() * AGENT_MASCOT_COLORS.length)]!
   expression.value = AGENT_MASCOT_EXPRESSIONS[Math.floor(Math.random() * AGENT_MASCOT_EXPRESSIONS.length)]!
@@ -193,6 +202,8 @@ function randomizeAvatar() {
 function resetAvatar() {
   const original = defaultAgentIdentity(props.profile.name, title.value)
   avatarMode.value = 'mascot'
+  bodyId.value = null
+  imageCrop.value = 'rounded'
   shape.value = original.shape
   color.value = original.color
   expression.value = original.expression
@@ -208,6 +219,7 @@ function submit() {
     shape: shape.value,
     color: color.value,
     expression: expression.value,
+  bodyId: bodyId.value, imageCrop: imageCrop.value,
     avatarDataURL: avatarDataURL.value,
   })
   title.value = normalized
@@ -217,10 +229,10 @@ function submit() {
 <template>
   <component :is="embedded ? 'div' : 'form'" :id="formId" class="identity-form" @submit.prevent="submit">
     <div class="identity-avatar">
-      <AgentAvatar :name="title || profile.name" :avatar="previewAvatar" :size="112" state="idle" />
+      <AgentAvatar :name="title || profile.name" :avatar="previewAvatar" :size="112" state="idle" :animated="true" />
       <div>
         <strong>自定义角色</strong>
-        <small>由夭夭独立保存并同步到 Web 与 iOS，不再读取 Bots mode 的头像。</small>
+        <small>头像设置保存后同步到 Web 与 iOS。</small>
         <p>
           <button class="quiet-button" :class="{ active: avatarMode === 'mascot' }" type="button" :disabled="busy" @click="avatarMode = 'mascot'">动态吉祥物</button>
           <button class="quiet-button" :class="{ active: avatarMode === 'image' }" type="button" :disabled="busy || !avatarDataURL" @click="avatarMode = 'image'">上传图片</button>
@@ -234,9 +246,17 @@ function submit() {
       <div>
         <strong>形状</strong>
         <div class="mascot-grid mascot-grid--shape">
-          <button v-for="candidate in AGENT_MASCOT_SHAPE_OPTIONS" :key="candidate" type="button" :class="{ selected: shape === candidate }" :aria-pressed="shape === candidate" @click="shape = candidate">
-            <AgentAvatar :name="title || profile.name" :avatar="mascotPreview({ shape: candidate })" :size="44" />
+          <button v-for="candidate in AGENT_MASCOT_SHAPE_OPTIONS" :key="candidate" type="button" :class="{ selected: !bodyId && shape === candidate }" :aria-pressed="!bodyId && shape === candidate" @click="shape = candidate; bodyId = null">
+            <AgentAvatar :name="title || profile.name" :avatar="mascotPreview({ shape: candidate, bodyId: null })" :size="44" />
             <span>{{ shapeLabel[candidate] }}</span>
+          </button>
+        </div>
+      </div>
+      <div>
+        <strong>造型</strong>
+        <div class="mascot-grid mascot-grid--shape">
+          <button v-for="candidate in AGENT_MASCOT_BODIES" :key="candidate" type="button" :class="{selected: bodyId === candidate}" :aria-pressed="bodyId === candidate" :aria-label="`造型：${AGENT_MASCOT_BODY_LABELS[candidate]}`" @click="bodyId = candidate">
+            <AgentAvatar :name="AGENT_MASCOT_BODY_LABELS[candidate]" :avatar="mascotPreview({bodyId:candidate})" :size="44" :animated="false" /><span>{{ AGENT_MASCOT_BODY_LABELS[candidate] }}</span>
           </button>
         </div>
       </div>
@@ -252,10 +272,11 @@ function submit() {
       <div>
         <strong>颜色</strong>
         <div class="color-grid">
-          <button v-for="candidate in AGENT_MASCOT_COLORS" :key="candidate" type="button" :class="{ selected: color === candidate }" :style="{ backgroundColor: candidate }" :aria-label="`使用颜色 ${candidate}`" :aria-pressed="color === candidate" @click="color = candidate" />
+          <button v-for="candidate in AGENT_MASCOT_COLORS" :key="candidate" type="button" :class="{ selected: color === candidate }" :style="{ backgroundColor: candidate }" :aria-label="`使用颜色 ${candidate}`" :title="AGENT_MASCOT_COLOR_LABELS[candidate]" :aria-pressed="color === candidate" @click="color = candidate" />
         </div>
       </div>
     </section>
+    <section v-if="avatarMode === 'image'" class="mascot-controls"><strong>图片裁剪</strong><div class="mascot-grid mascot-grid--shape"><button v-for="crop in AGENT_IMAGE_CROPS" :key="crop" type="button" :aria-pressed="imageCrop === crop" :class="{selected:imageCrop === crop}" @click="imageCrop = crop">{{ {circle:'圆形',rounded:'圆角方形',square:'方形'}[crop] }}</button></div></section>
     <div class="avatar-actions">
       <button class="quiet-button" type="button" :disabled="busy" @click="randomizeAvatar">随机外形</button>
       <button class="quiet-button" type="button" :disabled="busy" @click="resetAvatar">重置头像</button>
