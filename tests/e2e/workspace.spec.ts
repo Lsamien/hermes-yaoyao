@@ -37,7 +37,8 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('explains optional upstream credentials without blocking a ready connection', async ({ page }, testInfo) => {
-  await page.getByRole('button', { name: '打开设置中心' }).first().click()
+  await page.getByRole('button', { name: /^(打开设置中心|设置与模式)$/ }).first().click()
+  if (await page.getByRole('menuitem', { name: '进入设置', exact: true }).isVisible()) await page.getByRole('menuitem', { name: '进入设置', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '设置中心' })
   await dialog.getByRole('button', { name: 'Hermes 连接', exact: true }).click()
   await expect(dialog.locator('[aria-label="Hermes 连接状态"]')).toBeVisible()

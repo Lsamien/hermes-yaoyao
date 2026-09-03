@@ -103,6 +103,10 @@ const createMenuOpen = ref(false)
 const createMenu = ref<HTMLElement | null>(null)
 let createTrigger: HTMLElement | null = null
 const createPosition = ref({ left: '8px', top: '58px' })
+const settingsMenuOpen = ref(false)
+const settingsMenu = ref<HTMLElement | null>(null)
+let settingsTrigger: HTMLButtonElement | null = null
+const settingsMenuPosition = ref({ left: '8px', top: '8px' })
 const desktopSidebarContext = ref<HTMLElement | null>(null)
 const mobileSidebarContext = ref<HTMLElement | null>(null)
 
@@ -119,7 +123,7 @@ const navItems: NavItem[] = [
 
 // The active workspace is already represented by its main canvas and sidebar
 // context. Keep this strip focused on destinations the user can switch to.
-const featureNavItems = computed(() => navItems.filter(item => item.key !== activeNav.value.key
+const featureNavItems = computed(() => navItems.filter(item => item.key !== 'groups' && item.key !== activeNav.value.key
  ))
 
 const applicationWorkspace = computed(() => route.path.startsWith('/conversations'))
@@ -156,6 +160,7 @@ function closeMenus(event: MouseEvent) {
   const target = event.target as HTMLElement
   if (!target.closest('.sidebar-account-switcher')) profileMenuOpen.value = false
   if (!target.closest('.workspace-create-menu, .sidebar-create-trigger')) createMenuOpen.value = false
+  if (!target.closest('.workspace-settings-menu, .sidebar-settings-trigger')) settingsMenuOpen.value = false
 }
 function closeCreateMenu() {
   createMenuOpen.value = false
@@ -177,12 +182,36 @@ function chooseCreate(kind: 'agent' | 'group') {
   if (kind === 'agent') emit('createAgent')
   else emit('createGroup')
 }
-function createMenuKeydown(event: KeyboardEvent) {
+function actionMenuKeydown(event: KeyboardEvent) {
   if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
   event.preventDefault()
-  const buttons = [...(createMenu.value?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])]
+  const buttons = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
   const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
   buttons[event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length]?.focus()
+}
+
+function closeSettingsMenu() {
+  settingsMenuOpen.value = false
+  void nextTick(() => { if (settingsTrigger?.isConnected) settingsTrigger.focus() })
+}
+async function openSettingsMenu(event: MouseEvent) {
+  if (applicationWorkspace.value) { openSettings('account-security', event); return }
+  if (settingsMenuOpen.value) { closeSettingsMenu(); return }
+  settingsTrigger = event.currentTarget as HTMLButtonElement
+  const rect = settingsTrigger.getBoundingClientRect()
+  settingsMenuPosition.value = { left: `${Math.max(8, Math.min(rect.right - 180, window.innerWidth - 188))}px`, top: `${Math.max(8, rect.top - 92)}px` }
+  profileMenuOpen.value = false
+  createMenuOpen.value = false
+  settingsMenuOpen.value = true
+  await nextTick()
+  settingsMenu.value?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()
+}
+function chooseSettingsAction(action: 'settings' | 'bots') {
+  settingsMenuOpen.value = false
+  if (action === 'bots') { void navigate('/conversations'); return }
+  settingsReturnFocus.value = settingsTrigger?.closest('.mobile-drawer')
+    ? mobileNavigationTrigger.value : settingsTrigger ?? undefined
+  openSettings('agent-identity')
 }
 function workspaceKeydown(event: KeyboardEvent) {
   if (!applicationWorkspace.value || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'k' || settingsOpen.value || document.querySelector('dialog[open]')) return
@@ -248,6 +277,7 @@ function closeSettings() {
 
 function toggleSidebar() {
   createMenuOpen.value = false
+  settingsMenuOpen.value = false
   sidebarCollapsed.value = !sidebarCollapsed.value
   try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0') } catch { /* optional persistence */ }
 }
@@ -301,7 +331,7 @@ function handleSidebarFocusout(event: FocusEvent) {
 
 function handleSidebarSearchClosed() { sidebarSearchOpen.value = false }
 
-watch(() => route.fullPath, () => { mobileDrawerOpen.value = false; createMenuOpen.value = false })
+watch(() => route.fullPath, () => { mobileDrawerOpen.value = false; createMenuOpen.value = false; settingsMenuOpen.value = false })
 watch(() => activeNav.value.key, () => {
   sidebarSearchOpen.value = false
   profileMenuOpen.value = false
@@ -402,7 +432,7 @@ onBeforeUnmount(() => {
         @focusout.capture="handleSidebarFocusout"
       >
         <slot name="sidebar-before-heading" />
-        <header class="sidebar-context__heading">
+        <header v-if="!applicationWorkspace" class="sidebar-context__heading">
           <strong>{{ sidebarContextTitle || contextHeading }}</strong>
           <span v-if="sidebarSubtitle">{{ sidebarSubtitle }}</span>
         </header>
@@ -421,7 +451,7 @@ onBeforeUnmount(() => {
             </span>
             <AppIcon v-if="!applicationWorkspace" class="sidebar-account-switcher__chevron" name="chevron-down" :size="14" />
           </button>
-          <button class="sidebar-settings-trigger" type="button" title="设置中心" aria-label="打开设置中心" @click="openSettings(applicationWorkspace ? 'account-security' : 'agent-identity', $event)">
+          <button class="sidebar-settings-trigger" type="button" :title="applicationWorkspace ? '设置中心' : '设置与模式'" :aria-label="applicationWorkspace ? '打开设置中心' : '设置与模式'" :aria-haspopup="applicationWorkspace ? undefined : 'menu'" :aria-expanded="applicationWorkspace ? undefined : settingsMenuOpen" @click="openSettingsMenu">
             <AppIcon name="settings" :size="17" />
           </button>
           <Transition name="menu-fade">
@@ -508,7 +538,7 @@ onBeforeUnmount(() => {
         @focusout.capture="handleSidebarFocusout"
       >
         <slot name="sidebar-before-heading" />
-        <header class="sidebar-context__heading">
+        <header v-if="!applicationWorkspace" class="sidebar-context__heading">
           <strong>{{ sidebarContextTitle || contextHeading }}</strong>
           <span v-if="sidebarSubtitle">{{ sidebarSubtitle }}</span>
         </header>
@@ -527,7 +557,7 @@ onBeforeUnmount(() => {
             </span>
             <AppIcon v-if="!applicationWorkspace" class="sidebar-account-switcher__chevron" name="chevron-down" :size="14" />
           </button>
-          <button class="sidebar-settings-trigger" type="button" title="设置中心" aria-label="打开设置中心" @click="openSettings(applicationWorkspace ? 'account-security' : 'agent-identity', $event)">
+          <button class="sidebar-settings-trigger" type="button" :title="applicationWorkspace ? '设置中心' : '设置与模式'" :aria-label="applicationWorkspace ? '打开设置中心' : '设置与模式'" :aria-haspopup="applicationWorkspace ? undefined : 'menu'" :aria-expanded="applicationWorkspace ? undefined : settingsMenuOpen" @click="openSettingsMenu">
             <AppIcon name="settings" :size="17" />
           </button>
           <Transition name="menu-fade">
@@ -590,8 +620,14 @@ onBeforeUnmount(() => {
       @set-theme="emit('setTheme', $event)"
     />
     <Teleport to="body">
+      <div v-if="settingsMenuOpen" class="workspace-create-dismiss" @pointerdown.self="closeSettingsMenu" @keydown.esc.prevent.stop="closeSettingsMenu">
+        <div ref="settingsMenu" class="workspace-create-menu workspace-settings-menu" :style="settingsMenuPosition" role="menu" aria-label="设置与模式" @keydown="actionMenuKeydown">
+          <button type="button" role="menuitem" @click="chooseSettingsAction('settings')"><AppIcon name="settings" :size="17" />进入设置</button>
+          <button type="button" role="menuitem" @click="chooseSettingsAction('bots')"><AppIcon name="users" :size="17" />进入 Bot 模式</button>
+        </div>
+      </div>
       <div v-if="createMenuOpen" class="workspace-create-dismiss" @pointerdown.self="closeCreateMenu" @keydown.esc.prevent.stop="closeCreateMenu">
-        <div ref="createMenu" class="workspace-create-menu" :style="createPosition" role="menu" aria-label="新建聊天" @keydown="createMenuKeydown">
+        <div ref="createMenu" class="workspace-create-menu" :style="createPosition" role="menu" aria-label="新建聊天" @keydown="actionMenuKeydown">
           <button type="button" role="menuitem" @click="chooseCreate('agent')"><AppIcon name="users" :size="17" />新建 Bot</button>
           <button type="button" role="menuitem" @click="chooseCreate('group')"><AppIcon name="groups" :size="17" />新建群聊</button>
         </div>
@@ -612,6 +648,7 @@ onBeforeUnmount(() => {
   transition: grid-template-columns 180ms var(--ease-out);
 }
 
+.workspace-shell--conversations { grid-template-columns: 300px minmax(0, 1fr) auto; }
 .workspace-shell--collapsed { grid-template-columns: 68px minmax(0, 1fr) auto; }
 .mobile-header, .mobile-drawer, .drawer-scrim { display: none; }
 

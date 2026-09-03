@@ -8,7 +8,10 @@ const emit = defineEmits<{ select: [id: string]; pin: [id: string]; archive: [id
 const menuId = ref('')
 const menuPosition = ref({ left: '8px', top: '8px' })
 const menuConversation = computed(() => props.conversations.find(c => c.id === menuId.value))
-const rows = computed(() => props.conversations.filter(c => !c.archived).map(c => workspaceConversationItem(c, props.agents)))
+const rows = computed(() => props.conversations.filter(c => !c.archived).map(c => ({
+  ...workspaceConversationItem(c, props.agents),
+  section: c.pinned ? '已置顶' : '',
+})))
 function openMenu(id: string, event: MouseEvent) {
   menuId.value = id
   menuPosition.value = { left: `${Math.max(8, Math.min(event.clientX, window.innerWidth - 170))}px`, top: `${Math.max(8, Math.min(event.clientY, window.innerHeight - 100))}px` }
