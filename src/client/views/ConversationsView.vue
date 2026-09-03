@@ -71,7 +71,16 @@ const lightboxMedia = computed(() => media.value.filter(item => item.kind === 'i
 const reference = computed<ComposerReference | null>(() => quoted.value ? { id: quoted.value.id, content: quoted.value.content, author: quoted.value.author } : null)
 const avatarProfile = computed(() => ({ name: editingId.value || 'Agent', displayName: form.name || 'Agent', agentName: form.name || 'Agent', agentAvatar: form.avatar, isDefault: false, isRunning: true }))
 function openPreview(file: {name: string; url?: string; kind?: string}) {
-  const item = previewItemFromUrl(file.name, file.url || '')
+  let path = file.url || ''
+  try { path = decodeURIComponent(new URL(path, window.location.origin).pathname) } catch { /* preserve the supplied URL */ }
+  const attachment = messages.value.flatMap(message => message.attachments).find(candidate =>
+    path === candidate.sourcePath || path === `/api/app/files/${candidate.id}/download`
+      || path === `/api/app/files/${candidate.id}/preview`)
+  // A Markdown label such as “报告” has no extension. The archived file's name
+  // determines its viewer; the label is not reliable file-type metadata.
+  const mime = attachment?.mimeType.toLowerCase().split(';')[0] || ''
+  const textual = mime.startsWith('text/') || ['application/json', 'application/xml', 'application/yaml', 'application/x-yaml'].includes(mime)
+  const item = previewItemFromUrl(attachment?.name || file.name, file.url || '', undefined, textual ? 'text' : undefined)
   const index = lightboxMedia.value.findIndex(m => m.url === (item.previewUrl || item.downloadUrl))
   if (index >= 0) mediaIndex.value = index
   else preview.value = item

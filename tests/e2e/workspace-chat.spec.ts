@@ -82,6 +82,11 @@ test('created roles and editable teams share a durable chat list without plugin 
     'href',
     /\/api\/app\/files\/.+\/download/,
   )
+  await page.locator('.message--assistant a').first().click()
+  const textPreview = page.getByRole('dialog', { name: '预览 workspace-report.txt', exact: true })
+  await expect(textPreview).toBeVisible()
+  await expect(textPreview).toContainText('Fixture report')
+  await textPreview.getByRole('button', { name: '关闭预览' }).click()
   await page.getByRole('button', {name:'置顶聊天',exact:true}).click()
   await expect(page.getByRole('button', {name:'取消置顶',exact:true})).toBeVisible()
   const directURL = page.url()
