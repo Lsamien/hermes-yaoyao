@@ -414,3 +414,60 @@ describe('Web-owned workspace', () => {
     expect(store.require<WorkspaceConversation>(owner, 'conversation', c.id).name).toBe('乙')
   })
 })
+
+
+it('pins a direct chat without injecting or clearing optional profile fields', () => {
+  const avatar = 'yaoyao-mascot:v1:triangle:0ea5c6:curious'
+  const agent = store.createAgent(owner, { name: '审查员', profile: 'default', avatar })
+  const chat = store.list<WorkspaceConversation>(owner, 'conversation')[0]!
+  expect(store.updateConversation(owner, chat.id, { pinned: true }).pinned).toBe(true)
+  expect(store.updateConversation(owner, chat.id, { pinned: false }).pinned).toBe(false)
+  expect(store.require<WorkspaceConversation>(owner, 'conversation', chat.id).avatar).toBe(avatar)
+  expect(store.updateAgent(owner, agent.id, { instructions: '请检查边界' }).avatar).toBe(avatar)
+  expect(store.updateAgent(owner, agent.id, { avatar: '' }).avatar).toBe('')
+})
+
+it('accepts the existing cross-client mascot and team avatar formats', () => {
+  const a = store.createAgent(owner, { name: '设计', profile: 'default', avatar: 'yaoyao-mascot:v1:square:377fe6:friendly' })
+  const b = store.createAgent(owner, { name: '开发', profile: 'default' })
+  const group = store.createGroup(owner, { name: '产品团队', memberIds: [a.id, b.id], administratorId: a.id, avatar: 'builtin:team-animal:fox' })
+  expect(group.avatar).toBe('builtin:team-animal:fox')
+  expect(() => store.updateAgent(owner, a.id, { avatar: 'javascript:alert(1)' })).toThrow()
+})
+
+it('keeps the last message time independent of pinning and metadata edits', () => {
+  const agent=store.createAgent(owner,{name:'时间验收',profile:'default'})
+  const c=store.list<WorkspaceConversation>(owner,'conversation')[0]!
+  const message: WorkspaceMessage={id:randomUUID(),conversationId:c.id,seq:0,role:'user',content:'历史消息',reasoning:'',status:'complete',attachments:[],tools:[],createdAt:Date.now()-600_000}
+  store.saveMessage(owner,message)
+  const pinned=store.updateConversation(owner,c.id,{pinned:true})
+  expect(store.conversationSummary(owner,pinned).lastMessageAt).toBe(message.createdAt)
+  store.updateAgent(owner,agent.id,{name:'改名之后'})
+  expect(store.conversationSummary(owner,store.require(owner,'conversation',c.id)).lastMessageAt).toBe(message.createdAt)
+  // Existing records without the summary field still use their transcript time.
+  const previous={...pinned}; delete previous.lastMessageAt
+  expect(store.conversationSummary(owner,previous).lastMessageAt).toBe(message.createdAt)
+})
+
+
+it('publishes only the executing member and clears avatar activity when stopped', async () => {
+  const a=store.createAgent(owner,{name:'管理员头像',profile:'default'})
+  const b=store.createAgent(owner,{name:'执行者头像',profile:'default'})
+  const c=store.createGroup(owner,{name:'头像状态',memberIds:[a.id,b.id],administratorId:a.id})
+  reply=(socket,p)=>socket.send(JSON.stringify({method:'event',params:{type:'approval.request',session_id:p.session_id,payload:{request_id:'approval-avatar',message:'需要确认'}}}))
+  const run=runtime.send(owner,c.id,{requestId:randomUUID(),content:'处理任务',mentionIds:[b.id]})
+  await vi.waitFor(()=>expect(store.require<WorkspaceRun>(owner,'run',run.id).status).toBe('waiting'))
+  expect(store.require<WorkspaceConversation>(owner,'conversation',c.id)).toMatchObject({activeAgentId:b.id,activeRunStatus:'waiting'})
+  await runtime.stop(owner,run.id)
+  const stopped=store.require<WorkspaceConversation>(owner,'conversation',c.id)
+  expect(stopped.activeAgentId).toBeUndefined()
+  expect(stopped.activeRunStatus).toBeUndefined()
+})
+
+it('stores the expanded avatar shapes for cross-client role settings', () => {
+  const agent=store.createAgent(owner,{name:'扩展头像验收',profile:'default'})
+  for(const shape of ['ellipse','capsule','hexagon','cloud','droplet']) {
+    const avatar=`yaoyao-mascot:v1:${shape}:ff2dab:curious`
+    expect(store.updateAgent(owner,agent.id,{avatar}).avatar).toBe(avatar)
+  }
+})

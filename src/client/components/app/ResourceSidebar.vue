@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
 import TeamAvatar from '@/components/common/TeamAvatar.vue'
+import AgentAvatar from '@/components/common/AgentAvatar.vue'
 import type { SidebarItem } from './types'
 
 const SIDEBAR_SEARCH_EVENT = 'hermes-yaoyao:sidebar-search'
@@ -149,7 +150,8 @@ defineExpose({ focusSearch })
               <AppIcon name="chevron-down" :size="13" />
             </button>
             <span v-if="!singleLine" class="sidebar-item__icon" :class="{ 'sidebar-item__icon--avatar': !row.item.icon }">
-              <TeamAvatar v-if="row.item.avatar !== undefined || row.item.avatarMembers?.length" :name="row.item.title" :avatar="row.item.avatar || ''" :members="row.item.avatarMembers || []" :fallback-key="row.item.avatarFallbackKey || row.item.id" :size="23" />
+              <AgentAvatar v-if="row.item.avatarKind === 'agent'" :name="row.item.title" :avatar="row.item.avatar" :state="row.item.avatarState" :size="23" />
+              <TeamAvatar v-else-if="row.item.avatar !== undefined || row.item.avatarMembers?.length" :name="row.item.title" :avatar="row.item.avatar || ''" :members="row.item.avatarMembers || []" :fallback-key="row.item.avatarFallbackKey || row.item.id" :size="23" />
               <AppIcon v-else-if="row.item.icon" :name="row.item.icon" :size="row.item.topic ? 14 : 15" />
               <template v-else>{{ row.item.title.slice(0, 1).toUpperCase() }}</template>
               <span v-if="row.item.status" class="presence" :class="`presence--${row.item.status}`" />

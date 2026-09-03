@@ -5,7 +5,19 @@ import WorkspaceShell from '@/components/app/WorkspaceShell.vue'
 import ConversationList from '@/components/workspace/ConversationList.vue'
 import WorkspaceNodesPanel from '@/components/workspace/WorkspaceNodesPanel.vue'
 import AgentAvatar from '@/components/common/AgentAvatar.vue'
-import MarkdownContent from '@/components/messages/MarkdownContent.vue'
+import { createUuid } from '@/utils/id'
+import MessageTimeline from '@/components/messages/MessageTimeline.vue'
+import ComposerShell from '@/components/composer/ComposerShell.vue'
+import type { ComposerSubmit, ComposerReference } from '@/components/composer/types'
+import PreviewModal from '@/components/library/PreviewModal.vue'
+import ImagePreviewLightbox from '@/components/library/ImagePreviewLightbox.vue'
+import { previewItemFromUrl, mediaItemsFromMessages } from '@/components/library/mediaSequence'
+import type { UiLibraryItem } from '@/components/library/types'
+import type { UiMessage } from '@/components/messages/types'
+import AgentIdentityPanel from '@/components/app/AgentIdentityPanel.vue'
+import TeamAvatar from '@/components/common/TeamAvatar.vue'
+import AppIcon from '@/components/common/AppIcon.vue'
+import { workspaceAvatarMembers, workspaceAvatarState, workspaceMessagesToUi } from '@/components/workspace/viewModels'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 import { apiRequest } from '@/api/client'
@@ -40,6 +52,44 @@ const text = ref(''),
   mentions = ref<string[]>([]),
   older = ref(true)
 const showNodes = ref(false)
+const composer = ref<InstanceType<typeof ComposerShell>>()
+const timeline = ref<InstanceType<typeof MessageTimeline>>()
+const quoted = ref<UiMessage | null>(null)
+const preview = ref<UiLibraryItem | null>(null)
+const mediaIndex = ref<number | null>(null)
+const showThinking = ref(true)
+const uiMessages = computed(() => workspaceMessagesToUi(messages.value))
+const media = computed(() => mediaItemsFromMessages(uiMessages.value))
+const lightboxMedia = computed(() => media.value.filter(item => item.kind === 'image' || item.kind === 'video').map(item => ({ url: item.previewUrl || item.downloadUrl || '', name: item.name, type: item.kind as 'image' | 'video' })))
+const reference = computed<ComposerReference | null>(() => quoted.value ? { id: quoted.value.id, content: quoted.value.content, author: quoted.value.author } : null)
+const avatarProfile = computed(() => ({ name: editingId.value || 'Agent', displayName: form.name || 'Agent', agentName: form.name || 'Agent', agentAvatar: form.avatar, isDefault: false, isRunning: true }))
+function openPreview(file: {name: string; url?: string; kind?: string}) {
+  const item = previewItemFromUrl(file.name, file.url || '')
+  const index = lightboxMedia.value.findIndex(m => m.url === (item.previewUrl || item.downloadUrl))
+  if (index >= 0) mediaIndex.value = index
+  else preview.value = item
+}
+let uploadedSources: File[] = [], uploadedReferences: WorkspaceFile[] = []
+async function sendFromComposer(payload: ComposerSubmit) {
+  text.value = quoted.value ? `> ${(quoted.value.author || '我')}: ${quoted.value.content.replace(/\n/g, '\n> ')}\n\n${payload.text}` : payload.text
+  mentions.value = payload.mentionIds
+  if (payload.files.length) {
+    try {
+      busy.value = true
+      if (payload.files.length === uploadedSources.length && payload.files.every((f, i) => f === uploadedSources[i])) files.value = uploadedReferences
+      else {
+        const data = new FormData()
+        for (const file of payload.files) data.append('files', file)
+        files.value = (await apiRequest<{ files: WorkspaceFile[] }>('/api/app/uploads', {method: 'POST', body: data})).files
+        uploadedSources = [...payload.files]
+        uploadedReferences = [...files.value]
+      }
+    } catch (cause) { error.value = cause instanceof Error ? cause.message : '上传失败'; return }
+    finally { busy.value = false }
+  }
+  if (!payload.files.length) files.value = []
+  if (await send()) { composer.value?.clearAfterSend(); quoted.value = null; uploadedSources = []; uploadedReferences = [] }
+}
 const dialog = ref<'agent' | 'group' | 'editAgent' | 'editGroup' | null>(null),
   editingId = ref(''),
   scroller = ref<HTMLElement>(),
@@ -61,7 +111,8 @@ let cursor = 0,
   disposed = false,
   timer: ReturnType<typeof setTimeout> | undefined,
   generation = 0,
-  pendingRequestId: string | undefined
+  pendingRequestId: string | undefined,
+  pendingFingerprint = ''
 const selected = computed(() => (typeof route.params.id === 'string' ? route.params.id : undefined))
 const members = computed(() => agents.value.filter((a) => active.value?.memberIds.includes(a.id)))
 const isAgentDialog = computed(() => dialog.value === 'agent' || dialog.value === 'editAgent')
@@ -78,8 +129,12 @@ async function refresh() {
 }
 async function load(id = selected.value, append = false) {
   if (!id) {
+    generation++
     active.value = undefined
     messages.value = []
+    run.value = null
+    interactions.value = []
+    context.value = null
     return
   }
   const own = ++generation
@@ -93,9 +148,7 @@ async function load(id = selected.value, append = false) {
       context: Record<string, unknown> | null
     }>(`/api/app/conversations/${id}`)
     if (disposed || own !== generation) return
-    const atBottom =
-      !scroller.value ||
-      scroller.value.scrollHeight - scroller.value.scrollTop - scroller.value.clientHeight < 100
+    const atBottom = timeline.value?.isFollowingBottom() ?? true
     active.value = r.conversation
     messages.value = append
       ? [...new Map([...messages.value, ...r.messages].map((m) => [m.id, m])).values()].sort(
@@ -108,7 +161,7 @@ async function load(id = selected.value, append = false) {
     if (!append) older.value = r.messages.length === 100
     if (!append || atBottom) {
       await nextTick()
-      scroller.value?.scrollTo({ top: scroller.value.scrollHeight })
+      if (!append) timeline.value?.scrollToBottom('auto')
       await markRead()
     }
   } catch (e) {
@@ -149,12 +202,16 @@ async function select(id: string) {
   files.value = []
   mentions.value = []
   text.value = ''
+  quoted.value = null
+  preview.value = null
+  mediaIndex.value = null
   pendingRequestId = undefined
   await router.push(`/conversations/${id}`)
 }
 async function openDialog(kind: NonNullable<typeof dialog.value>) {
   error.value = ''
   dialog.value = kind
+  editingId.value = ''
   Object.assign(form, {
     name: '',
     avatar: '',
@@ -203,25 +260,11 @@ watch(
     form.autoReplyIds = form.autoReplyIds.filter((id) => ids.includes(id))
   },
 )
-async function avatarChanged(event: Event) {
-  const file = (event.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  if (file.size > 2 * 1024 * 1024) {
-    error.value = '头像请小于 2 MB'
-    return
-  }
-  form.avatar = await new Promise<string>((resolve, reject) => {
-    const r = new FileReader()
-    r.onload = () => resolve(String(r.result))
-    r.onerror = reject
-    r.readAsDataURL(file)
-  })
-}
 async function save() {
   busy.value = true
   error.value = ''
   try {
-    const fields = { name: form.name, avatar: form.avatar, instructions: form.instructions }
+    const fields = { name: form.name, ...(isAgentDialog.value ? { avatar: form.avatar } : {}), instructions: form.instructions }
     if (dialog.value === 'agent') {
       const [nodeId, profile] = JSON.parse(form.source)
       const result = await apiRequest<{ agent: Agent }>('/api/app/agents', {
@@ -286,7 +329,11 @@ async function send() {
   if (!c || busy.value || c.activeRunId || (!text.value.trim() && !files.value.length)) return
   busy.value = true
   error.value = ''
-  pendingRequestId ??= crypto.randomUUID()
+  const fingerprint = JSON.stringify([c.id, text.value, mentions.value, files.value.map(f => f.id)])
+  if (!pendingRequestId || pendingFingerprint !== fingerprint) {
+    pendingRequestId = createUuid()
+    pendingFingerprint = fingerprint
+  }
   try {
     await apiRequest(`/api/app/conversations/${c.id}/messages`, {
       method: 'POST',
@@ -301,19 +348,19 @@ async function send() {
     files.value = []
     mentions.value = []
     pendingRequestId = undefined
+    pendingFingerprint = ''
     await load(c.id, true)
     await refresh()
+    return true
   } catch (e) {
     error.value = e instanceof Error ? e.message : '发送失败'
   } finally {
     busy.value = false
   }
 }
-watch([text, () => files.value.map((f) => f.id).join(), () => mentions.value.join()], () => {
-  if (!busy.value) pendingRequestId = undefined
-})
-async function action(operation: 'pin' | 'archive') {
-  const c = active.value
+
+async function action(operation: 'pin' | 'archive', id = active.value?.id) {
+  const c = conversations.value.find(c => c.id === id)
   if (!c) return
   try {
     if (operation === 'pin')
@@ -420,158 +467,42 @@ onBeforeUnmount(() => {
       </div></template
     >
     <template #sidebar
-      ><ConversationList :conversations="conversations" :selected="selected" @select="select"
+      ><ConversationList :conversations="conversations" :agents="agents" :selected="selected" @select="select" @pin="action('pin', $event)" @archive="action('archive', $event)"
     /></template>
     <template #mobile-sidebar
-      ><ConversationList :conversations="conversations" :selected="selected" @select="select"
+      ><ConversationList :conversations="conversations" :agents="agents" :selected="selected" @select="select" @pin="action('pin', $event)" @archive="action('archive', $event)"
     /></template>
     <section class="workspace-chat" aria-label="聊天">
-      <header v-if="active" class="chat-header">
-        <AgentAvatar :name="active.name" :avatar="active.avatar" :size="38" />
-        <div>
-          <h1>{{ active.name }}</h1>
-          <small>{{
-            active.kind === 'group' ? `${members.length} 位成员 · 成员已固定` : 'Agent 单聊'
-          }}</small>
-        </div>
-        <span class="spacer" /><button @click="action('pin')">
-          {{ active.pinned ? '取消置顶' : '置顶' }}</button
-        ><button @click="openDialog(active.kind === 'direct' ? 'editAgent' : 'editGroup')">
-          设置</button
-        ><button @click="action('archive')">{{ active.archived ? '恢复' : '归档' }}</button>
-      </header>
-      <p v-if="error" class="error" role="alert">
-        {{ error }} <button @click="error = ''" aria-label="关闭错误">×</button>
-      </p>
-      <div
-        v-if="active"
-        ref="scroller"
-        class="messages"
-        @scroll="
-          scroller &&
-          scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40 &&
-          markRead()
-        "
-      >
-        <button v-if="older" class="older" @click="loadOlder">加载更早消息</button>
-        <p v-if="loading && !messages.length">正在加载…</p>
-        <article v-for="m in messages" :key="m.id" class="message" :class="m.role">
-          <small
-            >{{ m.role === 'user' ? '我' : m.agentName || '系统' }}
-            <time>{{
-              new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            }}</time></small
-          >
-          <details v-if="m.reasoning">
-            <summary>思考过程</summary>
-            <p>{{ m.reasoning }}</p>
-          </details>
-          <MarkdownContent :content="rendered(m)" :streaming="m.status === 'streaming'" />
-          <details v-for="(tool, i) in m.tools" :key="i">
-            <summary>{{ tool.name || tool.tool_name || '工具' }} · {{ tool.status }}</summary>
-            <pre>{{ JSON.stringify(tool, null, 2) }}</pre>
-          </details>
-          <a
-            v-for="file in m.attachments"
-            :key="file.id"
-            class="file"
-            :href="`/api/app/files/${file.id}/download`"
-            target="_blank"
-            rel="noreferrer"
-            ><img
-              v-if="file.mimeType.startsWith('image/')"
-              :src="`/api/app/files/${file.id}/preview`"
-              :alt="file.name"
-            />{{ file.name }}</a
-          ><small v-if="m.status !== 'complete'" class="status">{{
-            {
-              queued: '等待中',
-              streaming: '正在回复…',
-              failed: '执行失败',
-              interrupted: '已停止',
-              uncertain: '执行状态待确认',
-            }[m.status]
-          }}</small>
-        </article>
-        <p v-if="!loading && !messages.length" class="chat-empty">
-          {{ active.kind === 'group' ? '向团队描述你希望完成的事。' : '发一条消息，开始协作。' }}
-        </p>
-      </div>
-      <div v-else class="welcome">
-        <AgentAvatar name="夭夭" :size="72" />
-        <h1>从一个角色开始</h1>
-        <p>创建专属 Agent，为它设置职责和规则。<br />让不同角色在同一个群聊中协作。</p>
-        <button @click="openDialog('agent')">创建 Agent</button>
-      </div>
-      <div v-if="active" class="composer-area">
-        <div v-for="i in interactions" :key="i.id" class="interaction">
-          <strong>{{ i.kind === 'approval' ? '需要审批' : '需要补充信息' }}</strong>
-          <p>{{ i.message }}</p>
-          <template v-if="i.kind === 'approval'"
-            ><button @click="respond(i, 'once')">允许本次</button
-            ><button @click="respond(i, 'deny')">拒绝</button></template
-          ><template v-else
-            ><input v-model="answers[i.id]" aria-label="补充信息" /><button
-              @click="respond(i, answers[i.id] || '')"
-            >
-              提交
-            </button></template
-          >
-        </div>
-        <div v-if="run" class="run-status">
-          {{
-            run.status === 'uncertain'
-              ? '执行状态待确认'
-              : run.status === 'waiting'
-                ? '等待你的确认'
-                : '正在协作'
-          }}<span>{{ run.error }}</span
-          ><button v-if="run.status === 'uncertain'" @click="control('reconcile')">核对状态</button
-          ><button @click="control('stop')">停止</button>
-        </div>
-        <div v-if="active.kind === 'group'" class="mentions">
-          <label v-for="a in members" :key="a.id"
-            ><input v-model="mentions" type="checkbox" :value="a.id" />@{{ a.name }}</label
-          >
-        </div>
-        <div v-if="files.length" class="uploads">
-          <button
-            v-for="f in files"
-            :key="f.id"
-            @click="files = files.filter((x) => x.id !== f.id)"
-          >
-            {{ f.name }} ×
-          </button>
-        </div>
-        <form class="composer" @submit.prevent="send">
-          <textarea
-            v-model="text"
-            :disabled="active.archived"
-            aria-label="消息"
-            :placeholder="active.archived ? '聊天已归档' : '输入消息…'"
-            @keydown.enter.exact.prevent="send"
-          />
-          <div>
-            <input ref="fileInput" hidden type="file" multiple @change="upload" /><button
-              type="button"
-              :disabled="busy || active.archived"
-              @click="fileInput?.click()"
-            >
-              附件</button
-            ><span class="spacer" /><small v-if="context"
-              >上下文 {{ context.context_percent ?? context.percent ?? '—' }}%</small
-            ><button
-              type="submit"
-              :disabled="
-                busy || !!active.activeRunId || active.archived || (!text.trim() && !files.length)
-              "
-            >
-              {{ busy ? '处理中…' : '发送' }}
-            </button>
+      <MessageTimeline ref="timeline" :messages="uiMessages" :title="active?.name || '团队'"
+        :subtitle="active?.kind === 'group' ? `${members.length} 位成员 · 成员已固定` : ''"
+        :loading="loading" :has-older="older && !!active" :connected="!error" :synced="!loading"
+        :show-tools="showThinking" :allow-branch="false" :thinking="!!active?.activeRunId"
+        :agent-avatars="Object.fromEntries(agents.map(a => [a.id, a.avatar]))"
+        :agent-states="Object.fromEntries(members.map(a => [a.id, workspaceAvatarState(active, a.id)]))"
+        :mention-names="members.map(a => a.name)"
+        :empty-title="active ? '开始一段新对话' : '还没有聊天'"
+        :empty-description="active ? '从下方输入框发送消息。' : '创建 Agent，或选择成员新建群聊。'"
+        :interaction="interactions[0] ? { id: interactions[0].id, kind: interactions[0].kind, prompt: interactions[0].message, options: interactions[0].choices } : null"
+        @load-older="loadOlder" @quote="quoted = $event" @preview="openPreview" @preview-file="openPreview"
+        @approve="interactions[0] && respond(interactions[0], $event ? 'once' : 'deny')"
+        @clarify="interactions[0] && respond(interactions[0], $event)">
+        <template #header-actions>
+          <div v-if="active" class="header-actions">
+            <button class="icon-button" :aria-label="active.pinned ? '取消置顶' : '置顶聊天'" :title="active.pinned ? '取消置顶' : '置顶聊天'" @click="action('pin')"><AppIcon :name="active.pinned ? 'pin-off' : 'pin'" /></button>
+            <button class="icon-button" aria-label="聊天设置" title="聊天设置" @click="openDialog(active.kind === 'direct' ? 'editAgent' : 'editGroup')"><AppIcon name="settings" /></button>
+            <button class="icon-button" :aria-label="active.archived ? '恢复聊天' : '归档聊天'" :title="active.archived ? '恢复聊天' : '归档聊天'" @click="action('archive')"><AppIcon name="archive" /></button>
           </div>
-        </form>
-      </div>
+        </template>
+      </MessageTimeline>
+      <p v-if="error" class="error" role="alert">{{ error }}<button class="icon-button" @click="error = ''" aria-label="关闭错误"><AppIcon name="close" /></button></p>
+      <ComposerShell v-if="active" :key="active.id" ref="composer" mode="group" :draft-key="`${auth.user?.id}:${active.id}`"
+        :disabled="active.archived || loading || active.id !== selected" :sending="busy" stop-while-running :streaming="!!active.activeRunId"
+        :tool-trace-visible="showThinking" :reference="reference" :context-used="Number(context?.usedTokens || 0)" :context-limit="Number(context?.limitTokens || 0)"
+        :mention-options="active.kind === 'group' ? members.map(a => ({id:a.id,label:a.name,insertText:`@${a.name} `})) : []"
+        @send="sendFromComposer" @stop="control('stop')" @tool-trace-toggle="showThinking = !showThinking" @clear-reference="quoted = null" @error="error = $event" />
     </section>
+    <PreviewModal v-if="preview" :item="preview" :items="media" @close="preview = null" />
+    <ImagePreviewLightbox v-model="mediaIndex" :images="lightboxMedia" />
     <div
       v-if="showNodes"
       class="nodes-overlay"
@@ -590,13 +521,13 @@ onBeforeUnmount(() => {
           <button type="button" aria-label="关闭" @click="closeDialog">×</button>
         </header>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <label>名称<input v-model="form.name" required maxlength="100" /></label
-        ><label
-          >头像<input
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            @change="avatarChanged" /></label
-        ><AgentAvatar v-if="form.avatar" :name="form.name" :avatar="form.avatar" :size="48" /><label
+        <label>名称<input v-model="form.name" required maxlength="100" /></label>
+        <AgentIdentityPanel v-if="isAgentDialog" :key="`${dialog}:${editingId}`" :profile="avatarProfile" embedded :show-name="false" :show-default-model="false" :show-actions="false" @avatar-change="form.avatar = $event" />
+        <div v-else class="team-avatar-settings">
+          <TeamAvatar :name="form.name" :members="workspaceAvatarMembers(form.memberIds, agents, dialog === 'editGroup' ? active : undefined)" :size="64" />
+          <small>群聊头像由成员头像自动组合，随成员头像更新。</small>
+        </div>
+        <label
           v-if="dialog === 'agent'"
           >基础 Agent<select v-model="form.source" required>
             <option
@@ -673,8 +604,8 @@ onBeforeUnmount(() => {
               required /></label
         ></template>
         <footer>
-          <button type="button" @click="closeDialog">取消</button
-          ><button :disabled="busy || (!isAgentDialog && form.memberIds.length < 2)">
+          <button class="quiet-button" type="button" @click="closeDialog">取消</button
+          ><button class="solid-button" :disabled="busy || (!isAgentDialog && form.memberIds.length < 2)">
             {{ busy ? '保存中…' : '保存' }}
           </button>
         </footer>
@@ -683,236 +614,7 @@ onBeforeUnmount(() => {
   </WorkspaceShell>
 </template>
 <style scoped>
-.nodes-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: #0006;
-  display: grid;
-  place-items: center;
-}
-.nodes-overlay > div {
-  padding: 20px;
-  border-radius: 18px;
-  max-height: 85vh;
-  overflow: auto;
-  width: min(520px, 90vw);
-  background: var(--surface);
-}
-.new-actions {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-.workspace-chat {
-  height: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  color: var(--text-primary);
-  background: var(--surface);
-}
-button {
-  cursor: pointer;
-  color: inherit;
-}
-.chat-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 17px 24px;
-  border-bottom: 1px solid var(--line);
-}
-h1 {
-  font-size: 18px;
-  margin: 0 0 4px;
-}
-small {
-  color: var(--text-muted);
-}
-.spacer {
-  flex: 1;
-}
-.chat-header button,
-.composer button,
-.run-status button,
-.interaction button,
-.editor button,
-.welcome button {
-  padding: 8px 13px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface-soft);
-}
-button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.messages {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 24px max(24px, calc((100% - 780px) / 2));
-  scrollbar-gutter: stable;
-}
-.message {
-  margin: 0 0 28px;
-  overflow-wrap: anywhere;
-}
-.message > small {
-  display: block;
-  margin-bottom: 9px;
-  font-size: 11px;
-}
-.message.user {
-  margin-left: 15%;
-  padding: 14px 18px;
-  background: var(--surface-soft);
-  border-radius: 17px;
-}
-.message time {
-  margin-left: 8px;
-  opacity: 0.7;
-}
-.message pre {
-  white-space: pre-wrap;
-  font-size: 11px;
-  max-height: 300px;
-  overflow: auto;
-}
-.message details {
-  margin: 8px 0;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-.message .file {
-  display: inline-flex;
-  vertical-align: top;
-  flex-direction: column;
-  max-width: 280px;
-  margin: 8px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  color: inherit;
-  font-size: 12px;
-}
-.file img {
-  max-height: 240px;
-  max-width: 100%;
-  object-fit: contain;
-}
-.composer-area {
-  width: min(820px, 100%);
-  box-sizing: border-box;
-  align-self: center;
-  padding: 12px 24px 24px;
-}
-.composer {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 12px;
-  background: var(--surface);
-}
-.composer textarea {
-  resize: vertical;
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 75px;
-  max-height: 220px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  line-height: 1.6;
-  outline: none;
-}
-.composer > div {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.mentions,
-.uploads {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 10px;
-  font-size: 12px;
-}
-.mentions label {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-.uploads button {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 7px;
-  background: var(--surface-soft);
-}
-.run-status {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-  font-size: 12px;
-  margin-bottom: 10px;
-}
-.run-status span {
-  color: var(--text-muted);
-}
-.error {
-  padding: 12px 20px;
-  margin: 0;
-  background: color-mix(in srgb, var(--danger, #c64c4c) 10%, transparent);
-  color: var(--danger, #c64c4c);
-  font-size: 13px;
-}
-.error button {
-  float: right;
-  border: 0;
-  background: none;
-}
-.welcome {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  text-align: center;
-  padding: 30px;
-  gap: 18px;
-}
-.welcome h1 {
-  font-size: 26px;
-}
-.welcome p {
-  line-height: 1.9;
-  color: var(--text-muted);
-}
-.chat-empty {
-  padding: 60px 20px;
-  text-align: center;
-  color: var(--text-muted);
-}
-.interaction {
-  border: 1px solid var(--line);
-  padding: 16px;
-  border-radius: 12px;
-  margin-bottom: 12px;
-  font-size: 13px;
-}
-.interaction button {
-  margin-right: 8px;
-}
-.older {
-  display: block;
-  margin: 0 auto 25px;
-  border: 0;
-  background: transparent;
-  color: var(--text-muted);
-}
+.workspace-chat{display:flex;min-width:0;min-height:0;flex:1;flex-direction:column}.new-actions{display:grid;gap:2px}.new-actions button{display:flex;align-items:center;min-height:40px;padding:0 11px;border:0;border-radius:9px;background:transparent;color:var(--text-primary);text-align:left;font-size:12px;font-weight:610;cursor:pointer}.new-actions button:hover{background:var(--surface-hover)}.header-actions{display:flex;gap:4px;margin-left:auto}.error{display:flex;align-items:center;justify-content:space-between;margin:0 18px 9px;color:var(--danger);font-size:12px}.team-avatar-settings{display:grid;gap:12px}.team-avatar-options{display:flex;gap:10px}.team-avatar-options button{padding:5px;border:1px solid var(--line);border-radius:10px;background:var(--surface-soft);cursor:pointer}.team-avatar-options button[aria-pressed=true]{border-color:var(--accent)}.nodes-overlay{position:fixed;inset:0;z-index:1000;background:var(--scrim);display:grid;place-items:center}.nodes-overlay>div{padding:20px;max-height:85vh;overflow:auto;width:min(520px,90vw);background:var(--surface-raised);border:1px solid var(--line);border-radius:16px}
 .editor {
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -968,24 +670,5 @@ button:disabled {
 }
 .status {
   margin-top: 8px;
-}
-@media (max-width: 700px) {
-  .chat-header {
-    padding: 12px;
-    gap: 8px;
-  }
-  .chat-header button {
-    padding: 6px;
-    font-size: 11px;
-  }
-  .messages {
-    padding: 18px 15px;
-  }
-  .composer-area {
-    padding: 10px 12px 16px;
-  }
-  .message.user {
-    margin-left: 8%;
-  }
 }
 </style>

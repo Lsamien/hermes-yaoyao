@@ -361,3 +361,45 @@ export function artifactToUi(item: ConversationArtifact): UiLibraryItem {
     sourceProfile: item.profile,
   }
 }
+
+
+/** Adapt the Web-owned transcript to the existing chat presentation. */
+export function workspaceMessagesToUi(messages: import('@shared/workspace').WorkspaceMessage[]): UiMessage[] {
+  return messages.map(message => ({
+    id: message.id, role: message.role, author: message.agentName,
+    profile: message.agentId, createdAt: message.createdAt,
+    content: message.content.replace(/(!?\[[^\]]*\])\(<?([^)>]+)>?\)/g, (whole, label: string, path: string) => {
+      const file = message.attachments.find(file => file.sourcePath === path)
+      return file ? `${label}(/api/app/files/${file.id}/${label.startsWith('!') ? 'preview' : 'download'})` : whole
+    }),
+    reasoning: message.reasoning,
+    status: message.status === 'complete' || message.status === 'interrupted' ? 'settled'
+      : message.status === 'uncertain' ? 'unknown-receipt'
+      : message.status === 'queued' ? 'pending' : message.status,
+    attachments: message.attachments.map(file => ({
+      id: file.id, name: file.name, size: file.size,
+      kind: file.mimeType.startsWith('image/') ? 'image' : file.mimeType.startsWith('video/') ? 'video' : file.mimeType.startsWith('audio/') ? 'audio' : 'file',
+      url: `/api/app/files/${file.id}/${file.mimeType.startsWith('image/') ? 'preview' : 'download'}`,
+    })),
+    tools: message.tools.map((tool, index) => ({
+      id: String(tool.id || index), name: String(tool.name || tool.tool_name || '工具'),
+      status: String(tool.status).includes('error') ? 'error' : String(tool.status).includes('complete') ? 'success' : 'running',
+      input: tool.arguments ?? tool.input, output: tool.result ?? tool.output,
+    })),
+  }))
+}
+
+
+export function workspaceAvatarMembers(memberIds: string[], agents: import('@shared/workspace').WorkspaceAgent[], conversation?: import('@shared/workspace').WorkspaceConversation) {
+  const byId = new Map(agents.map(agent => [agent.id, agent]))
+  return memberIds.flatMap(id => {
+    const agent = byId.get(id)
+    return agent ? [{ name: agent.name, avatar: agent.avatar, state: workspaceAvatarState(conversation, agent.id) }] : []
+  })
+}
+
+
+export function workspaceAvatarState(conversation: import('@shared/workspace').WorkspaceConversation | undefined, agentId: string): 'idle' | 'working' | 'waiting' {
+  if (!conversation?.activeRunId || conversation.activeAgentId !== agentId) return 'idle'
+  return conversation.activeRunStatus === 'waiting' || conversation.activeRunStatus === 'uncertain' ? 'waiting' : 'working'
+}

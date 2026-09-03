@@ -10,6 +10,7 @@ const props = withDefaults(defineProps<{
   placeholder?: string
   disabled?: boolean
   streaming?: boolean
+  stopWhileRunning?: boolean
   sending?: boolean
   modelLabel?: string
   fastMode?: boolean
@@ -33,6 +34,7 @@ const props = withDefaults(defineProps<{
   placeholder: '输入消息，Enter 发送，Shift + Enter 换行',
   disabled: false,
   streaming: false,
+  stopWhileRunning: false,
   sending: false,
   modelLabel: '选择模型',
   fastMode: false,
@@ -87,7 +89,7 @@ let errorTimer: number | undefined
 const canSubmit = computed(() => !props.disabled && !props.sending && (text.value.trim().length > 0 || attachments.value.length > 0))
 // A running group still accepts new room messages. Only an ordinary session
 // turns its primary send affordance into an interrupt control.
-const showStop = computed(() => props.mode === 'chat' && props.streaming && !canSubmit.value)
+const showStop = computed(() => props.streaming && (props.stopWhileRunning || (props.mode === 'chat' && !canSubmit.value)))
 const compactModel = computed(() => props.modelLabel.split('/').filter(Boolean).at(-1) || props.modelLabel)
 const contextPercent = computed(() => props.contextLimit > 0 ? Math.min(100, Math.round(props.contextUsed / props.contextLimit * 100)) : 0)
 const hasContext = computed(() => props.contextLimit > 0)
@@ -506,7 +508,7 @@ defineExpose({
           >
             <AppIcon name="bolt" :size="15" />
           </button>
-          <span v-else class="composer-mention-hint"><b>@</b><span>提及 Agent</span></span>
+          <span v-else-if="mentionOptions.length" class="composer-mention-hint"><b>@</b><span>提及成员</span></span>
         </div>
         <div class="composer-actions">
           <button v-if="mode === 'chat' && streaming && canSubmit" class="queue-toggle" :class="{ active: queueMode }" type="button" :title="queueMode ? '消息将排队发送' : '消息将 Steer 当前会话'" @click="emit('queueToggle')">

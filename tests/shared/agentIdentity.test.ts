@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   YAOYAO_AGENT_IDENTITY_NAMESPACE,
+  AGENT_MASCOT_SHAPES,
   agentIdentityFromProfile,
   decodeAgentMascotAvatar,
   defaultAgentIdentity,
@@ -45,4 +46,13 @@ describe('Yaoyao agent identity', () => {
     expect(defaultAgentIdentity('designer')).toEqual(defaultAgentIdentity('designer'))
     expect(defaultAgentIdentity('designer')).not.toEqual(defaultAgentIdentity('reviewer'))
   })
+})
+
+it('round trips every expanded shape including uploaded-avatar alternatives', () => {
+  expect(AGENT_MASCOT_SHAPES).toHaveLength(8)
+  for (const shape of AGENT_MASCOT_SHAPES) {
+    const encoded = encodeAgentAvatar({...defaultAgentIdentity('designer'), shape, color:'#ff2dab'})
+    expect(decodeAgentMascotAvatar(encoded)).toMatchObject({shape,color:'#ff2dab'})
+  }
+  expect(decodeAgentMascotAvatar('yaoyao-mascot:v1:script:ff2dab:friendly')).toBeNull()
 })

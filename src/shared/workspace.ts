@@ -26,8 +26,11 @@ export interface WorkspaceConversation {
   pinned: boolean
   readSeq: number
   lastSeq: number
+  lastMessageAt?: number
   preview: string
   activeRunId?: string
+  activeAgentId?: string
+  activeRunStatus?: WorkspaceRun['status']
   createdAt: number
   updatedAt: number
 }
@@ -63,6 +66,7 @@ export interface WorkspaceRun {
   conversationId: string
   messageId: string
   mentionIds: string[]
+  activeAgentId?: string
   status: 'queued' | 'running' | 'waiting' | 'complete' | 'failed' | 'interrupted' | 'uncertain'
   round: number
   error?: string

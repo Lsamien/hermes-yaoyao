@@ -1,114 +1,51 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import AgentAvatar from '@/components/common/AgentAvatar.vue'
-import type { WorkspaceConversation } from '@shared/workspace'
-const props = defineProps<{ conversations: WorkspaceConversation[]; selected?: string }>()
-defineEmits<{ select: [id: string] }>()
-const query = ref(''),
-  archived = ref(false)
-const rows = computed(() =>
-  props.conversations.filter(
-    (c) =>
-      c.archived === archived.value &&
-      (!query.value || `${c.name} ${c.preview}`.toLowerCase().includes(query.value.toLowerCase())),
-  ),
-)
+import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
+import type { SidebarItem } from '@/components/app/types'
+import { workspaceAvatarMembers, workspaceAvatarState } from './viewModels'
+import { formatMessageTime } from '@/utils/messageTime'
+import type { WorkspaceAgent, WorkspaceConversation } from '@shared/workspace'
+const props = withDefaults(defineProps<{ conversations: WorkspaceConversation[]; agents?: WorkspaceAgent[]; selected?: string }>(), { agents: () => [] })
+const emit = defineEmits<{ select: [id: string]; pin: [id: string]; archive: [id: string] }>()
+const query = ref(''), archived = ref(false), menuId = ref('')
+const menuPosition = ref({ left: '8px', top: '8px' })
+const menuConversation = computed(() => props.conversations.find(c => c.id === menuId.value))
+const rows = computed<SidebarItem[]>(() => props.conversations.filter(c => c.archived === archived.value &&
+  (!query.value || `${c.name} ${c.preview}`.toLocaleLowerCase().includes(query.value.toLocaleLowerCase())))
+  .map(c => ({ id: c.id, title: c.name, subtitle: c.preview || '开始聊天', pinned: c.pinned,
+    section: c.pinned ? '已置顶' : '聊天', avatar: c.kind === 'group' ? '' : c.avatar,
+    avatarMembers: c.kind === 'group' ? workspaceAvatarMembers(c.memberIds, props.agents, c) : [],
+    meta: formatMessageTime(c.lastMessageAt ?? c.createdAt),
+    avatarKind: c.kind === 'direct' ? 'agent' : 'team',
+    avatarState: workspaceAvatarState(c, c.memberIds[0] || ''),
+    unread: Math.max(0, c.lastSeq - c.readSeq), status: c.activeRunId ? 'working' : undefined })))
+function openMenu(id: string, event: MouseEvent) {
+  menuId.value = id
+  menuPosition.value = { left: `${Math.max(8, Math.min(event.clientX, window.innerWidth - 170))}px`, top: `${Math.max(8, Math.min(event.clientY, window.innerHeight - 100))}px` }
+}
+function action(kind: 'pin' | 'archive') {
+  if (kind === 'pin') emit('pin', menuId.value)
+  else emit('archive', menuId.value)
+  menuId.value = ''
+}
 </script>
 <template>
   <div class="conversation-list">
-    <input v-model="query" type="search" placeholder="搜索聊天" aria-label="搜索聊天" />
     <label class="archive-filter"><input v-model="archived" type="checkbox" />显示已归档</label>
-    <button
-      v-for="c in rows"
-      :key="c.id"
-      class="conversation-row"
-      :class="{ selected: c.id === selected }"
-      @click="$emit('select', c.id)"
-    >
-      <AgentAvatar
-        :name="c.name"
-        :avatar="c.avatar"
-        :state="c.activeRunId ? 'working' : 'idle'"
-        :size="38"
-      />
-      <span class="row-text"
-        ><strong>{{ c.pinned ? '⌖ ' : '' }}{{ c.name }}</strong
-        ><small
-          >{{ c.kind === 'group' ? `${c.memberIds.length} 位成员 · ` : ''
-          }}{{ c.preview || '开始聊天' }}</small
-        ></span
-      >
-      <span v-if="c.lastSeq > c.readSeq" class="unread" aria-label="未读消息" />
-    </button>
-    <p v-if="!rows.length" class="empty">
-      {{ archived ? '没有已归档聊天' : '创建一个 Agent，开始你的第一段聊天。' }}
-    </p>
+    <ResourceSidebar :items="rows" :active-id="selected" :search="query" search-placeholder="搜索聊天"
+      empty-title="还没有聊天" empty-description="创建 Agent，或选择成员新建群聊。"
+      @search="query = $event" @select="emit('select', $event)" @more="openMenu" @context-menu="openMenu" />
+    <Teleport to="body">
+      <div v-if="menuConversation" class="conversation-menu-dismiss" @pointerdown.self="menuId = ''" @keydown.esc="menuId = ''">
+        <section class="conversation-actions" :style="menuPosition" role="menu" aria-label="聊天操作">
+          <button role="menuitem" @click="action('pin')">{{ menuConversation.pinned ? '取消置顶' : '置顶聊天' }}</button>
+          <button role="menuitem" @click="action('archive')">{{ menuConversation.archived ? '恢复聊天' : '归档聊天' }}</button>
+        </section>
+      </div>
+    </Teleport>
   </div>
 </template>
 <style scoped>
-.conversation-list {
-  padding: 8px;
-}
-.conversation-list > input {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--text-primary);
-}
-.archive-filter {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  font-size: 11px;
-  color: var(--text-muted);
-  padding: 10px 3px;
-}
-.conversation-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
-  color: var(--text-primary);
-  padding: 12px 10px;
-  text-align: left;
-  cursor: pointer;
-}
-.conversation-row:hover,
-.conversation-row.selected {
-  background: var(--surface-soft);
-}
-.row-text {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-  flex: 1;
-}
-.row-text strong {
-  font-size: 13px;
-}
-.row-text small {
-  font-size: 11px;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.unread {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent, #507f6c);
-}
-.empty {
-  padding: 24px 12px;
-  font-size: 13px;
-  line-height: 1.8;
-  color: var(--text-muted);
-}
+.conversation-list{display:flex;flex:1;flex-direction:column;min-height:0}.archive-filter{display:flex;align-items:center;gap:6px;padding:8px 12px;color:var(--text-muted);font-size:11px}
+.conversation-menu-dismiss{position:fixed;inset:0;z-index:200}.conversation-actions{position:absolute;display:grid;min-width:155px;padding:5px;border:1px solid var(--line);border-radius:10px;background:var(--surface-raised);box-shadow:var(--shadow-float)}.conversation-actions button{padding:9px 12px;border:0;border-radius:7px;background:transparent;color:var(--text-primary);text-align:left;cursor:pointer;font-size:12px}.conversation-actions button:hover{background:var(--surface-hover)}
 </style>

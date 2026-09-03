@@ -173,6 +173,7 @@ export class WorkspaceRuntime {
         conversationId,
         messageId: message.id,
         mentionIds: mentions,
+        activeAgentId: queue[0],
         status: 'queued',
         round: 0,
         queue,
@@ -233,6 +234,7 @@ export class WorkspaceRuntime {
           }),
         }
         run.status = 'running'
+        run.activeAgentId = agent.id
         this.store.saveRun(owner, run)
         const message = await this.turn(owner, c, agent, run)
         await this.onMessage(owner, message).catch(() => {})
@@ -276,6 +278,7 @@ export class WorkspaceRuntime {
       )
         run.hostReturn = true
       if (run.queue[0] === agentId) run.queue.shift()
+      run.activeAgentId = run.queue[0]
       run.currentMessageId = undefined
       run.error = undefined
       run.status = 'running'
@@ -292,6 +295,8 @@ export class WorkspaceRuntime {
     const key = `${c.id}:${agent.id}`,
       target = this.nodes.target(owner, agent.nodeId)
     const gateway = new WorkspaceGateway(target)
+    run.activeAgentId = agent.id
+    this.store.saveRun(owner, run)
     let binding = this.store.get<WorkspaceBinding>(owner, 'binding', key)
     let message =
       recovering && run.currentMessageId

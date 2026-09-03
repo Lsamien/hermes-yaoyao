@@ -1,8 +1,9 @@
 export const YAOYAO_AGENT_IDENTITY_NAMESPACE = 'hermes-yaoyao-identity'
 export const YAOYAO_AGENT_IDENTITY_VERSION = 1
 
-export const AGENT_MASCOT_SHAPES = ['circle', 'square', 'triangle'] as const
+export const AGENT_MASCOT_SHAPES = ['circle', 'square', 'triangle', 'ellipse', 'capsule', 'hexagon', 'cloud', 'droplet'] as const
 export type AgentMascotShape = typeof AGENT_MASCOT_SHAPES[number]
+export const AGENT_MASCOT_SHAPE_OPTIONS: readonly AgentMascotShape[] = ['circle', 'ellipse', 'square', 'capsule', 'triangle', 'hexagon', 'cloud', 'droplet']
 
 export const AGENT_MASCOT_EXPRESSIONS = ['friendly', 'focused', 'curious', 'calm'] as const
 export type AgentMascotExpression = typeof AGENT_MASCOT_EXPRESSIONS[number]
@@ -10,6 +11,7 @@ export type AgentMascotExpression = typeof AGENT_MASCOT_EXPRESSIONS[number]
 export const AGENT_MASCOT_COLORS = [
   '#009957', '#377fe6', '#d94b52', '#e78531', '#8057c8',
   '#0ea5c6', '#d84f8b', '#d8a729', '#01a492', '#e5634e',
+  '#000000', '#a2845e', '#ff2dab', '#8e8e93',
 ] as const
 
 export type AgentAvatarMode = 'mascot' | 'image'
@@ -33,7 +35,7 @@ export interface AgentIdentityProfileSource {
 }
 
 const imageDataURLPattern = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/i
-const mascotAvatarPattern = /^yaoyao-mascot:v1:(circle|square|triangle):([0-9a-f]{6}):(friendly|focused|curious|calm)$/i
+const mascotAvatarPattern = /^yaoyao-mascot:v1:(circle|square|triangle|ellipse|capsule|hexagon|cloud|droplet):([0-9a-f]{6}):(friendly|focused|curious|calm)$/i
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -62,8 +64,8 @@ export function defaultAgentIdentity(profileName: string, displayName?: string):
     version: YAOYAO_AGENT_IDENTITY_VERSION,
     displayName: cleanName(displayName) || key,
     avatarMode: 'mascot',
-    shape: AGENT_MASCOT_SHAPES[stableIndex(`${key}:shape`, AGENT_MASCOT_SHAPES.length)]!,
-    color: AGENT_MASCOT_COLORS[stableIndex(`${key}:color`, AGENT_MASCOT_COLORS.length)]!,
+    shape: AGENT_MASCOT_SHAPES[stableIndex(`${key}:shape`, 3)]!,
+    color: AGENT_MASCOT_COLORS[stableIndex(`${key}:color`, 10)]!,
     expression: AGENT_MASCOT_EXPRESSIONS[stableIndex(`${key}:expression`, AGENT_MASCOT_EXPRESSIONS.length)]!,
   }
 }

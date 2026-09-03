@@ -6,6 +6,7 @@ import { EventEmitter } from 'node:events'
 import { z } from 'zod'
 import { HttpError } from './errors.js'
 import { notificationPlainText } from './notificationText.js'
+import { decodeAgentMascotAvatar, isAgentImageAvatar } from '../shared/agentIdentity.js'
 import type {
   WorkspaceAgent as Agent,
   WorkspaceConversation as Conversation,
@@ -23,15 +24,14 @@ const name = z
 const avatar = z
   .string()
   .max(2_800_000)
-  .default('')
   .refine(
-    (v) => !v || /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v),
-    '头像须为 PNG、JPEG 或 WebP 图片',
+    (v) => !v || isAgentImageAvatar(v) || !!decodeAgentMascotAvatar(v) || /^builtin:team-animal:(fox|whale|owl|rabbit|bear)$/.test(v),
+    '请选择有效的内置头像或 PNG、JPEG、WebP 图片',
   )
 export const agentInput = z
   .object({
     name,
-    avatar,
+    avatar: avatar.default(''),
     instructions: z.string().max(24_000).default(''),
     nodeId: z.string().default('local'),
     profile: z.string().min(1).max(256),
@@ -48,7 +48,7 @@ export const agentPatch = z
 export const groupInput = z
   .object({
     name,
-    avatar,
+    avatar: avatar.default(''),
     memberIds: z.array(z.string().uuid()).min(2).max(8),
     instructions: z.string().max(24_000).default(''),
     administratorId: z.string().uuid(),
@@ -334,6 +334,7 @@ export class WorkspaceStore {
       if (!message.seq) message.seq = c.lastSeq + 1
       c.lastSeq = Math.max(c.lastSeq, message.seq)
       c.updatedAt = Date.now()
+      c.lastMessageAt = Math.max(c.lastMessageAt ?? 0, message.createdAt)
       c.preview = notificationPlainText(message.content, { maximum: 160, fallback: '' })
       this.put(owner, 'message', message.id, message)
       this.put(owner, 'conversation', c.id, c)
@@ -341,11 +342,21 @@ export class WorkspaceStore {
       this.event(owner, 'conversation.changed', c, c.id)
     })
   }
+  conversationSummary(owner: string, conversation: Conversation): Conversation {
+    return {
+      ...conversation,
+      lastMessageAt: conversation.lastMessageAt
+        ?? (conversation.lastSeq > 0 ? this.messages(owner, conversation.id, Number.MAX_SAFE_INTEGER, 1).at(-1)?.createdAt : undefined)
+        ?? conversation.createdAt,
+    }
+  }
   saveRun(owner: string, run: Run): void {
     this.atomic(() => {
       const c = this.require<Conversation>(owner, 'conversation', run.conversationId)
       const terminal = ['complete', 'failed', 'interrupted'].includes(run.status)
       c.activeRunId = terminal ? undefined : run.id
+      c.activeAgentId = terminal ? undefined : run.activeAgentId
+      c.activeRunStatus = terminal ? undefined : run.status
       run.updatedAt = Date.now()
       this.put(owner, 'run', run.id, run)
       this.put(owner, 'conversation', c.id, c)

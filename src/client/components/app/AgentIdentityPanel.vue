@@ -9,6 +9,7 @@ import {
   AGENT_MASCOT_COLORS,
   AGENT_MASCOT_EXPRESSIONS,
   AGENT_MASCOT_SHAPES,
+  AGENT_MASCOT_SHAPE_OPTIONS,
   agentIdentityFromProfile,
   decodeAgentMascotAvatar,
   defaultAgentIdentity,
@@ -26,6 +27,9 @@ const props = withDefaults(defineProps<{
   showActions?: boolean
   resetVersion?: number
   defaultModelLabel?: string
+  embedded?: boolean
+  showName?: boolean
+  showDefaultModel?: boolean
 }>(), {
   busy: false,
   error: '',
@@ -33,10 +37,14 @@ const props = withDefaults(defineProps<{
   showActions: true,
   resetVersion: 0,
   defaultModelLabel: '',
+  embedded: false,
+  showName: true,
+  showDefaultModel: true,
 })
 const emit = defineEmits<{
   save: [input: ProfileIdentityInput]
   'dirty-change': [dirty: boolean]
+  avatarChange: [avatar: string]
 }>()
 
 const title = ref('')
@@ -81,6 +89,7 @@ function resetFromProfile() {
 
 watch([() => props.profile.name, () => props.resetVersion], resetFromProfile, { immediate: true })
 watch([() => props.profile.name, () => props.defaultModelLabel], async () => {
+  if (!props.showDefaultModel) return
   const generation = ++modelLoadGeneration
   const fallback = props.defaultModelLabel
     || [props.profile.provider, props.profile.model].filter(Boolean).join(' / ')
@@ -103,11 +112,12 @@ const previewAvatar = computed(() => encodeAgentAvatar({
   expression: expression.value,
   ...(avatarDataURL.value ? { imageDataURL: avatarDataURL.value } : {}),
 }))
+watch(previewAvatar, value => emit('avatarChange', value), { immediate: true })
 const identityFingerprint = computed(currentFingerprint)
 const dirty = computed(() => identityFingerprint.value !== baseline.value)
 watch(dirty, value => emit('dirty-change', value), { immediate: true })
 
-const shapeLabel: Record<AgentMascotShape, string> = { circle: '圆形', square: '方形', triangle: '短三角' }
+const shapeLabel: Record<AgentMascotShape, string> = { circle: '圆形', square: '圆角方形', triangle: '小三角', ellipse: '椭圆', capsule: '胶囊', hexagon: '六边形', cloud: '云朵', droplet: '水滴' }
 const expressionLabel: Record<AgentMascotExpression, string> = {
   friendly: '友好', focused: '专注', curious: '好奇', calm: '沉稳',
 }
@@ -174,6 +184,21 @@ async function chooseAvatar(event: Event) {
   }
 }
 
+function randomizeAvatar() {
+  avatarMode.value = 'mascot'
+  shape.value = AGENT_MASCOT_SHAPES[Math.floor(Math.random() * AGENT_MASCOT_SHAPES.length)]!
+  color.value = AGENT_MASCOT_COLORS[Math.floor(Math.random() * AGENT_MASCOT_COLORS.length)]!
+  expression.value = AGENT_MASCOT_EXPRESSIONS[Math.floor(Math.random() * AGENT_MASCOT_EXPRESSIONS.length)]!
+}
+function resetAvatar() {
+  const original = defaultAgentIdentity(props.profile.name, title.value)
+  avatarMode.value = 'mascot'
+  shape.value = original.shape
+  color.value = original.color
+  expression.value = original.expression
+  avatarDataURL.value = null
+}
+
 function submit() {
   const normalized = title.value.trim().replace(/\s+/g, ' ')
   if (!normalized) { localError.value = '请输入 Agent 名称'; return }
@@ -190,7 +215,7 @@ function submit() {
 </script>
 
 <template>
-  <form :id="formId" class="identity-form" @submit.prevent="submit">
+  <component :is="embedded ? 'div' : 'form'" :id="formId" class="identity-form" @submit.prevent="submit">
     <div class="identity-avatar">
       <AgentAvatar :name="title || profile.name" :avatar="previewAvatar" :size="112" state="idle" />
       <div>
@@ -204,12 +229,12 @@ function submit() {
       </div>
       <input ref="fileInput" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" @change="chooseAvatar" />
     </div>
-    <label>名称<input v-model="title" :disabled="busy" maxlength="100" autocomplete="off" /></label>
+    <label v-if="showName">名称<input v-model="title" :disabled="busy" maxlength="100" autocomplete="off" /></label>
     <section v-if="avatarMode === 'mascot'" class="mascot-controls">
       <div>
         <strong>形状</strong>
         <div class="mascot-grid mascot-grid--shape">
-          <button v-for="candidate in AGENT_MASCOT_SHAPES" :key="candidate" type="button" :class="{ selected: shape === candidate }" :aria-pressed="shape === candidate" @click="shape = candidate">
+          <button v-for="candidate in AGENT_MASCOT_SHAPE_OPTIONS" :key="candidate" type="button" :class="{ selected: shape === candidate }" :aria-pressed="shape === candidate" @click="shape = candidate">
             <AgentAvatar :name="title || profile.name" :avatar="mascotPreview({ shape: candidate })" :size="44" />
             <span>{{ shapeLabel[candidate] }}</span>
           </button>
@@ -231,7 +256,11 @@ function submit() {
         </div>
       </div>
     </section>
-    <div class="identity-default-model">
+    <div class="avatar-actions">
+      <button class="quiet-button" type="button" :disabled="busy" @click="randomizeAvatar">随机外形</button>
+      <button class="quiet-button" type="button" :disabled="busy" @click="resetAvatar">重置头像</button>
+    </div>
+    <div v-if="showDefaultModel" class="identity-default-model">
       <strong>默认全局模型</strong>
       <span>{{ resolvedDefaultModelLabel || '服务器未返回默认模型' }}</span>
       <small>仅影响之后新建的会话；已有会话保留自己的模型。</small>
@@ -242,11 +271,11 @@ function submit() {
         <button class="primary-button" type="submit" :disabled="busy">{{ busy ? '正在同步…' : '保存并同步' }}</button>
       </slot>
     </footer>
-  </form>
+  </component>
 </template>
 
 <style scoped>
-.identity-form{display:grid;max-width:720px}.identity-avatar{display:flex;align-items:flex-start;gap:24px;margin-bottom:32px;padding:0;background:transparent}.identity-avatar>div{display:grid;gap:7px;padding-top:4px}.identity-avatar strong{font-size:16px}.identity-avatar small{max-width:480px;color:var(--text-muted);font-size:13px;line-height:1.55}.identity-avatar p{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 0}.identity-form label{display:grid;max-width:480px;gap:8px;color:var(--text-secondary);font-size:14px;font-weight:650}.identity-form input:not(.sr-only){width:100%;min-height:46px;box-sizing:border-box;padding:0 13px;border:1px solid var(--line);border-radius:9px;outline:0;background:var(--surface-raised);color:var(--text-primary);font:14px var(--font-ui);font-weight:400}.identity-form input:focus{border-color:var(--line-strong);box-shadow:0 0 0 3px var(--focus-ring)}.quiet-button,.primary-button,.identity-actions :slotted(.quiet-button),.identity-actions :slotted(.primary-button){display:inline-flex;min-height:40px;align-items:center;justify-content:center;gap:7px;padding:0 14px;border:0;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600}.quiet-button,.identity-actions :slotted(.quiet-button){border:1px solid var(--line);background:var(--surface-raised);color:var(--text-secondary)}.quiet-button.active{border-color:var(--accent);color:var(--text-primary);box-shadow:0 0 0 2px var(--focus-ring)}.primary-button,.identity-actions :slotted(.primary-button){min-width:118px;background:var(--accent);color:var(--text-on-solid)}.quiet-button:disabled,.primary-button:disabled,.identity-actions :slotted(.quiet-button:disabled),.identity-actions :slotted(.primary-button:disabled){cursor:wait;opacity:.5}.identity-error{margin:14px 0 0;color:var(--danger);font-size:13px}.identity-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:30px;padding-top:18px;border-top:1px solid var(--line)}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.mascot-controls{display:grid;gap:22px;margin-top:24px}.mascot-controls>div{display:grid;gap:10px}.mascot-controls strong{color:var(--text-secondary);font-size:13px}.mascot-grid{display:grid;gap:9px}.mascot-grid--shape{grid-template-columns:repeat(3,minmax(0,1fr))}.mascot-grid--expression{grid-template-columns:repeat(4,minmax(0,1fr))}.mascot-grid button{display:flex;min-height:78px;align-items:center;justify-content:center;gap:9px;padding:8px;border:1px solid var(--line);border-radius:12px;background:var(--surface-soft);color:var(--text-secondary);cursor:pointer}.mascot-grid button.selected{border-color:var(--accent);background:var(--surface-raised);color:var(--text-primary);box-shadow:0 0 0 2px var(--focus-ring)}.mascot-grid button span{font-size:12px;font-weight:650}.color-grid{display:flex;flex-wrap:wrap;gap:11px}.color-grid button{width:38px;height:38px;border:3px solid transparent;border-radius:50%;cursor:pointer;box-shadow:inset 0 0 0 1px rgb(255 255 255 / .2)}.color-grid button.selected{border-color:var(--surface);outline:2px solid var(--accent)}
+.identity-form{display:grid;max-width:720px}.identity-avatar{display:flex;align-items:flex-start;gap:24px;margin-bottom:32px;padding:0;background:transparent}.identity-avatar>div{display:grid;gap:7px;padding-top:4px}.identity-avatar strong{font-size:16px}.identity-avatar small{max-width:480px;color:var(--text-muted);font-size:13px;line-height:1.55}.identity-avatar p{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 0}.identity-form label{display:grid;max-width:480px;gap:8px;color:var(--text-secondary);font-size:14px;font-weight:650}.identity-form input:not(.sr-only){width:100%;min-height:46px;box-sizing:border-box;padding:0 13px;border:1px solid var(--line);border-radius:9px;outline:0;background:var(--surface-raised);color:var(--text-primary);font:14px var(--font-ui);font-weight:400}.identity-form input:focus{border-color:var(--line-strong);box-shadow:0 0 0 3px var(--focus-ring)}.quiet-button,.primary-button,.identity-actions :slotted(.quiet-button),.identity-actions :slotted(.primary-button){display:inline-flex;min-height:40px;align-items:center;justify-content:center;gap:7px;padding:0 14px;border:0;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600}.quiet-button,.identity-actions :slotted(.quiet-button){border:1px solid var(--line);background:var(--surface-raised);color:var(--text-secondary)}.quiet-button.active{border-color:var(--accent);color:var(--text-primary);box-shadow:0 0 0 2px var(--focus-ring)}.primary-button,.identity-actions :slotted(.primary-button){min-width:118px;background:var(--accent);color:var(--text-on-solid)}.quiet-button:disabled,.primary-button:disabled,.identity-actions :slotted(.quiet-button:disabled),.identity-actions :slotted(.primary-button:disabled){cursor:wait;opacity:.5}.identity-error{margin:14px 0 0;color:var(--danger);font-size:13px}.identity-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:30px;padding-top:18px;border-top:1px solid var(--line)}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.mascot-controls{display:grid;gap:22px;margin-top:24px}.mascot-controls>div{display:grid;gap:10px}.mascot-controls strong{color:var(--text-secondary);font-size:13px}.mascot-grid{display:grid;gap:9px}.mascot-grid--shape{grid-template-columns:repeat(4,minmax(0,1fr))}.mascot-grid--shape button{flex-direction:column}.avatar-actions{display:flex;gap:10px;margin-top:20px}.mascot-grid--expression{grid-template-columns:repeat(4,minmax(0,1fr))}.mascot-grid button{display:flex;min-height:78px;align-items:center;justify-content:center;gap:9px;padding:8px;border:1px solid var(--line);border-radius:12px;background:var(--surface-soft);color:var(--text-secondary);cursor:pointer}.mascot-grid button.selected{border-color:var(--accent);background:var(--surface-raised);color:var(--text-primary);box-shadow:0 0 0 2px var(--focus-ring)}.mascot-grid button span{font-size:12px;font-weight:650}.color-grid{display:flex;flex-wrap:wrap;gap:11px}.color-grid button{width:38px;height:38px;border:3px solid transparent;border-radius:50%;cursor:pointer;box-shadow:inset 0 0 0 1px rgb(255 255 255 / .2)}.color-grid button.selected{border-color:var(--surface);outline:2px solid var(--accent)}
 @media(max-width:600px){.identity-avatar{align-items:flex-start;flex-direction:column}.identity-form label{max-width:none}}
 .identity-default-model{display:grid;max-width:480px;gap:5px;margin-top:20px;padding:13px;border:1px solid var(--line);border-radius:9px;background:var(--surface-soft)}
 .identity-default-model strong{color:var(--text-secondary);font-size:13px}.identity-default-model span{font:12px var(--font-code);overflow-wrap:anywhere}.identity-default-model small{color:var(--text-muted);font-size:11px}

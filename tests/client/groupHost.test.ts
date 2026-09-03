@@ -229,7 +229,7 @@ describe('group host controls', () => {
     })
     await wrapper.get('input[placeholder="例如：产品评审"]').setValue('头像团队')
     await wrapper.findAll('.agent-picker > button')[1]!.trigger('click')
-    expect(wrapper.findAll('.avatar-picker .team-avatar__member')).toHaveLength(3)
+    expect(wrapper.findAll('.avatar-picker .team-avatar__member')).toHaveLength(choices.length)
     expect(wrapper.get('.avatar-picker').text()).toContain('由成员的动态角色自动组成')
     expect(wrapper.findAll('.avatar-picker .agent-avatar--image')).toHaveLength(1)
     await wrapper.get('.solid-button').trigger('click')

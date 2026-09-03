@@ -1,0 +1,48 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createUuid } from '@/utils/id'
+import { workspaceMessagesToUi } from '@/components/workspace/viewModels'
+
+afterEach(() => vi.unstubAllGlobals())
+describe('workspace chat uses the established presentation', () => {
+  it('creates valid request ids on LAN HTTP without crypto.randomUUID', () => {
+    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => { for (let i=0;i<bytes.length;i++) bytes[i]=i; return bytes } })
+    expect(createUuid()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+  })
+  it('preserves role identity, reasoning, files and tools for MessageTimeline', () => {
+    const [message] = workspaceMessagesToUi([{id:'m',conversationId:'c',seq:1,role:'assistant',agentId:'a',agentName:'编辑',content:'[报告](/tmp/report.txt)',reasoning:'检查资料',status:'complete',createdAt:10,attachments:[{id:'f',name:'report.txt',mimeType:'text/plain',size:4,createdAt:10,sender:'agent',sourcePath:'/tmp/report.txt'}],tools:[{id:'t',name:'read_file',status:'tool.complete',result:'ok'}]}])
+    expect(message).toMatchObject({profile:'a',author:'编辑',reasoning:'检查资料',status:'settled',content:'[报告](/api/app/files/f/download)'})
+    expect(message?.tools?.[0]).toMatchObject({name:'read_file',status:'success',output:'ok'})
+    expect(message?.attachments?.[0]?.url).toBe('/api/app/files/f/download')
+  })
+})
+
+import { mount } from '@vue/test-utils'
+import ConversationList from '@/components/workspace/ConversationList.vue'
+import TeamAvatar from '@/components/common/TeamAvatar.vue'
+import type { WorkspaceAgent, WorkspaceConversation } from '../../src/shared/workspace'
+
+it('composes real member avatars and refreshes them without changing group membership', async () => {
+  const agents: WorkspaceAgent[] = ['first','second'].map((id,index) => ({id,name:id,avatar:`yaoyao-mascot:v1:${index ? 'square' : 'circle'}:377fe6:friendly`,instructions:'',nodeId:'local',profile:'default',archived:false,revision:1,createdAt:1,updatedAt:1}))
+  const c: WorkspaceConversation = {id:'g',kind:'group',name:'群聊',avatar:'data:image/png;base64,AA==',memberIds:['second','first'],instructions:'',administratorId:'first',mode:'host',autoReplyIds:[],maxReplyRounds:1,archived:false,pinned:false,readSeq:0,lastSeq:0,preview:'',createdAt:Date.now(),updatedAt:Date.now(),lastMessageAt:Date.now()}
+  const wrapper = mount(ConversationList, {props:{conversations:[c],agents}})
+  expect(wrapper.getComponent(TeamAvatar).props('members')!.map((m: {name:string}) => m.name)).toEqual(['second','first'])
+  expect(wrapper.findAll('.team-avatar__member')).toHaveLength(2)
+  expect(wrapper.find('.team-avatar__image').exists()).toBe(false)
+  expect(wrapper.find('.sidebar-item__row small').text()).toMatch(/\d{2}:\d{2}/)
+  await wrapper.setProps({agents:agents.map(a=>a.id==='first'?{...a,avatar:'yaoyao-mascot:v1:triangle:d94b52:curious'}:a)})
+  expect(wrapper.getComponent(TeamAvatar).props('members')![1]!.avatar).toBe('yaoyao-mascot:v1:triangle:d94b52:curious')
+  await wrapper.setProps({conversations:[{...c,activeRunId:'run',activeAgentId:'second',activeRunStatus:'running'}]})
+  expect(wrapper.findAll('.team-avatar__member.agent-avatar--working')).toHaveLength(1)
+  expect(wrapper.find('.team-avatar__member--1').classes()).toContain('agent-avatar--working')
+  await wrapper.setProps({conversations:[{...c,activeRunId:'run',activeAgentId:'second',activeRunStatus:'waiting'}]})
+  expect(wrapper.findAll('.team-avatar__member.agent-avatar--waiting')).toHaveLength(1)
+  await wrapper.setProps({conversations:[c]})
+  expect(wrapper.findAll('.team-avatar__member.agent-avatar--working')).toHaveLength(0)
+  expect(wrapper.findAll('.team-avatar__member.agent-avatar--waiting')).toHaveLength(0)
+  await wrapper.setProps({conversations:[{...c,kind:'direct',memberIds:['first'],activeRunId:'direct-run',activeAgentId:'first',activeRunStatus:'running'}]})
+  expect(wrapper.find('.sidebar-item__icon .agent-avatar').exists() || wrapper.find('.sidebar-item .agent-avatar').exists()).toBe(true)
+  expect(wrapper.find('.sidebar-item .agent-avatar--working').exists()).toBe(true)
+  await wrapper.setProps({conversations:[{...c,kind:'direct',memberIds:['first'],activeRunId:'direct-run',activeAgentId:'first',activeRunStatus:'waiting'}]})
+  expect(wrapper.find('.sidebar-item .agent-avatar--waiting').exists()).toBe(true)
+  wrapper.unmount()
+})

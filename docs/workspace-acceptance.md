@@ -31,3 +31,11 @@ Web：运行上述三个 npm 命令。浏览器用例会自动启动隔离测试
 iOS：使用 `YaoYaoAI` scheme 和可用模拟器，运行 `-only-testing:YaoYaoAITests/WorkspaceChatTests`。需要允许模拟器签名以验证钥匙串登录；禁用签名的安装包不能作为登录验收依据。
 
 实现和接口说明见 [聊天契约](workspace-chat.md)，部署步骤见 [部署说明](agent-install.md)。
+
+
+## v0.3.4 发布验收
+
+- 2026-09-03：完整 Web 测试 85 个文件、460 项通过；发布清单校验、类型检查和生产构建通过。
+- `npx playwright test -c playwright.workspace.config.ts`：当前聊天完整端到端流程通过。
+- 本次包含原有聊天组件恢复、HTTP 发送修复、置顶修复、动态成员头像、头像状态联动、列表消息时间和扩展头像。
+- 旧插件与旧话题协议已退役，不将其浏览器场景作为当前聊天发布条件。

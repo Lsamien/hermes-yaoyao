@@ -14,9 +14,11 @@ export type SidebarItemBase = {
   expanded?: boolean
   status?: 'online' | 'working' | 'offline'
   icon?: 'chat' | 'groups' | 'file' | 'image' | 'video' | 'audio' | 'link' | 'artifacts' | 'branch' | 'topic' | 'chevron-left' | 'plus' | 'archive'
+  avatarKind?: 'agent' | 'team'
+  avatarState?: 'idle' | 'working' | 'waiting'
   avatar?: string
   avatarFallbackKey?: string
-  avatarMembers?: Array<{ name: string; avatar?: string }>
+  avatarMembers?: Array<{ name: string; avatar?: string; state?: 'idle' | 'working' | 'waiting' }>
   emptyText?: string
 }
 

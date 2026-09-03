@@ -32,7 +32,9 @@ const props = withDefaults(defineProps<{
   interaction?: UiInteraction | null
   mentionNames?: string[]
   agentAvatars?: Record<string, string>
+  agentStates?: Record<string, 'idle' | 'working' | 'waiting'>
   thinking?: boolean
+  allowBranch?: boolean
 }>(), {
   title: '',
   subtitle: '',
@@ -51,7 +53,9 @@ const props = withDefaults(defineProps<{
   interaction: null,
   mentionNames: () => [],
   agentAvatars: () => ({}),
+  agentStates: () => ({}),
   thinking: false,
+  allowBranch: true,
 })
 
 const emit = defineEmits<{
@@ -85,7 +89,7 @@ let thinkingStartedAt = 0
 const formatTime = formatMessageTime
 
 function avatarState(message: UiMessage): 'idle' | 'working' | 'waiting' | 'failure' {
-  if (message.status === 'streaming') return 'working'
+  if (message.status === 'streaming') return (message.profile && props.agentStates[message.profile]) || 'working'
   if (message.status === 'pending' || message.status === 'unknown-receipt') return 'waiting'
   if (message.status === 'failed') return 'failure'
   return 'idle'
@@ -220,7 +224,7 @@ onBeforeUnmount(() => {
   if (thinkingTimer !== undefined) window.clearInterval(thinkingTimer)
 })
 
-defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
+defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom, isFollowingBottom: () => pinnedToBottom.value })
 </script>
 
 <template>
@@ -364,7 +368,7 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom })
                 @click="copyMessage(message)"
               ><AppIcon :name="copiedMessageId === message.id ? 'check' : copyFailedMessageId === message.id ? 'alert' : 'copy'" :size="13" /></button>
               <button type="button" title="引用" aria-label="引用消息" @click="emit('quote', message)"><AppIcon name="quote" :size="13" /></button>
-              <button v-if="message.role === 'assistant'" type="button" title="从这里分支" aria-label="从这里分支" @click="emit('branch', message)"><AppIcon name="branch" :size="13" /></button>
+              <button v-if="allowBranch && message.role === 'assistant'" type="button" title="从这里分支" aria-label="从这里分支" @click="emit('branch', message)"><AppIcon name="branch" :size="13" /></button>
             </div>
             </template>
           </div>

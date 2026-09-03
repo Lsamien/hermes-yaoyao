@@ -6,6 +6,7 @@ import { AGENT_MASCOT_COLORS, AGENT_MASCOT_SHAPES } from '@shared/agentIdentity'
 export type TeamAvatarMember = {
   name: string
   avatar?: string
+  state?: 'idle' | 'working' | 'waiting'
 }
 
 const props = withDefaults(defineProps<{
@@ -36,17 +37,20 @@ const clusterMembers = computed(() => {
   const entries = props.members.slice(0, 3).map(member => ({
     name: member.name,
     avatar: member.avatar || '',
+    state: member.state || 'idle',
   }))
   const key = props.fallbackKey || props.name || 'team'
-  while (entries.length < 3) {
+  const fallbackCount = entries.length ? entries.length : 3
+  while (entries.length < fallbackCount) {
     const index = entries.length
     const shape = AGENT_MASCOT_SHAPES[index]!
     const color = AGENT_MASCOT_COLORS[
-      stableIndex(`${key}:group:${index}`, AGENT_MASCOT_COLORS.length)
+      stableIndex(`${key}:group:${index}`, 10)
     ]!.slice(1)
     entries.push({
       name: `${props.name || '团队'} ${index + 1}`,
       avatar: `yaoyao-mascot:v1:${shape}:${color}:friendly`,
+      state: 'idle',
     })
   }
   return entries
@@ -69,6 +73,7 @@ const clusterMembers = computed(() => {
         :class="`team-avatar__member--${index + 1}`"
         :name="member.name"
         :avatar="member.avatar"
+        :state="member.state"
         :size="Math.round(size * .64)"
       />
     </span>

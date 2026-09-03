@@ -91,10 +91,11 @@ export function workspaceRouter(
     ctx.body = {
       conversations: store
         .list<WorkspaceConversation>(user, 'conversation')
+        .map(c => store.conversationSummary(user, c))
         .sort(
           (a, b) =>
             Number(b.pinned) - Number(a.pinned) ||
-            b.updatedAt - a.updatedAt ||
+            (b.lastMessageAt ?? b.createdAt) - (a.lastMessageAt ?? a.createdAt) ||
             a.id.localeCompare(b.id),
         ),
       cursor: store.cursor(user),
