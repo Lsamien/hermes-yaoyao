@@ -6,15 +6,12 @@ import LoginView from '@/views/LoginView.vue'
 import PasswordChangeView from '@/views/PasswordChangeView.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
-import { useGroupsStore } from '@/stores/groups'
 import { useKanbanStore } from '@/stores/kanban'
 import { useThemeStore } from '@/stores/theme'
-import { reconcileYaoyaoPlugin } from '@/api/systemUpdate'
 import AgentIdentityFixture from '@/components/app/AgentIdentityFixture.vue'
 
 const auth = useAuthStore()
 const chat = useChatStore()
-const groups = useGroupsStore()
 const kanban = useKanbanStore()
 const theme = useThemeStore()
 const route = useRoute()
@@ -22,8 +19,8 @@ const agentIdentityFixture = import.meta.env.DEV
   && new URLSearchParams(window.location.search).get('fixture') === 'agent-identity'
 
 const pageTitle = computed(() => {
-  const name = route.path.startsWith('/groups')
-    ? groups.selectedRoom?.name || '团队'
+  const name = route.path.startsWith('/conversations')
+    ? '聊天'
     : route.path.startsWith('/kanban')
       ? kanban.selectedBoard?.name || kanban.selectedBoardSlug || '看板'
     : route.path.startsWith('/files')
@@ -42,7 +39,6 @@ watch(pageTitle, value => { document.title = value }, { immediate: true })
 
 watch(() => auth.isAuthenticated, authenticated => {
   if (authenticated) {
-    void reconcileYaoyaoPlugin().catch(() => undefined)
     void chat.connect().catch(() => undefined)
   }
 })

@@ -1,4 +1,6 @@
 import type Koa from 'koa'
+import type { WorkspaceStore } from './workspaceStore.js'
+import type { WorkspaceConversation } from '../shared/workspace.js'
 import Router from '@koa/router'
 import { parse } from 'cookie'
 import { createReadStream, realpathSync, statSync } from 'node:fs'
@@ -6,7 +8,7 @@ import { basename, resolve, sep } from 'node:path'
 import { lookup as mimeLookup } from 'mime-types'
 import { isSupportedGroupProtocolVersion, SUPPORTED_GROUP_PROTOCOL_VERSION_LABEL } from '../shared/types.js'
 import type { ServerConfig } from './config.js'
-import { DEFAULT_YAOYAO_PLUGIN_SOURCE, isLoopbackHost, isLoopbackUpstream, isPrivateHost } from './config.js'
+import { isLoopbackHost, isLoopbackUpstream, isPrivateHost } from './config.js'
 import { HttpError } from './errors.js'
 import { compareReleaseVersions } from './releases.js'
 import {
@@ -48,6 +50,7 @@ import {
 type JsonObject = Record<string, unknown>
 
 export interface RouteDependencies {
+  workspace: WorkspaceStore
   config: ServerConfig
   csrf: CsrfProtection
   upstream: UpstreamClient
@@ -79,20 +82,6 @@ function optionalBody(ctx: Koa.Context): JsonObject | undefined {
     : undefined
 }
 
-async function boundedRawBody(ctx: Koa.Context, maximum: number): Promise<Buffer> {
-  const chunks: Buffer[] = []
-  let size = 0
-  for await (const raw of ctx.req) {
-    const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as Uint8Array)
-    size += chunk.byteLength
-    if (size > maximum) {
-      throw new HttpError(413, 'Paired node attachment is too large', 'node_attachment_too_large')
-    }
-    chunks.push(chunk)
-  }
-  if (size === 0) throw new HttpError(400, 'Paired node attachment is empty', 'invalid_node_attachment')
-  return Buffer.concat(chunks, size)
-}
 
 function parseJson(response: UpstreamResponse): JsonObject {
   try {
@@ -157,27 +146,13 @@ function normalizedProfiles(value: JsonObject): unknown[] {
   })
 }
 
-function profilesWithHermesBotNames(profiles: unknown[], pluginProfiles: JsonObject | undefined): unknown[] {
-  const items = Array.isArray(pluginProfiles?.profiles) ? pluginProfiles.profiles : []
-  const identities = new Map<string, string>()
-  for (const entry of items) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
-    const profile = entry as JsonObject
-    const name = typeof profile.name === 'string' ? profile.name : ''
-    const botName = typeof profile.botName === 'string' ? profile.botName.trim() : ''
-    if (name && botName) identities.set(name, botName)
-  }
+function profilesWithCoreNames(profiles: unknown[]): unknown[] {
   return profiles.map(entry => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry
     const profile = entry as JsonObject
-    const name = typeof profile.name === 'string' ? profile.name : typeof profile.profile === 'string' ? profile.profile : ''
-    const agentName = identities.get(name)
-    return agentName ? {
-      ...profile,
-      agentName,
-      description: agentName,
-      display_name: agentName,
-    } : profile
+    const meta = profile.ui_meta as Record<string, any> | undefined
+    const title = meta?.['hermes-bots']?.title ?? profile.display_name
+    return typeof title === 'string' && title.trim() ? { ...profile, agentName:title.trim(), display_name:title.trim(), description:title.trim() } : profile
   })
 }
 
@@ -193,125 +168,6 @@ function publicStatus(status: JsonObject): JsonObject {
     gatewayState: typeof status.gateway_state === 'string'
       ? status.gateway_state
       : typeof status.gatewayState === 'string' ? status.gatewayState : undefined,
-  }
-}
-
-async function yaoyaoPluginVersion(
-  dependencies: RouteDependencies,
-  jar: CookieJar,
-): Promise<string | undefined> {
-  const response = await dependencies.upstream.request('/api/dashboard/plugins', jar)
-  if (response.status < 200 || response.status >= 300) return undefined
-  const manifests = parseJsonValue(response)
-  if (!Array.isArray(manifests)) return undefined
-  const manifest = manifests.find(entry => (
-    entry && typeof entry === 'object' && !Array.isArray(entry)
-    && (entry as JsonObject).name === 'yaoyao'
-  )) as JsonObject | undefined
-  return typeof manifest?.version === 'string' ? manifest.version : undefined
-}
-
-async function requireYaoyaoStorageReady(
-  dependencies: RouteDependencies,
-  jar: CookieJar,
-  installedVersion?: string,
-): Promise<void> {
-  if (!installedVersion) return
-  const response = await dependencies.upstream.request(
-    '/api/plugins/yaoyao/maintenance/storage',
-    jar,
-  )
-  if (response.status < 200 || response.status >= 300) {
-    throw new HttpError(
-      409,
-      '当前夭夭插件尚未具备安全升级能力，请先按文档完成一次兼容版本安装',
-      'yaoyao_storage_migration_required',
-    )
-  }
-  const storage = parseJson(response)
-  if (storage.ready !== true) {
-    throw new HttpError(
-      409,
-      '检测到旧数据目录冲突，已停止升级以避免覆盖夭夭数据',
-      'yaoyao_storage_conflict',
-    )
-  }
-}
-
-let yaoyaoReconcileInFlight: Promise<JsonObject> | undefined
-
-function pluginVersionAtLeast(installed: string | undefined, expected: string): boolean {
-  if (!installed) return false
-  try {
-    return compareReleaseVersions(installed, expected) >= 0
-  } catch {
-    return installed === expected
-  }
-}
-
-async function reconcileYaoyaoPlugin(
-  dependencies: RouteDependencies,
-  jar: CookieJar,
-  clientAddress: string | undefined,
-  expectedVersion: string,
-): Promise<JsonObject> {
-  if (yaoyaoReconcileInFlight) return yaoyaoReconcileInFlight
-  const task = (async () => {
-    const installedVersion = await yaoyaoPluginVersion(dependencies, jar)
-    if (pluginVersionAtLeast(installedVersion, expectedVersion)) {
-      return {
-        ok: true,
-        updated: false,
-        installedPluginVersion: installedVersion,
-        expectedPluginVersion: expectedVersion,
-      }
-    }
-
-    await requireYaoyaoStorageReady(dependencies, jar, installedVersion)
-    const pluginSource = dependencies.config.yaoyaoPluginSource
-      ?? DEFAULT_YAOYAO_PLUGIN_SOURCE
-    const installedResult = requireSuccess(await dependencies.upstream.request(
-      '/api/dashboard/agent-plugins/install',
-      jar,
-      {
-        method: 'POST',
-        body: {
-          identifier: pluginSource,
-          force: Boolean(installedVersion),
-          enable: true,
-        },
-        clientAddress,
-      },
-    ))
-
-    let actualVersion: string | undefined
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      actualVersion = await yaoyaoPluginVersion(dependencies, jar)
-      if (pluginVersionAtLeast(actualVersion, expectedVersion)) break
-      await new Promise(resolvePromise => setTimeout(resolvePromise, 250))
-    }
-    if (!pluginVersionAtLeast(actualVersion, expectedVersion)) {
-      throw new HttpError(
-        502,
-        `9119 插件更新后版本仍不匹配：期望 ${expectedVersion}，实际 ${actualVersion || '未安装'}`,
-        'yaoyao_plugin_version_mismatch',
-      )
-    }
-    return {
-      ...installedResult,
-      source: pluginSource,
-      updated: true,
-      installedPluginVersion: actualVersion,
-      expectedPluginVersion: expectedVersion,
-      restarted: false,
-      restartRequired: false,
-    }
-  })()
-  yaoyaoReconcileInFlight = task
-  try {
-    return await task
-  } finally {
-    if (yaoyaoReconcileInFlight === task) yaoyaoReconcileInFlight = undefined
   }
 }
 
@@ -413,21 +269,6 @@ function pushRequest<T>(operation: () => T): T {
   }
 }
 
-function bestEffortAutoSubscribe(
-  ctx: Koa.Context,
-  dependencies: RouteDependencies,
-  userID: string,
-  roomID: string,
-  baselineMessageSeq?: number,
-): void {
-  try {
-    dependencies.push.setGroupSubscription(userID, roomID, true, baselineMessageSeq)
-  } catch (cause) {
-    const detail = cause instanceof Error ? cause.message : String(cause)
-    ctx.app.emit('error', new Error(`团队消息已发送，但自动订阅推送失败：${detail}`), ctx)
-  }
-}
-
 function bestEffortRemoveUserPush(
   ctx: Koa.Context,
   dependencies: RouteDependencies,
@@ -441,44 +282,10 @@ function bestEffortRemoveUserPush(
   }
 }
 
-function groupMessageSequence(response: UpstreamResponse): number | undefined {
-  try {
-    const payload = parseJson(response)
-    const data = payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)
-      ? payload.data as JsonObject : {}
-    const message = payload.message && typeof payload.message === 'object' && !Array.isArray(payload.message)
-      ? payload.message as JsonObject
-      : data.message && typeof data.message === 'object' && !Array.isArray(data.message)
-        ? data.message as JsonObject : {}
-    const value = Number(message.seq ?? message.sequence)
-    return Number.isSafeInteger(value) && value >= 0 ? value : undefined
-  } catch {
-    return undefined
-  }
-}
-
-async function latestGroupMessageSequence(
-  dependencies: RouteDependencies,
-  roomID: string,
-): Promise<number> {
-  const response = await dependencies.upstreamSession.request(
-    `/api/plugins/yaoyao/v1/rooms/${encodeURIComponent(roomID)}/messages`,
-    { search: new URLSearchParams({ limit: '1' }) },
-  )
-  if (response.status === 404) throw new HttpError(404, '团队不存在', 'group_not_found')
-  const payload = requireSuccess(response)
-  const data = payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)
-    ? payload.data as JsonObject : {}
-  const rows = Array.isArray(payload.items) ? payload.items
-    : Array.isArray(payload.messages) ? payload.messages
-      : Array.isArray(data.items) ? data.items
-        : Array.isArray(data.messages) ? data.messages : []
-  const latest = rows.reduce((maximum, raw) => {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return maximum
-    const value = Number((raw as JsonObject).seq ?? (raw as JsonObject).sequence)
-    return Number.isSafeInteger(value) && value >= 0 ? Math.max(maximum, value) : maximum
-  }, 0)
-  return latest
+async function latestGroupMessageSequence(dependencies: RouteDependencies, roomID: string, owner: string): Promise<number> {
+  const room = dependencies.workspace.require<WorkspaceConversation>(owner, 'conversation', roomID)
+  if (room.kind !== 'group') throw new HttpError(404,'群聊不存在','group_not_found')
+  return room.lastSeq
 }
 
 function requestOrigin(ctx: Koa.Context, config: ServerConfig): string {
@@ -494,132 +301,12 @@ function pairingScopes(value: unknown): string[] | undefined {
   return value
 }
 
-async function addPairedChildNode(
-  qrPayload: string,
-  nameValue: string | undefined,
-  dependencies: RouteDependencies,
-): Promise<JsonObject> {
-  let deepLink: URL
-  try { deepLink = new URL(qrPayload.trim()) } catch {
-    throw new HttpError(400, '配对码格式无效', 'invalid_pairing_code')
-  }
-  if (deepLink.protocol !== 'yaoyao:' || deepLink.hostname !== 'pair' || deepLink.searchParams.get('v') !== '1') {
-    throw new HttpError(400, '这不是 8800 节点配对码', 'invalid_pairing_code')
-  }
-  const serviceValue = deepLink.searchParams.get('url') ?? ''
-  let serviceURL: URL
-  try { serviceURL = new URL(serviceValue) } catch {
-    throw new HttpError(400, '配对码缺少有效的 8800 地址', 'invalid_pairing_code')
-  }
-  if (!['http:', 'https:'].includes(serviceURL.protocol)
-    || serviceURL.username || serviceURL.password || serviceURL.search || serviceURL.hash
-    || (serviceURL.protocol === 'http:' && !isPrivateHost(serviceURL.hostname))) {
-    throw new HttpError(400, '子节点必须使用可信局域网 HTTP 或 HTTPS', 'invalid_node_url')
-  }
-  const requestJSON = async (url: URL, init?: RequestInit): Promise<JsonObject> => {
-    let response: Response
-    let timeout: ReturnType<typeof setTimeout> | undefined
-    try {
-      response = await Promise.race([
-        fetch(url, { ...init, redirect: 'error' }),
-        new Promise<never>((_resolve, reject) => {
-          timeout = setTimeout(() => reject(new Error('request timed out')), 20_000)
-          timeout.unref()
-        }),
-      ])
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : 'connection failed'
-      throw new HttpError(502, `无法连接子 8800 节点：${reason}`, 'child_node_unavailable')
-    } finally {
-      if (timeout) clearTimeout(timeout)
-    }
-    let value: unknown
-    try { value = await response.json() } catch { value = undefined }
-    if (!response.ok || !value || typeof value !== 'object' || Array.isArray(value)) {
-      throw new HttpError(response.status || 502, '子节点拒绝了配对请求', 'child_node_rejected')
-    }
-    return value as JsonObject
-  }
-  const capabilities = await requestJSON(new URL('/api/pair/v1/capabilities', serviceURL))
-  if (capabilities.serviceType !== 'yaoyao-web') {
-    throw new HttpError(409, '子节点必须是 8800 夭夭 Web 服务', 'child_node_must_be_8800')
-  }
-  const pairingId = deepLink.searchParams.get('id') ?? ''
-  const secret = deepLink.searchParams.get('secret') ?? ''
-  const expectedNode = deepLink.searchParams.get('node') ?? ''
-  const expectedFingerprint = deepLink.searchParams.get('fingerprint') ?? ''
-  const claimed = await requestJSON(new URL('/api/pair/v1/claim', serviceURL), {
-    method: 'POST',
-    headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ pairingId, secret, deviceName: '夭夭 8800 父节点' }),
-  })
-  if (claimed.serviceType !== 'yaoyao-web'
-    || claimed.nodeId !== expectedNode
-    || claimed.fingerprint !== expectedFingerprint
-    || typeof claimed.serverUrl !== 'string'
-    || typeof claimed.token !== 'string') {
-    throw new HttpError(502, '子节点身份与二维码不一致', 'child_node_identity_mismatch')
-  }
-  const nodeURL = new URL(claimed.serverUrl)
-  const profiles = await requestJSON(new URL(`${nodeURL.pathname.replace(/\/$/, '')}/api/profiles`, nodeURL), {
-    headers: { accept: 'application/json', authorization: `Bearer ${claimed.token}` },
-  })
-  let profileIdentities = new Map<string, JsonObject>()
-  try {
-    const identityPayload = await requestJSON(
-      new URL(`${nodeURL.pathname.replace(/\/$/, '')}/api/profile-identities`, nodeURL),
-      { headers: { accept: 'application/json', authorization: `Bearer ${claimed.token}` } },
-    )
-    profileIdentities = new Map(
-      (Array.isArray(identityPayload.profiles) ? identityPayload.profiles : [])
-        .flatMap(value => {
-          if (!value || typeof value !== 'object' || Array.isArray(value)) return []
-          const identity = value as JsonObject
-          return typeof identity.name === 'string' ? [[identity.name, identity] as const] : []
-        }),
-    )
-  } catch {
-    // Older 8800 nodes remain pairable; they simply use their REST names.
-  }
-  const profileItems = normalizedProfiles(profiles).flatMap(entry => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
-    const value = entry as JsonObject
-    const name = typeof value.name === 'string' ? value.name : ''
-    if (!name) return []
-    const identity = profileIdentities.get(name)
-    return [{
-      name,
-      displayName: typeof identity?.displayName === 'string' ? identity.displayName
-        : typeof value.agentName === 'string' ? value.agentName
-        : typeof value.display_name === 'string' ? value.display_name : name,
-      model: typeof value.model === 'string' ? value.model : '',
-      ...(typeof identity?.avatar === 'string' ? { avatar: identity.avatar } : {}),
-      ...(typeof identity?.color === 'string' ? { color: identity.color } : {}),
-    }]
-  })
-  const registration = {
-    nodeId: claimed.nodeId,
-    name: nameValue?.trim() || nodeURL.host,
-    serverUrl: claimed.serverUrl,
-    fingerprint: claimed.fingerprint,
-    accessToken: claimed.token,
-    profiles: profileItems,
-  }
-  const response = await dependencies.upstreamSession.request('/api/plugins/yaoyao/v1/nodes', {
-    method: 'POST', body: registration,
-  })
-  return requireSuccess(response)
-}
-
 function pairedProxyScope(path: string, method: string): NodeScope {
   if (path === '/profiles' || path.startsWith('/profiles/')) {
     return path.includes('/sessions') ? 'history.read' : 'agents.read'
   }
   if (path === '/sessions' || path.startsWith('/sessions/')) {
     return ['GET', 'HEAD'].includes(method) ? 'history.read' : 'sessions.execute'
-  }
-  if (path.startsWith('/plugins/yaoyao/v1/')) {
-    return ['GET', 'HEAD'].includes(method) ? 'groups.read' : 'groups.execute'
   }
   return 'sessions.execute'
 }
@@ -639,7 +326,7 @@ function pairedProxyPath(rawPath: string): string {
     || path.startsWith('/models/')
     || path.startsWith('/files/')
     || path.startsWith('/attachments/')
-    || path.startsWith('/plugins/yaoyao/')
+
   if (!allowed) throw new HttpError(404, 'Paired node route is not available', 'node_route_not_found')
   return `/api${path}`
 }
@@ -940,7 +627,7 @@ async function bootstrap(
       profiles: [],
       csrfToken,
       insecureLan: dependencies.config.insecureLan,
-      groupUploadsEnabled: isLoopbackUpstream(dependencies.config.upstream),
+      groupUploadsEnabled: true,
       upstreamReady: false,
       serverKind: 'yaoyao-web',
     })
@@ -960,14 +647,10 @@ async function bootstrap(
           const statusResponse = await dependencies.upstreamSession.request('/api/status')
           const rawStatus = requireSuccess(statusResponse)
           const profilesResponse = await dependencies.upstreamSession.request('/api/profiles')
-          const pluginProfilesResponse = await dependencies.upstreamSession.request('/api/plugins/yaoyao/profiles')
+
           return {
             status: publicStatus(rawStatus),
-            profiles: profilesWithHermesBotNames(
-              normalizedProfiles(requireSuccess(profilesResponse)),
-              pluginProfilesResponse.status >= 200 && pluginProfilesResponse.status < 300
-                ? parseJson(pluginProfilesResponse) : undefined,
-            ),
+            profiles: profilesWithCoreNames(normalizedProfiles(requireSuccess(profilesResponse))),
           }
         })(),
         new Promise<never>((_resolve, reject) => {
@@ -992,7 +675,7 @@ async function bootstrap(
     profiles,
     csrfToken,
     insecureLan: dependencies.config.insecureLan,
-    groupUploadsEnabled: isLoopbackUpstream(dependencies.config.upstream),
+    groupUploadsEnabled: true,
     upstreamReady,
     upstreamError,
     serverKind: 'yaoyao-web',
@@ -1086,7 +769,7 @@ async function searchSessions(ctx: Koa.Context, dependencies: RouteDependencies)
     if (!text) throw new HttpError(400, 'q is required', 'missing_query')
     const limit = Math.max(1, Math.min(100, Number(query.get('limit') ?? '50') || 50))
     query.set('limit', String(limit))
-    if (!query.get('source')) query.set('exclude_sources', 'cron,ios_group')
+    if (!query.get('source')) query.set('exclude_sources', 'cron,ios_group,yaoyao_workspace')
     if (query.get('profile')) {
       const response = await dependencies.upstream.request('/api/sessions/search', jar, { search: query })
       sendUpstreamResponse(ctx, response, jar)
@@ -1119,11 +802,6 @@ async function searchSessions(ctx: Koa.Context, dependencies: RouteDependencies)
     })
     json(ctx, 200, { results: results.slice(0, limit) })
   })
-}
-
-function groupPath(ctx: Koa.Context, suffix = ''): string {
-  const roomID = canonicalUUID(ctx.params.roomID, 'room ID')
-  return `/api/plugins/yaoyao/v1/rooms/${roomID}${suffix}`
 }
 
 function localMediaPath(root: string, relativePath: string): string {
@@ -1288,13 +966,9 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   router.get('/api/profiles', async (ctx) => {
     dependencies.auth.require(ctx, true)
     const profilesResponse = await dependencies.upstreamSession.request('/api/profiles')
-    const pluginProfilesResponse = await dependencies.upstreamSession.request('/api/plugins/yaoyao/profiles')
+
     json(ctx, profilesResponse.status, {
-      profiles: profilesWithHermesBotNames(
-        normalizedProfiles(requireSuccess(profilesResponse)),
-        pluginProfilesResponse.status >= 200 && pluginProfilesResponse.status < 300
-          ? parseJson(pluginProfilesResponse) : undefined,
-      ),
+      profiles: profilesWithCoreNames(normalizedProfiles(requireSuccess(profilesResponse))),
     })
   })
   router.get('/api/push/v1/capabilities', (ctx) => {
@@ -1359,7 +1033,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   })
   router.get('/api/push/v1/group-subscriptions', (ctx) => {
     const user = dependencies.auth.require(ctx)
-    const subscriptions = dependencies.push.listGroupSubscriptions(user.id)
+    const subscriptions = dependencies.push.listGroupSubscriptions(user.id).filter(s => dependencies.workspace.get<WorkspaceConversation>(user.id,'conversation',s.roomId)?.kind === 'group')
     json(ctx, 200, {
       subscriptions,
       roomIds: subscriptions.filter(item => item.enabled).map(item => item.roomId),
@@ -1373,7 +1047,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     }
     const enabled = request.enabled
     const roomID = canonicalUUID(ctx.params.roomID, 'room ID')
-    const baseline = enabled ? await latestGroupMessageSequence(dependencies, roomID) : undefined
+    const baseline = enabled ? await latestGroupMessageSequence(dependencies, roomID, user.id) : undefined
     const subscription = pushRequest(() => dependencies.push.setGroupSubscription(
       user.id,
       roomID,
@@ -1394,7 +1068,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   })
   router.get('/api/app/push/v1/group-subscriptions', (ctx) => {
     const user = dependencies.auth.require(ctx)
-    const subscriptions = dependencies.push.listGroupSubscriptions(user.id)
+    const subscriptions = dependencies.push.listGroupSubscriptions(user.id).filter(s => dependencies.workspace.get<WorkspaceConversation>(user.id,'conversation',s.roomId)?.kind === 'group')
     json(ctx, 200, {
       subscriptions,
       roomIds: subscriptions.filter(item => item.enabled).map(item => item.roomId),
@@ -1408,7 +1082,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     }
     const enabled = request.enabled
     const roomID = canonicalUUID(ctx.params.roomID, 'room ID')
-    const baseline = enabled ? await latestGroupMessageSequence(dependencies, roomID) : undefined
+    const baseline = enabled ? await latestGroupMessageSequence(dependencies, roomID, user.id) : undefined
     const subscription = pushRequest(() => dependencies.push.setGroupSubscription(
       user.id,
       roomID,
@@ -1568,7 +1242,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       nodeId: dependencies.pairings.nodeID,
       fingerprint: dependencies.pairings.fingerprint,
       scopes: [...DEFAULT_NODE_SCOPES],
-      features: ['bots', 'bot-group', 'native-group-worker', 'history'],
+      features: ['bots', 'history'],
     })
   })
 
@@ -1627,39 +1301,12 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       throw new HttpError(414, 'Paired node query is too long', 'node_query_too_long')
     }
     const jar = new CookieJar(cookieHeader)
-    const isWorkerAttachment = ctx.method === 'POST'
-      && /\/plugins\/yaoyao\/v1\/node-worker\/sessions\/[^/]+\/attachments$/.test(path)
-      && ctx.get('content-type').split(';', 1)[0]?.trim().toLowerCase() === 'application/octet-stream'
-    let rawBody: BodyInit | undefined
-    let requestHeaders: Record<string, string> = {
-      'x-yaoyao-node-client': ctx.params.deviceID,
-    }
-    if (isWorkerAttachment) {
-      const encodedName = ctx.get('x-file-name-b64')
-      const mimeType = ctx.get('x-mime-type') || 'application/octet-stream'
-      if (!/^[A-Za-z0-9_-]{2,512}$/.test(encodedName)
-        || !/^[\x20-\x7e]{1,200}$/.test(mimeType)) {
-        throw new HttpError(400, 'Paired node attachment headers are invalid', 'invalid_node_attachment')
-      }
-      const buffer = await boundedRawBody(ctx, 25 * 1_024 * 1_024)
-      rawBody = buffer.buffer.slice(
-        buffer.byteOffset,
-        buffer.byteOffset + buffer.byteLength,
-      ) as ArrayBuffer
-      requestHeaders = {
-        ...requestHeaders,
-        'content-type': 'application/octet-stream',
-        'x-file-name-b64': encodedName,
-        'x-mime-type': mimeType,
-      }
-    }
     const response = await dependencies.upstream.withReadScope(`device:${ctx.params.deviceID}`, ctx.get('x-yaoyao-cache') === 'bypass', () => dependencies.upstream.request(path, jar, {
       method: ctx.method,
       search: new URLSearchParams(ctx.querystring),
-      body: ['GET', 'HEAD'].includes(ctx.method) || isWorkerAttachment
+      body: ['GET', 'HEAD'].includes(ctx.method)
         ? undefined : optionalBody(ctx),
-      rawBody,
-      headers: requestHeaders,
+      headers: { 'x-yaoyao-node-client': ctx.params.deviceID },
       clientAddress: path === '/api/auth/ws-ticket'
         ? undefined : ctx.req.socket.remoteAddress,
     }))
@@ -1984,14 +1631,6 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       json(ctx, 200, { ok: true })
     })
   })
-  router.get('/api/app/admin/duplex-voice', async (ctx) => {
-    await proxyAdminFeature(ctx, dependencies, '/api/plugins/yaoyao/voice/settings')
-  })
-  router.put('/api/app/admin/duplex-voice', async (ctx) => {
-    await proxyAdminFeature(ctx, dependencies, '/api/plugins/yaoyao/voice/settings', {
-      method: 'PUT', requestBody: body(ctx),
-    })
-  })
   router.get('/api/app/system/update/status', async (ctx) => {
     dependencies.auth.requireAdmin(ctx)
     // No upstream calls, including best-effort plugin probes: a stalled 9119
@@ -2085,85 +1724,6 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       throw updateFailure(error)
     }
   })
-  router.post('/api/app/plugins/yaoyao/reconcile', async (ctx) => {
-    await withJar(ctx, async (jar) => {
-      await requireGatewayAuthentication(ctx, dependencies, jar)
-      json(ctx, 200, await reconcileYaoyaoPlugin(
-        dependencies,
-        jar,
-        ctx.req.socket.remoteAddress,
-        dependencies.updates.currentManifest().pluginVersion,
-      ))
-    })
-  })
-  router.post('/api/app/plugins/yaoyao/install', async (ctx) => {
-    await withJar(ctx, async (jar) => {
-      await requireGatewayAuthentication(ctx, dependencies, jar)
-      const pluginSource = dependencies.config.yaoyaoPluginSource
-        ?? DEFAULT_YAOYAO_PLUGIN_SOURCE
-      const request = body(ctx)
-      if (request.force !== undefined && typeof request.force !== 'boolean') {
-        throw new HttpError(400, 'force must be a boolean', 'invalid_request')
-      }
-
-      const manifestsResponse = await dependencies.upstream.request(
-        '/api/dashboard/plugins',
-        jar,
-      )
-      if (manifestsResponse.status < 200 || manifestsResponse.status >= 300) {
-        sendUpstreamResponse(ctx, manifestsResponse, jar)
-        return
-      }
-      const manifests = parseJsonValue(manifestsResponse)
-      if (!Array.isArray(manifests)) {
-        throw new HttpError(502, 'Hermes returned an invalid plugin list', 'invalid_upstream_json')
-      }
-      const installed = manifests.some((entry) => (
-        entry && typeof entry === 'object' && !Array.isArray(entry)
-        && (entry as JsonObject).name === 'yaoyao'
-      ))
-
-      await requireYaoyaoStorageReady(
-        dependencies,
-        jar,
-        installed ? 'installed' : undefined,
-      )
-
-      const force = request.force === true
-      if (installed && !force) {
-        throw new HttpError(
-          409,
-          '夭夭已经安装；升级时必须明确传入 force=true',
-          'yaoyao_force_required',
-        )
-      }
-      const installResponse = await dependencies.upstream.request(
-        '/api/dashboard/agent-plugins/install',
-        jar,
-        {
-          method: 'POST',
-          body: {
-            identifier: pluginSource,
-            force,
-            enable: true,
-          },
-          clientAddress: ctx.req.socket.remoteAddress,
-        },
-      )
-      if (installResponse.status < 200 || installResponse.status >= 300) {
-        sendUpstreamResponse(ctx, installResponse, jar)
-        return
-      }
-      const installedResult = parseJson(installResponse)
-      json(ctx, 200, {
-        ...installedResult,
-        source: pluginSource,
-        restarted: false,
-        restartRequired: false,
-      })
-    })
-  })
-
   router.get('/api/app/profiles', async (ctx) => {
     await withJar(ctx, async (jar) => {
       const profilesResponse = await dependencies.upstream.request('/api/profiles', jar)
@@ -2171,13 +1731,8 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
         sendUpstreamResponse(ctx, profilesResponse, jar)
         return
       }
-      const pluginProfilesResponse = await dependencies.upstream.request('/api/plugins/yaoyao/profiles', jar)
-      const profiles = profilesWithHermesBotNames(
-        normalizedProfiles(parseJson(profilesResponse)),
-        pluginProfilesResponse.status >= 200 && pluginProfilesResponse.status < 300
-          ? parseJson(pluginProfilesResponse)
-          : undefined,
-      )
+
+      const profiles = profilesWithCoreNames(normalizedProfiles(parseJson(profilesResponse)))
       json(ctx, 200, { profiles })
     })
   })
@@ -2215,7 +1770,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   })
   router.get('/api/app/sessions', async (ctx) => {
     const search = searchFrom(ctx, ['limit', 'offset', 'order', 'archived', 'profile', 'source'])
-    search.set('exclude_sources', 'cron,ios_group')
+    search.set('exclude_sources', 'cron,ios_group,yaoyao_workspace')
     const path = search.get('profile') ? '/api/sessions' : '/api/profiles/sessions'
     await proxy(ctx, dependencies.upstream, path, { search })
   })
@@ -2258,226 +1813,6 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     })
   })
 
-  router.get('/api/app/groups/capabilities', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/capabilities')
-  })
-  router.get('/api/app/groups/nodes', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/nodes')
-  })
-  router.post('/api/app/groups/nodes', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/nodes', {
-      method: 'POST', requestBody: body(ctx),
-    })
-  })
-  router.post('/api/app/groups/nodes/pair', async (ctx) => {
-    dependencies.auth.requireAdmin(ctx)
-    const request = body(ctx)
-    const qrPayload = typeof request.qrPayload === 'string' ? request.qrPayload : ''
-    if (!qrPayload || qrPayload.length > 4_096) {
-      throw new HttpError(400, '请粘贴有效的 8800 配对码', 'invalid_pairing_code')
-    }
-    json(ctx, 201, await addPairedChildNode(
-      qrPayload,
-      typeof request.name === 'string' ? request.name : undefined,
-      dependencies,
-    ))
-  })
-  router.post('/api/app/groups/nodes/refresh-identities', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/nodes/refresh-identities', {
-      method: 'POST', requestBody: {},
-    })
-  })
-  router.delete('/api/app/groups/nodes/:nodeID', async (ctx) => {
-    const nodeID = canonicalUUID(ctx.params.nodeID, 'node ID')
-    await proxy(
-      ctx,
-      dependencies.upstream,
-      `/api/plugins/yaoyao/v1/nodes/${nodeID}`,
-      { method: 'DELETE', requestBody: body(ctx) },
-    )
-  })
-  router.get('/api/app/groups/rooms', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/rooms', {
-      search: searchFrom(ctx, ['limit', 'cursor', 'archived']),
-    })
-  })
-  router.get('/api/app/groups/topics/pinned', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/topics/pinned', {
-      search: searchFrom(ctx, ['limit']),
-    })
-  })
-  router.get('/api/app/groups/topics', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/topics', {
-      search: searchFrom(ctx, ['limit', 'cursor']),
-    })
-  })
-  router.post('/api/app/groups/rooms', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/v1/rooms', {
-      method: 'POST', requestBody: body(ctx),
-    })
-  })
-  router.get('/api/app/groups/rooms/:roomID', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, groupPath(ctx))
-  })
-  for (const method of ['patch', 'delete'] as const) {
-    router[method]('/api/app/groups/rooms/:roomID', async (ctx) => {
-      await proxy(ctx, dependencies.upstream, groupPath(ctx), {
-        method: method.toUpperCase(), requestBody: body(ctx),
-      })
-    })
-  }
-  router.post('/api/app/groups/rooms/:roomID/restore', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, groupPath(ctx, '/restore'), {
-      method: 'POST', requestBody: body(ctx),
-    })
-  })
-  router.post('/api/app/groups/rooms/:roomID/agents', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, groupPath(ctx, '/agents'), {
-      method: 'POST', requestBody: body(ctx),
-    })
-  })
-  for (const method of ['patch', 'delete'] as const) {
-    router[method]('/api/app/groups/rooms/:roomID/agents/:agentID', async (ctx) => {
-      const agentID = canonicalUUID(ctx.params.agentID, 'agent ID')
-      await proxy(ctx, dependencies.upstream, groupPath(ctx, `/agents/${agentID}`), {
-        method: method.toUpperCase(), requestBody: body(ctx),
-      })
-    })
-  }
-  router.post('/api/app/groups/rooms/:roomID/agents/:agentID/interrupt', async (ctx) => {
-    const agentID = canonicalUUID(ctx.params.agentID, 'agent ID')
-    await proxy(ctx, dependencies.upstream, groupPath(ctx, `/agents/${agentID}/interrupt`), {
-      method: 'POST', requestBody: body(ctx),
-    })
-  })
-  router.get('/api/app/groups/rooms/:roomID/topics', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, groupPath(ctx, '/topics'), {
-      search: searchFrom(ctx, ['limit', 'cursor', 'archived']),
-    })
-  })
-  router.patch('/api/app/groups/rooms/:roomID/topics/:topicID', async (ctx) => {
-    const topicID = canonicalUUID(ctx.params.topicID, 'topic ID')
-    await proxy(ctx, dependencies.upstream, groupPath(ctx, `/topics/${topicID}`), {
-      method: 'PATCH', requestBody: body(ctx),
-    })
-  })
-  router.delete('/api/app/groups/rooms/:roomID/topics/:topicID', async (ctx) => {
-    const topicID = canonicalUUID(ctx.params.topicID, 'topic ID')
-    await proxy(ctx, dependencies.upstream, groupPath(ctx, `/topics/${topicID}`), {
-      method: 'DELETE', requestBody: body(ctx),
-    })
-  })
-  router.post('/api/app/groups/rooms/:roomID/topics/:topicID/restore', async (ctx) => {
-    const topicID = canonicalUUID(ctx.params.topicID, 'topic ID')
-    await proxy(ctx, dependencies.upstream, groupPath(ctx, `/topics/${topicID}/restore`), {
-      method: 'POST', requestBody: body(ctx),
-    })
-  })
-  router.patch('/api/app/groups/rooms/:roomID/topics/:topicID/read', async (ctx) => {
-    const topicID = canonicalUUID(ctx.params.topicID, 'topic ID')
-    await proxy(ctx, dependencies.upstream, groupPath(ctx, `/topics/${topicID}/read`), {
-      method: 'PATCH', requestBody: body(ctx),
-    })
-  })
-  router.get('/api/app/groups/rooms/:roomID/messages', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, groupPath(ctx, '/messages'), {
-      search: searchFrom(ctx, ['topicId', 'beforeSeq', 'afterSeq', 'limit']),
-    })
-  })
-  router.post('/api/app/groups/rooms/:roomID/messages', async (ctx) => {
-    const localUser = dependencies.auth.require(ctx)
-    const subscribedRoomID = canonicalUUID(ctx.params.roomID, 'room ID')
-    const request = body(ctx)
-    const uploadIds = Array.isArray(request.uploadIds)
-      ? request.uploadIds.map((value) => String(value))
-      : []
-    const upstreamBody = { ...request }
-    delete upstreamBody.uploadIds
-    if (uploadIds.length) {
-      if (!isLoopbackUpstream(dependencies.config.upstream)) {
-        throw new HttpError(409, 'Group attachments require a loopback Hermes upstream', 'remote_upload_disabled')
-      }
-      const accountKey = requestAccountKey(ctx.req)
-      const records = dependencies.uploads.records(uploadIds, accountKey)
-      const content = typeof upstreamBody.content === 'string' ? upstreamBody.content.trim() : ''
-      upstreamBody.content = [content, uploadMarkdown(records)].filter(Boolean).join('\n\n')
-      await withJar(ctx, async (jar) => {
-        const response = await dependencies.upstream.request(groupPath(ctx, '/messages'), jar, {
-          method: 'POST', body: upstreamBody,
-        })
-        sendUpstreamResponse(ctx, response, jar)
-        if (response.status >= 200 && response.status < 300) {
-          dependencies.uploads.markReferenced(uploadIds, accountKey)
-          bestEffortAutoSubscribe(
-            ctx,
-            dependencies,
-            localUser.id,
-            subscribedRoomID,
-            groupMessageSequence(response),
-          )
-        }
-      })
-      return
-    }
-    await withJar(ctx, async (jar) => {
-      const response = await dependencies.upstream.request(groupPath(ctx, '/messages'), jar, {
-        method: 'POST', body: upstreamBody,
-      })
-      sendUpstreamResponse(ctx, response, jar)
-      if (response.status >= 200 && response.status < 300) {
-        bestEffortAutoSubscribe(
-          ctx,
-          dependencies,
-          localUser.id,
-          subscribedRoomID,
-          groupMessageSequence(response),
-        )
-      }
-    })
-  })
-  for (const action of ['approval', 'clarification'] as const) {
-    router.post(`/api/app/groups/rooms/:roomID/interactions/:interactionID/${action}`, async (ctx) => {
-      const interactionID = safeIdentifier(ctx.params.interactionID, 'interaction ID')
-      await proxy(
-        ctx,
-        dependencies.upstream,
-        groupPath(ctx, `/interactions/${encodeURIComponent(interactionID)}/${action}`),
-        { method: 'POST', requestBody: body(ctx) },
-      )
-    })
-  }
-
-  router.post('/api/app/group-uploads', async (ctx) => {
-    if (!isLoopbackUpstream(dependencies.config.upstream)) {
-      throw new HttpError(409, 'Group attachments require a loopback Hermes upstream', 'remote_upload_disabled')
-    }
-    await withJar(ctx, async (jar) => {
-      await requireGatewayAuthentication(ctx, dependencies, jar)
-      const accountKey = requestAccountKey(ctx.req)
-      const files = await receiveGroupUploads(ctx.req, dependencies.uploads, accountKey)
-      json(ctx, 201, { files })
-    })
-  })
-
-  router.get('/api/app/files', async (ctx) => {
-    await proxy(ctx, dependencies.upstream, '/api/plugins/yaoyao/files', {
-      search: searchFrom(ctx, ['limit', 'cursor', 'search', 'profile', 'kind', 'sender', 'session_id']),
-    })
-  })
-  for (const action of ['download', 'preview'] as const) {
-    router.get(`/api/app/files/:fileID/${action}`, async (ctx) => {
-      const id = safeIdentifier(ctx.params.fileID, 'file ID')
-      await proxy(ctx, dependencies.upstream, `/api/plugins/yaoyao/${encodeURIComponent(id)}/download`, {
-        search: searchFrom(ctx, ['profile']),
-        requestHeaders: ctx.get('range') ? { range: ctx.get('range') } : undefined,
-        maxResponseBytes: 256 * 1_024 * 1_024,
-      })
-      if (action === 'preview') {
-        prepareFilePreview(ctx, `file-${id}`)
-      }
-    })
-  }
-
   router.all('/api/*gatewayPath', async (ctx) => {
     if (ctx.path.startsWith('/api/app/') || ctx.path.startsWith('/api/pair/')) {
       throw new HttpError(404, 'Route not found', 'not_found')
@@ -2496,22 +1831,8 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       // phone's address here would make 9119 reject the ticket during Upgrade.
       clientAddress: upstreamPath === '/api/auth/ws-ticket'
         ? undefined : ctx.req.socket.remoteAddress,
-      maxResponseBytes: /\/plugins\/yaoyao\/v1\/nodes\/[0-9a-f-]{36}\/files$/.test(upstreamPath)
-        ? 256 * 1_024 * 1_024 : undefined,
+
     })
-    const nativeGroupMessage = ctx.method === 'POST'
-      ? /^\/api\/plugins\/yaoyao\/v1\/rooms\/([0-9a-f-]{36})\/messages$/.exec(upstreamPath)
-      : null
-    if (nativeGroupMessage && response.status >= 200 && response.status < 300) {
-      const localUser = dependencies.auth.require(ctx)
-      bestEffortAutoSubscribe(
-        ctx,
-        dependencies,
-        localUser.id,
-        canonicalUUID(nativeGroupMessage[1]!, 'room ID'),
-        groupMessageSequence(response),
-      )
-    }
     sendUpstreamResponse(ctx, response, dependencies.upstreamSession.jar)
   })
 

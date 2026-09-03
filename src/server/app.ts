@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
@@ -22,6 +22,11 @@ import {
 } from './security.js'
 import { UpstreamHttpError, UpstreamClient } from './upstream.js'
 import { UploadStore } from './uploads.js'
+import { WorkspaceStore } from './workspaceStore.js'
+import { WorkspaceNodes } from './workspaceGateway.js'
+import { WorkspaceRuntime } from './workspaceRuntime.js'
+import { WorkspaceAssets } from './workspaceAssets.js'
+import { workspaceRouter } from './workspaceRoutes.js'
 import { SystemUpdateManager } from './updateManager.js'
 import { PushCoordinator } from './pushCoordinator.js'
 import {
@@ -39,9 +44,7 @@ import {
 } from './allowedHostsConfiguration.js'
 import {
   ChatPushJobManager,
-  GroupPushEventWatcher,
   HermesChatNotificationResolver,
-  HermesGroupEventSource,
 } from './pushEvents.js'
 
 export interface ApplicationOptions {
@@ -62,6 +65,8 @@ export interface ApplicationOptions {
 }
 
 export interface ApplicationRuntime {
+  workspace: WorkspaceStore
+  workspaceRuntime: WorkspaceRuntime
   realtime: RealtimeAPI
   app: Koa
   config: ServerConfig
@@ -80,7 +85,6 @@ export interface ApplicationRuntime {
   allowedHostsConfiguration: AllowedHostsConfigurationManager
   pushEventCoordinator: PushCoordinatorEventAdapter
   chatPushJobs: ChatPushJobManager
-  groupPushEvents: GroupPushEventWatcher
   close(): void
 }
 
@@ -174,21 +178,34 @@ export function createApplication(options: ApplicationOptions = {}): Application
     isUserActive: userID => auth.isUserActive(userID),
     userAuthorizationVersion: userID => auth.pushAuthorizationVersion(userID),
   })
-  const pushEventCoordinator = new PushCoordinatorEventAdapter(push, upstreamSession)
+  const pushEventCoordinator = new PushCoordinatorEventAdapter(push)
   const chatPushJobs = new ChatPushJobManager(config, upstreamSession, pushEventCoordinator, {
     resolver: new HermesChatNotificationResolver(
       upstreamSession,
       (localUserID, prompt) => push.promptDigest(localUserID, prompt),
     ),
   })
-  const groupPushEvents = new GroupPushEventWatcher(
-    new HermesGroupEventSource(config, upstreamSession),
-    pushEventCoordinator,
-  )
+  // The application owns group events. No Dashboard plugin is queried.
+  const workspace = new WorkspaceStore(config.home)
+  const workspaceNodes = new WorkspaceNodes(workspace, config, { url: config.upstream, client: upstream, session: upstreamSession })
+  const workspaceRuntime = new WorkspaceRuntime(workspace, workspaceNodes, uploads, owner => auth.isUserActive(owner))
+  const workspaceAssets = new WorkspaceAssets(workspace, workspaceNodes, config.home)
+  workspaceRuntime.onMessage = (owner, message) => workspaceAssets.archive(owner, message)
+  workspaceRuntime.onNotify = (owner, c, run, message, interaction) => {
+    if (c.kind === 'group' && !push.isGroupSubscribed(owner,c.id)) return
+    push.enqueueNotification({ kind: interaction ? interaction.kind === 'approval' ? 'chat.approval.requested' : 'chat.clarification.requested' : run.status === 'failed' ? 'chat.failed' : 'chat.completed', eventID: `workspace:${interaction?.id ?? run.id}`, localUserID: owner, title: c.name, body: (interaction?.message || message?.content || run.error || '回复完成').slice(0,180), collapseID: `workspace:${c.id}`, data: { conversationId:c.id, workspace:'1' }, ...(c.kind === 'group' ? {roomID:c.id} : {}) })
+  }
   const realtime = new RealtimeAPI(config, auth, csrf, pairings, upstream, upstreamSession, {
     coordinator: pushEventCoordinator,
     resolver: new HermesChatNotificationResolver(upstreamSession, (user, prompt) => push.promptDigest(user, prompt)),
   })
+  realtime.broker.protectedSession = id => workspace.ownsUpstream(id)
+  realtime.broker.onNativeEvent = (owner, profile, storedId, frame) => {
+    if (!['message.complete', 'tool.complete', 'tool.completed', 'attachment.staged'].includes(frame.type)) return
+    const data = frame.payload ?? {}, text = JSON.stringify(data)
+    const messageId = String(data.row_id ?? data.message_id ?? data.id ?? createHash('sha256').update(text).digest('hex'))
+    void workspaceAssets.archiveText(owner, text, 'local', profile, storedId, messageId, frame.type === 'attachment.staged' ? 'user' : 'agent').catch(() => {})
+  }
   chatPushJobs.setTransportFactory(realtime.recoveryTransport, job => realtime.ownsPushJob(job.id))
   try {
     uploads.cleanupUncommitted()
@@ -242,15 +259,17 @@ export function createApplication(options: ApplicationOptions = {}): Application
     await next()
   })
   app.use(realtime.middleware())
-  app.use(bodyParser({
+  const parseBody = (limit: string) => bodyParser({
     encoding: 'utf-8',
     enableTypes: ['json'],
     parsedMethods: ['POST', 'PUT', 'PATCH', 'DELETE'],
-    jsonLimit: '2mb',
+    jsonLimit: limit,
     onError: (error, ctx) => {
       throw new HttpError(ctx.status === 413 || (error as { status?: number }).status === 413 ? 413 : 400, 'Invalid JSON request body', 'invalid_json_body')
     },
-  }))
+  })
+  const ordinaryBody = parseBody('2mb'), workspaceBody = parseBody('4mb')
+  app.use((ctx,next) => (/^\/api\/app\/(agents|conversations)(\/|$)/.test(ctx.path) ? workspaceBody : ordinaryBody)(ctx,next))
   app.use(async (ctx, next) => {
     ctx.state.localAuth = auth
     ctx.state.upstreamSession = upstreamSession
@@ -295,7 +314,30 @@ export function createApplication(options: ApplicationOptions = {}): Application
     } else await next()
   })
 
+  const applicationRouter = workspaceRouter(workspace, workspaceRuntime, workspaceNodes, workspaceAssets, uploads, auth, push)
+  app.use(applicationRouter.routes())
+  app.use(async (ctx, next) => {
+    if (ctx.path.includes('/plugins/yaoyao') || ctx.path.startsWith('/api/app/groups')) throw new HttpError(410, '请使用新版聊天接口', 'retired_plugin_api')
+    const id = /\/sessions\/([^/]+)/.exec(ctx.path)?.[1]
+    if (id && workspace.ownsUpstream(decodeURIComponent(id))) throw new HttpError(404, '会话不存在', 'session_not_found')
+    await next()
+    // Native history is a separate surface, including search and profile projections.
+    if (ctx.path.includes('/sessions') || ctx.path.endsWith('/profiles')) {
+      let value: any = ctx.body
+      const buffered = Buffer.isBuffer(value)
+      try {
+        if (buffered) value = JSON.parse(value.toString())
+        const filter = (v: any): any => {
+          if (Array.isArray(v)) return v.filter(x => !x || typeof x !== 'object' || (x.source !== 'yaoyao_workspace' && !workspace.ownsUpstream(String(x.id ?? x.session_id ?? x.sessionId ?? '')))).map(filter)
+          if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k,x]) => [k, filter(x)]))
+          return v
+        }
+        ctx.body = buffered ? Buffer.from(JSON.stringify(filter(value))) : filter(value)
+      } catch { /* Preserve non-JSON error responses. */ }
+    }
+  })
   const router = createApiRouter({
+    workspace,
     config,
     csrf,
     upstream,
@@ -324,6 +366,8 @@ export function createApplication(options: ApplicationOptions = {}): Application
   })
 
   return {
+    workspace,
+    workspaceRuntime,
     realtime,
     app,
     config,
@@ -342,14 +386,16 @@ export function createApplication(options: ApplicationOptions = {}): Application
     allowedHostsConfiguration,
     pushEventCoordinator,
     chatPushJobs,
-    groupPushEvents,
     close: () => {
+      workspaceAssets.close()
+      workspaceRuntime.close()
+      workspaceNodes.close()
       upstream.close()
       realtime.close()
       chatPushJobs.stop()
-      groupPushEvents.stop()
       push.close()
       uploads.close()
+      workspace.close()
     },
   }
 }
@@ -370,12 +416,11 @@ export function createNodeServer(runtime: ApplicationRuntime): NodeServerRuntime
   const synchronizePushObservers = (enabled = runtime.push.isAnyProviderEnabled()) => {
     if (enabled) {
       runtime.chatPushJobs.start()
-      runtime.groupPushEvents.start()
     } else {
       runtime.chatPushJobs.stop()
-      runtime.groupPushEvents.stop()
     }
   }
+  runtime.workspaceRuntime.start()
   synchronizePushObservers()
   const removePushConfigurationListener = runtime.push.onEnabledChange(synchronizePushObservers)
   const removeWebSockets = runtime.realtime.rejectLegacyUpgrades(server)

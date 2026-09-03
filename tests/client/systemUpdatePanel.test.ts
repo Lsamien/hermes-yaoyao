@@ -70,7 +70,7 @@ describe('SystemUpdatePanel', () => {
     const wrapper = mount(SystemUpdatePanel, { global: { stubs: { AppIcon: true } } })
     await flushPromises()
     expect(wrapper.text()).toContain('9119 离线或认证失败也不影响')
-    expect(wrapper.text()).toContain('未检测（不影响 Web 升级）')
+    expect(wrapper.text()).not.toContain('当前插件')
     expect(wrapper.find('.version-warning').exists()).toBe(false)
     const apply = wrapper.find<HTMLButtonElement>('.solid-button')
     expect(apply.element.disabled).toBe(false)

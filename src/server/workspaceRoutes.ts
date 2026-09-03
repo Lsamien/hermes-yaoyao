@@ -1,0 +1,549 @@
+import Router from '@koa/router'
+import type Koa from 'koa'
+import { createReadStream, statSync } from 'node:fs'
+import { z } from 'zod'
+import { WorkspaceStore, agentInput, parse } from './workspaceStore.js'
+import { WorkspaceRuntime } from './workspaceRuntime.js'
+import { WorkspaceNodes, type WorkspaceNode } from './workspaceGateway.js'
+import {
+  WorkspaceAssets,
+  libraryFile,
+  publicFile,
+  type StoredWorkspaceFile,
+} from './workspaceAssets.js'
+import { receiveGroupUploads, type UploadStore } from './uploads.js'
+import { HttpError } from './errors.js'
+import type { PushCoordinator } from './pushCoordinator.js'
+import type { LocalAuthStore } from './localAuth.js'
+import type {
+  WorkspaceAgent,
+  WorkspaceConversation,
+  WorkspaceRun,
+  WorkspaceInteraction,
+} from '../shared/workspace.js'
+
+const body = (ctx: Koa.Context): any => (ctx.request as Koa.Request & { body?: unknown }).body ?? {}
+const number = (v: unknown, fallback: number) =>
+  typeof v === 'string' && /^\d+$/.test(v) ? Math.min(Number(v), Number.MAX_SAFE_INTEGER) : fallback
+export function workspaceRouter(
+  store: WorkspaceStore,
+  runtime: WorkspaceRuntime,
+  nodes: WorkspaceNodes,
+  assets: WorkspaceAssets,
+  uploads: UploadStore,
+  auth: LocalAuthStore,
+  push: PushCoordinator,
+): Router {
+  const router = new Router(),
+    owner = (ctx: Koa.Context) => auth.require(ctx).id
+  const libraryId = (user: string, id: string) =>
+    Number(
+      store.db
+        .prepare("SELECT rowid AS n FROM workspace_entities WHERE owner=? AND kind='file' AND id=?")
+        .get(user, id)?.n ?? 0,
+    )
+  const fileRecord = (user: string, id: string): StoredWorkspaceFile => {
+    if (/^\d+$/.test(id)) {
+      const row = store.db
+        .prepare("SELECT data FROM workspace_entities WHERE owner=? AND kind='file' AND rowid=?")
+        .get(user, Number(id))
+      if (row) return JSON.parse(String(row.data))
+    }
+    return store.require(user, 'file', id)
+  }
+  router.get('/api/app/capabilities', (ctx) => {
+    owner(ctx)
+    ctx.body = {
+      protocolVersion: 1,
+      serverKind: 'yaoyao-web',
+      features: [
+        'agents',
+        'conversations',
+        'immutableGroups',
+        'files',
+        'voice',
+        'context',
+        'nodes',
+        'events',
+      ],
+    }
+  })
+  router.get('/api/app/agents/sources', async (ctx) => {
+    ctx.body = await nodes.sources(owner(ctx))
+  })
+  router.get('/api/app/agents', (ctx) => {
+    ctx.body = { agents: store.list<WorkspaceAgent>(owner(ctx), 'agent') }
+  })
+  router.post('/api/app/agents', async (ctx) => {
+    const user = owner(ctx),
+      input = parse(agentInput, body(ctx)),
+      sources = await nodes.sources(user)
+    if (!sources.sources.some((s) => s.nodeId === input.nodeId && s.profile === input.profile))
+      throw new HttpError(409, '基础 Agent 当前不可用', 'source_unavailable')
+    ctx.body = { agent: store.createAgent(user, input) }
+    ctx.status = 201
+  })
+  router.patch('/api/app/agents/:id', (ctx) => {
+    ctx.body = { agent: store.updateAgent(owner(ctx), ctx.params.id, body(ctx)) }
+  })
+  router.get('/api/app/conversations', (ctx) => {
+    const user = owner(ctx)
+    ctx.body = {
+      conversations: store
+        .list<WorkspaceConversation>(user, 'conversation')
+        .sort(
+          (a, b) =>
+            Number(b.pinned) - Number(a.pinned) ||
+            b.updatedAt - a.updatedAt ||
+            a.id.localeCompare(b.id),
+        ),
+      cursor: store.cursor(user),
+    }
+  })
+  router.post('/api/app/conversations', (ctx) => {
+    const user = owner(ctx),
+      conversation = store.createGroup(user, body(ctx))
+    try {
+      push.setGroupSubscription(user, conversation.id, true, conversation.lastSeq)
+    } catch {
+      /* Optional delivery cannot undo a created chat. */
+    }
+    ctx.body = { conversation }
+    ctx.status = 201
+  })
+  router.get('/api/app/conversations/:id', (ctx) => {
+    const user = owner(ctx),
+      conversation = store.require<WorkspaceConversation>(user, 'conversation', ctx.params.id)
+    ctx.body = {
+      conversation,
+      messages: store.messages(user, conversation.id),
+      run: conversation.activeRunId
+        ? store.require<WorkspaceRun>(user, 'run', conversation.activeRunId)
+        : null,
+      interactions: store
+        .list<WorkspaceInteraction>(user, 'interaction')
+        .filter((i) => i.conversationId === conversation.id && !i.resolved),
+      context: store.get(user, 'context', conversation.id) ?? null,
+    }
+  })
+  router.patch('/api/app/conversations/:id', (ctx) => {
+    ctx.body = { conversation: store.updateConversation(owner(ctx), ctx.params.id, body(ctx)) }
+  })
+  router.get('/api/app/conversations/:id/messages', (ctx) => {
+    ctx.body = {
+      messages: store.messages(
+        owner(ctx),
+        ctx.params.id,
+        number(ctx.query.before, Number.MAX_SAFE_INTEGER),
+        Math.min(200, number(ctx.query.limit, 100)),
+      ),
+    }
+  })
+  router.post('/api/app/conversations/:id/messages', (ctx) => {
+    const user = owner(ctx)
+    ctx.body = { run: runtime.send(user, ctx.params.id, body(ctx)) }
+    ctx.status = 202
+  })
+  router.put('/api/app/conversations/:id/read', (ctx) => {
+    const user = owner(ctx),
+      c = store.require<WorkspaceConversation>(user, 'conversation', ctx.params.id)
+    const seq = parse(z.object({ seq: z.number().int().nonnegative() }).strict(), body(ctx)).seq
+    c.readSeq = Math.max(c.readSeq, Math.min(seq, c.lastSeq))
+    store.atomic(() => {
+      store.put(user, 'conversation', c.id, c)
+      store.event(user, 'conversation.changed', c, c.id)
+    })
+    ctx.body = { conversation: c }
+  })
+  router.post('/api/app/runs/:id/stop', async (ctx) => {
+    await runtime.stop(owner(ctx), ctx.params.id)
+    ctx.body = { ok: true }
+  })
+  router.post('/api/app/runs/:id/reconcile', (ctx) => {
+    const user = owner(ctx)
+    store.require(user, 'run', ctx.params.id)
+    void runtime.reconcile(user, ctx.params.id).catch(() => {})
+    ctx.status = 202
+    ctx.body = { ok: true }
+  })
+  router.post('/api/app/interactions/:id/respond', async (ctx) => {
+    const b = parse(z.object({ answer: z.string().min(1).max(16_000) }).strict(), body(ctx))
+    await runtime.respond(owner(ctx), ctx.params.id, b.answer)
+    ctx.body = { ok: true }
+  })
+  router.get('/api/app/events', (ctx) => {
+    const user = owner(ctx),
+      after = number(ctx.query.after, 0),
+      events = store.events(user, after)
+    ctx.set('Cache-Control', 'no-store')
+    ctx.body = { events, cursor: events.at(-1)?.seq ?? after }
+  })
+  router.get('/api/app/nodes', (ctx) => {
+    ctx.body = {
+      nodes: store
+        .list<WorkspaceNode>(owner(ctx), 'node')
+        .map(({ secret: _secret, ...node }) => node),
+    }
+  })
+  router.post('/api/app/nodes', async (ctx) => {
+    const b = parse(
+      z
+        .object({
+          name: z.string().min(1).max(100),
+          url: z.string().url().max(2048),
+          username: z.string().max(256),
+          password: z.string().max(4096),
+        })
+        .strict(),
+      body(ctx),
+    )
+    await nodes.add(owner(ctx), b)
+    ctx.status = 201
+    ctx.body = { ok: true }
+  })
+  router.delete('/api/app/nodes/:id', (ctx) => {
+    nodes.remove(owner(ctx), ctx.params.id)
+    ctx.body = { ok: true }
+  })
+  router.post('/api/app/uploads', async (ctx) => {
+    const user = owner(ctx),
+      refs = await receiveGroupUploads(ctx.req, uploads, user)
+    const files = uploads
+      .records(
+        refs.map((r) => r.id),
+        user,
+      )
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        mimeType: r.mimeType,
+        size: r.size,
+        path: r.path,
+        sender: 'user' as const,
+        createdAt: Date.now(),
+      }))
+    // A library entry owns its bytes even when the user cancels the draft.
+    uploads.markReferenced(files.map(file => file.id), user)
+    for (const f of files) store.put(user, 'file', f.id, f)
+    ctx.status = 201
+    ctx.body = { files: files.map(publicFile) }
+  })
+  router.get('/api/app/files', (ctx) => {
+    const files = store
+      .list<StoredWorkspaceFile>(owner(ctx), 'file')
+      .filter(
+        (f) =>
+          (!ctx.query.search ||
+            f.name.toLowerCase().includes(String(ctx.query.search).toLowerCase())) &&
+          (!ctx.query.profile || f.profile === ctx.query.profile) &&
+          (!ctx.query.session_id || f.conversationId === ctx.query.session_id) &&
+          (!ctx.query.sender || f.sender === ctx.query.sender),
+      )
+      .sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
+      .map((f) => libraryFile(publicFile(f), libraryId(owner(ctx), f.id), store.get<WorkspaceConversation>(owner(ctx),'conversation',f.conversationId ?? '')))
+      .filter((f) => !ctx.query.kind || f.kind === ctx.query.kind)
+    const start = number(ctx.query.cursor, 0),
+      limit = Math.min(200, number(ctx.query.limit, 50))
+    ctx.body = {
+      items: files.slice(start, start + limit),
+      total: files.length,
+      nextCursor: start + limit < files.length ? String(start + limit) : null,
+    }
+  })
+  router.get('/api/app/files/stats', (ctx) => {
+    const files = store.list<StoredWorkspaceFile>(owner(ctx), 'file')
+    ctx.body = { count: files.length, totalBytes: files.reduce((sum, f) => sum + f.size, 0) }
+  })
+  router.post('/api/app/message-files/query', (ctx) => {
+    const ids = parse(
+      z.object({ messageIds: z.array(z.union([z.string(), z.number()])).max(500) }),
+      body(ctx),
+    ).messageIds.map(String)
+    const files = store.list<StoredWorkspaceFile>(owner(ctx), 'file')
+    ctx.body = {
+      messages: Object.fromEntries(
+        ids.map((id) => [
+          id,
+          files
+            .filter((f) => f.messageId === id)
+            .map((f, ordinal) => ({
+              itemId: libraryId(owner(ctx), f.id),
+              messageId: id,
+              ordinal,
+              originalPath: `/api/app/files/${f.id}/download`,
+              referencePath: `/api/app/files/${f.id}/download`,
+              name: f.name,
+              size: f.size,
+              mimeType: f.mimeType,
+              archiveStatus: 'ready',
+              archivedAt: f.createdAt,
+              availability: 'archived',
+            })),
+        ]),
+      ),
+    }
+  })
+  for (const action of ['download', 'preview'])
+    router.get(`/api/app/files/:id/${action}`, (ctx) => {
+      const file = fileRecord(owner(ctx), ctx.params.id),
+        size = statSync(file.path).size
+      const activeContent =
+        /(?:html|svg|javascript|ecmascript|xml)/i.test(file.mimeType) ||
+        /\.(?:html?|svg|js|mjs|xml|xhtml)$/i.test(file.name)
+      ctx.type = activeContent ? 'application/octet-stream' : file.mimeType
+      ctx.set(
+        'Content-Disposition',
+        `${action === 'preview' && !activeContent ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+      )
+      ctx.set('Accept-Ranges', 'bytes')
+      ctx.set('Cache-Control', 'private, no-store')
+      const range = ctx.get('range'),
+        match = /^bytes=(\d*)-(\d*)$/.exec(range)
+      let start = 0,
+        end = size - 1
+      if (range) {
+        if (!match || (!match[1] && !match[2]))
+          throw new HttpError(416, 'Range invalid', 'invalid_range')
+        if (!match[1]) start = Math.max(0, size - Number(match[2]))
+        else {
+          start = Number(match[1])
+          end = match[2] ? Math.min(size - 1, Number(match[2])) : size - 1
+        }
+        if (start > end || start >= size) {
+          ctx.set('Content-Range', `bytes */${size}`)
+          throw new HttpError(416, 'Range invalid', 'invalid_range')
+        }
+        ctx.status = 206
+        ctx.set('Content-Range', `bytes ${start}-${end}/${size}`)
+      }
+      ctx.length = Math.max(0, end - start + 1)
+      ctx.body = size ? createReadStream(file.path, { start, end }) : Buffer.alloc(0)
+    })
+  const contextKey = (ctx: Koa.Context) =>
+    JSON.stringify([ctx.query.profile ?? ctx.get('x-hermes-profile') ?? 'default', ctx.params.id])
+  router.get('/api/app/session-context/:id', (ctx) => {
+    ctx.body = { snapshot: store.get(owner(ctx), 'native-context', contextKey(ctx)) ?? null }
+  })
+  router.put('/api/app/session-context/:id', (ctx) => {
+    const user = owner(ctx),
+      key = contextKey(ctx)
+    const value = parse(
+      z
+        .object({
+          usedTokens: z.number().int().nonnegative(),
+          limitTokens: z.number().int().positive().nullable().optional(),
+          percent: z.number().nonnegative().nullable().optional(),
+          compressions: z.number().int().nonnegative().nullable().optional(),
+          model: z.string().max(512).nullable().optional(),
+          provider: z.string().max(256).nullable().optional(),
+          observedAt: z.number().nonnegative(),
+        })
+        .strict(),
+      body(ctx),
+    )
+    const previous = store.get<{ observedAt: number }>(user, 'native-context', key)
+    const snapshot =
+      previous && previous.observedAt > value.observedAt
+        ? previous
+        : { ...value, sessionId: ctx.params.id, updatedAt: Date.now() / 1000 }
+    store.put(user, 'native-context', key, snapshot)
+    ctx.body = { snapshot }
+  })
+  registerVoice(router, store, nodes, owner, auth)
+  return router
+}
+
+function registerVoice(
+  router: Router,
+  store: WorkspaceStore,
+  vault: WorkspaceNodes,
+  owner: (ctx: Koa.Context) => string,
+  auth: LocalAuthStore,
+): void {
+  const read = (key: string): any => {
+    const saved = store.get<string>('_system', 'voice', key)
+    return saved ? vault.open(saved) : {}
+  }
+  const save = (key: string, value: unknown) =>
+    store.put('_system', 'voice', key, vault.seal(value))
+  const settings = () => ({
+    voices: [],
+    currentVoiceId: '',
+    apiKey: '',
+    updatedAt: 0,
+    ...read('duplex'),
+  })
+  const publicSettings = () => {
+    const { apiKey, ...value } = settings()
+    return { ...value, hasApiKey: Boolean(apiKey) }
+  }
+  router.get('/api/app/admin/duplex-voice', (ctx) => {
+    auth.requireAdmin(ctx)
+    ctx.body = publicSettings()
+  })
+  router.put('/api/app/admin/duplex-voice', (ctx) => {
+    auth.requireAdmin(ctx)
+    const b = parse(
+      z
+        .object({
+          apiKey: z.string().max(4096).optional(),
+          voices: z
+            .array(z.object({ id: z.string().min(1).max(200), name: z.string().min(1).max(200) }))
+            .max(100),
+          currentVoiceId: z.string().max(200),
+        })
+        .strict(),
+      body(ctx),
+    )
+    if (
+      new Set(b.voices.map((v) => v.id)).size !== b.voices.length ||
+      (b.currentVoiceId && !b.voices.some((v) => v.id === b.currentVoiceId))
+    )
+      throw new HttpError(400, '音色设置无效')
+    save('duplex', { ...settings(), ...b, updatedAt: Date.now() })
+    ctx.body = publicSettings()
+  })
+  router.get('/api/app/voice/runtime', (ctx) => {
+    const user = owner(ctx),
+      value = settings()
+    ctx.body = {
+      ...value,
+      currentVoiceId: store.get(user, 'voice-selection', 'current') ?? value.currentVoiceId,
+    }
+  })
+  router.put('/api/app/voice/current-voice', (ctx) => {
+    const user = owner(ctx),
+      value = settings(),
+      id = parse(z.object({ currentVoiceId: z.string() }).strict(), body(ctx)).currentVoiceId
+    if (!value.voices.some((v: any) => v.id === id)) throw new HttpError(400, '音色不存在')
+    store.put(user, 'voice-selection', 'current', id)
+    ctx.body = { voices: value.voices, currentVoiceId: id, updatedAt: Date.now() }
+  })
+  for (const kind of ['tts', 'stt']) {
+    const list = () => {
+      const data = read(kind)
+      return {
+        activeProvider: data.activeProvider ?? (kind === 'tts' ? 'edge' : 'browser'),
+        settings: Object.entries(data.providers ?? {}).map(([provider, v]: [string, any]) => ({
+          provider,
+          settings: v.settings,
+          secrets: Object.fromEntries(Object.keys(v.secrets ?? {}).map((k) => [k, '[stored]'])),
+        })),
+      }
+    }
+    router.get(`/api/app/${kind}/settings`, (ctx) => {
+      owner(ctx)
+      ctx.body = list()
+    })
+    router.put(`/api/app/${kind}/settings/active`, (ctx) => {
+      auth.requireAdmin(ctx)
+      const data = read(kind),
+        provider = parse(
+          z.object({ provider: z.string().min(1).max(100) }).strict(),
+          body(ctx),
+        ).provider
+      if (!data.providers?.[provider] && !['edge', 'browser'].includes(provider))
+        throw new HttpError(400, '请先配置服务商')
+      data.activeProvider = provider
+      save(kind, data)
+      ctx.body = list()
+    })
+    router.put(`/api/app/${kind}/settings/:provider`, (ctx) => {
+      auth.requireAdmin(ctx)
+      const input = parse(
+        z
+          .object({
+            settings: z.record(z.string(), z.unknown()).default({}),
+            secrets: z.record(z.string(), z.string().max(4096)).default({}),
+            activeProvider: z.string().optional(),
+          })
+          .strict(),
+        body(ctx),
+      )
+      if (JSON.stringify(input.settings).length > 32_000) throw new HttpError(413, '设置过大')
+      const data = read(kind)
+      data.providers ??= {}
+      const old = data.providers[ctx.params.provider] ?? { settings: {}, secrets: {} }
+      data.providers[ctx.params.provider] = {
+        settings: { ...old.settings, ...input.settings },
+        secrets: {
+          ...old.secrets,
+          ...Object.fromEntries(Object.entries(input.secrets).filter(([, v]) => v !== '[stored]')),
+        },
+      }
+      if (input.activeProvider) data.activeProvider = input.activeProvider
+      save(kind, data)
+      ctx.body = list()
+    })
+    router.delete(`/api/app/${kind}/settings/:provider`, (ctx) => {
+      auth.requireAdmin(ctx)
+      const data = read(kind)
+      if (data.providers) delete data.providers[ctx.params.provider]
+      if (data.activeProvider === ctx.params.provider)
+        data.activeProvider = kind === 'tts' ? 'edge' : 'browser'
+      save(kind, data)
+      ctx.body = list()
+    })
+    router.delete(`/api/app/${kind}/settings/:provider/secret/:secret`, (ctx) => {
+      auth.requireAdmin(ctx)
+      const data = read(kind)
+      if (data.providers?.[ctx.params.provider]?.secrets)
+        delete data.providers[ctx.params.provider].secrets[ctx.params.secret]
+      save(kind, data)
+      ctx.body = list()
+    })
+    router.delete(`/api/app/${kind}/settings/:provider/base-url-preset`, (ctx) => {
+      auth.requireAdmin(ctx)
+      const data = read(kind),
+        s = data.providers?.[ctx.params.provider]?.settings
+      if (s) s.baseUrlPresets = (s.baseUrlPresets ?? []).filter((v: string) => v !== ctx.query.url)
+      save(kind, data)
+      ctx.body = list()
+    })
+  }
+  router.get('/api/app/voice/providers-info', (ctx) => {
+    owner(ctx)
+    ctx.body = {
+      tts: ['edge', 'openai', 'custom', 'mimo', 'doubao'],
+      stt: ['browser', 'openai', 'custom', 'doubao'],
+    }
+  })
+  router.post('/api/app/voice/probe', async (ctx) => {
+    auth.requireAdmin(ctx)
+    const b = parse(
+        z
+          .object({
+            kind: z.enum(['tts', 'stt']),
+            provider: z.string().optional(),
+            compatibility: z.enum(['manual', 'openai-compatible']).default('openai-compatible'),
+            baseUrl: z.string().url(),
+            apiKey: z.string().max(4096).optional(),
+          })
+          .strict(),
+        body(ctx),
+      ),
+      url = new URL(b.baseUrl)
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
+      throw new HttpError(400, '服务地址无效')
+    if (b.compatibility === 'manual') {
+      ctx.body = { ok: true, models: [], normalizedBaseUrl: b.baseUrl, manualModelAllowed: true }
+      return
+    }
+    url.pathname = `${url.pathname.replace(/\/$/, '')}/models`
+    const response = await fetch(url, {
+      headers: b.apiKey ? { Authorization: `Bearer ${b.apiKey}` } : {},
+      signal: AbortSignal.timeout(10_000),
+      redirect: 'error',
+    })
+    const value = (await response.json()) as any
+    ctx.body = {
+      ok: response.ok,
+      models: Array.isArray(value.data)
+        ? value.data.slice(0, 500).map((m: any) => String(m.id))
+        : [],
+      normalizedBaseUrl: b.baseUrl,
+      manualModelAllowed: true,
+      errorSummary: response.ok ? '' : `HTTP ${response.status}`,
+    }
+  })
+}

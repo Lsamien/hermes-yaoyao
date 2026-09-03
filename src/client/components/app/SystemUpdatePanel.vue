@@ -27,7 +27,6 @@ let lifecycleToken = 0
 const terminal = computed(() => job.value && ['succeeded', 'failed', 'rolled_back'].includes(job.value.state))
 const jobRunning = computed(() => Boolean(job.value && !terminal.value))
 const locked = computed(() => operationStarting.value || (jobRunning.value && !trackingTimedOut.value))
-const currentPlugin = computed(() => status.value?.installedPluginVersion || '未检测（不影响 Web 升级）')
 const canApply = computed(() => Boolean(status.value?.supported && status.value.updateAvailable && status.value.latest && !jobRunning.value && !busy.value))
 
 function stopPolling() { pollToken += 1 }
@@ -150,12 +149,9 @@ onBeforeUnmount(() => { lifecycleToken += 1; operationStarting.value = false; st
 
     <section v-if="status" class="version-grid" aria-label="版本信息">
       <article><small>当前 Web</small><strong>{{ status.current.webVersion }}</strong></article>
-      <article><small>当前插件</small><strong>{{ currentPlugin }}</strong></article>
       <article><small>最新 Web</small><strong>{{ status.latest?.webVersion || status.current.webVersion }}</strong></article>
-      <article><small>配套插件</small><strong>{{ status.latest?.pluginVersion || status.current.pluginVersion }}</strong></article>
     </section>
 
-    <p v-if="status?.installedPluginVersion && !status.versionsMatch" class="version-warning"><AppIcon name="alert" :size="15" />插件版本与 Web 清单不一致，可在 9119 恢复后单独更新；不影响 Web 升级。</p>
     <p v-if="status?.installationMode === 'source'" class="mode-note">首次升级会把运行服务迁移到可回滚的版本目录；Git 工作区不会被覆盖。</p>
     <p v-if="status && !status.supported" class="mode-note">{{ status.unsupportedReason }}</p>
 

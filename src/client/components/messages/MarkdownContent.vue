@@ -118,8 +118,7 @@ function decorateFileLinks() {
     let url: URL
     try { url = new URL(link.href, window.location.href) } catch { return }
     const isAgentFile = /^\/Users\/[^/]+\/Agents\/.+/.test(url.pathname)
-    const isRemoteNodeFile = /^\/api\/plugins\/yaoyao\/v1\/nodes\/[0-9a-f-]{36}\/files$/i.test(url.pathname)
-      && Boolean(url.searchParams.get('path'))
+    const isRemoteNodeFile = /^\/api\/app\/files\/(?:[0-9a-f-]{36}|[0-9]+)\/(?:download|preview)$/i.test(url.pathname)
     if (url.origin !== window.location.origin || (!isAgentFile && !isRemoteNodeFile)) return
     link.dataset.fileCard = 'true'
     link.classList.add('file-link-card')

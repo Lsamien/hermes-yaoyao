@@ -112,13 +112,8 @@ describe('scoped upstream read-through cache', () => {
     await f.read()
     expect(f.fetch).toHaveBeenCalledTimes(5)
   })
-  it('invalidates earlier group snapshots after a fresh journal anchor', async () => {
-    const f = fixture()
-    const rooms = () => f.client.withReadScope('alice', false, () => f.client.request('/api/plugins/yaoyao/v1/rooms', f.jar))
-    await rooms(); await rooms()
-    expect(f.fetch).toHaveBeenCalledTimes(1)
-    await f.client.request('/api/plugins/yaoyao/v1/capabilities', f.jar)
-    await rooms()
-    expect(f.fetch).toHaveBeenCalledTimes(3)
+  it('leaves Web-owned conversation snapshots outside the upstream cache', async () => {
+    expect(readPolicy('/api/app/conversations')).toBeUndefined()
+    expect(readPolicy('/api/app/events', new URLSearchParams('after=5'))).toBeUndefined()
   })
 })

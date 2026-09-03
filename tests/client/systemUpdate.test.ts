@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   applySystemUpdate,
   checkSystemUpdate,
-  reconcileYaoyaoPlugin,
   rollbackSystemUpdate,
   systemUpdateJob,
   systemUpdateStatus,
@@ -33,7 +32,6 @@ describe('system update client protocol', () => {
     await applySystemUpdate('0.3.0')
     await systemUpdateJob('11111111-1111-4111-8111-111111111111')
     await rollbackSystemUpdate()
-    await reconcileYaoyaoPlugin()
 
     expect(calls.map(call => call.path)).toEqual([
       '/api/app/system/update/status',
@@ -41,7 +39,6 @@ describe('system update client protocol', () => {
       '/api/app/system/update/apply',
       '/api/app/system/update/jobs/11111111-1111-4111-8111-111111111111',
       '/api/app/system/update/rollback',
-      '/api/app/plugins/yaoyao/reconcile',
     ])
     expect(new Headers(calls[1]!.init?.headers).get('X-CSRF-Token')).toBe('csrf-system-update')
     expect(calls[2]!.init?.body).toBe(JSON.stringify({ targetVersion: '0.3.0' }))

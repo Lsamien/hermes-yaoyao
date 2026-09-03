@@ -97,7 +97,7 @@ function cacheable(value: UpstreamResponse): boolean {
 }
 
 export function readPolicy(path: string, search?: URLSearchParams): ReadPolicy | undefined {
-  if (path === '/api/profiles' || path === '/api/plugins/yaoyao/profiles') {
+  if (path === '/api/profiles') {
     return { tags: ['profiles'], freshMs: 5_000, staleMs: 15_000 }
   }
   if (path === '/api/model/options') return { tags: ['models'], freshMs: 30_000, staleMs: 60_000 }
@@ -109,17 +109,7 @@ export function readPolicy(path: string, search?: URLSearchParams): ReadPolicy |
     const oldPage = Number(search?.get('offset') ?? 0) > 0
     return { tags: ['sessions', `session:${decodeURIComponent(session[1]!)}`], freshMs: oldPage ? 10_000 : 1_000, staleMs: 0 }
   }
-  const base = '/api/plugins/yaoyao/v1'
-  if ([`${base}/rooms`, `${base}/topics`, `${base}/topics/pinned`].includes(path)) {
-    return { tags: ['groups', 'group-list'], freshMs: 2_000, staleMs: 0 }
-  }
-  const room = /^\/api\/plugins\/yaoyao\/v1\/rooms\/([^/]+)(?:\/(messages|topics))?$/.exec(path)
-  if (room) {
-    // Incremental reconciliation reads must never stop at a cached old tail.
-    if (search?.has('afterSeq')) return undefined
-    return { tags: ['groups', `group:${room[1]}`], freshMs: search?.has('beforeSeq') ? 10_000 : 1_000, staleMs: 0 }
-  }
-  return undefined
+
 }
 
 export function mutationTags(path: string): string[] | undefined {
@@ -127,9 +117,6 @@ export function mutationTags(path: string): string[] | undefined {
   const session = /^\/api\/sessions\/([^/]+)/.exec(path)
   if (session) return ['session-list', `session:${decodeURIComponent(session[1]!)}`]
   if (path.startsWith('/api/sessions')) return ['sessions']
-  const room = /^\/api\/plugins\/yaoyao\/v1\/rooms\/([^/]+)/.exec(path)
-  if (room) return ['group-list', `group:${room[1]}`]
-  if (path.startsWith('/api/plugins/yaoyao/v1/')) return ['groups']
   if (/^\/api\/(profiles|model|config|env|providers|dashboard\/agent-plugins)/.test(path)) return ['profiles', 'models', 'sessions', 'groups']
   return undefined
 }

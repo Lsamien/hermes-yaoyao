@@ -39,6 +39,8 @@ interface Upstream {
 
 /** Server-owned WS transports. Downstream detach never tears down an active upstream. */
 export class RealtimeBroker {
+  protectedSession: (id: string) => boolean = () => false
+  onNativeEvent: (owner: string, profile: string, storedId: string, frame: Frame) => void = () => {}
   readonly epoch = randomUUID()
   readonly channels = new Map<string, RealtimeChannel>()
   private upstreams = new Map<string, Upstream>()
@@ -54,6 +56,7 @@ export class RealtimeBroker {
   }
 
   async create(principal: RealtimePrincipal, kind: 'chat' | 'groups', group?: { epoch: string; cursor: number }): Promise<RealtimeChannel> {
+    if (String(kind) === 'groups') throw new HttpError(410, '请使用新版聊天事件接口', 'retired_group_stream')
     if (this.closed) throw new HttpError(503, 'Realtime broker is stopping', 'broker_stopping')
     principal.authorize?.(kind)
     if (!principal.valid()) throw new HttpError(401, 'Authentication expired', 'authentication_required')
@@ -72,10 +75,7 @@ export class RealtimeBroker {
       entries: [], routes: new Set(), listeners: new Set(), touched: this.now(), bytes: 0, group }
     this.channels.set(c.id, c)
     try {
-      if (kind === 'groups') {
-        if (!group) throw new HttpError(400, 'Group anchor is required', 'invalid_anchor')
-        await this.connectGroup(c)
-      } else {
+      {
         const u = this.upstream(principal)
         await this.connect(u)
         this.emit(c, 'frame', u.ready!)
@@ -133,6 +133,9 @@ export class RealtimeBroker {
     if (c.kind !== 'chat') throw new HttpError(403, 'Group event channel is read-only', 'read_only')
     const normalized = checkedChatFrame(Buffer.from(JSON.stringify(input)), false, c.principal.paired)
     const frame = JSON.parse(normalized) as Frame
+    if (Object.values(frame.params?.preferred_session_ids ?? {}).some(id => typeof id === 'string' && this.protectedSession(id))) {
+      throw new HttpError(404, '会话不存在', 'session_not_found')
+    }
     c.principal.authorize?.('chat', String(frame.method))
     delete frame.id
     const fingerprint = JSON.stringify(frame)
@@ -168,6 +171,7 @@ export class RealtimeBroker {
   private async perform(c: RealtimeChannel, frame: Frame): Promise<Frame> {
     const u = this.upstream(c.principal)
     const p = frame.params as Frame
+    if (p.session_id && this.protectedSession(String(p.session_id))) throw new HttpError(404, '会话不存在', 'session_not_found')
     const method = String(frame.method)
     const opening = method === 'session.create' || method === 'session.resume'
     if (opening && (c.routes.size >= 128 || u.routes.size >= 512)) throw new HttpError(429, 'Route capacity reached', 'route_limit')
@@ -231,8 +235,11 @@ export class RealtimeBroker {
         u.byRuntime.delete(route.runtime); u.routes.delete(this.routeKey(route.profile, route.stored))
         this.routeOwners.delete(JSON.stringify([c.principal.instanceKey ?? c.principal.upstreamKey, route.profile, route.stored]))
       }
+      if (route && response.result && ['file.attach','image.attach_bytes','pdf.attach'].includes(method) && c.principal.key.startsWith('user:')) {
+        this.onNativeEvent(c.principal.key.split(':')[1]!, route.profile, route.stored, { type:'attachment.staged', payload:response.result })
+      }
       u.lastUsed = this.now()
-      return response
+      return this.withoutProtectedSessions(response) ?? { result: {} }
     }
     if (['session.interrupt', 'approval.respond', 'clarify.respond', 'session.steer'].includes(method)) return execute()
     const work = (u.tails.get(routeKey) ?? Promise.resolve()).catch(() => {}).then(execute)
@@ -344,7 +351,10 @@ export class RealtimeBroker {
       while (this.interactions.size > 10_000) this.interactions.delete(this.interactions.keys().next().value!)
     }
     if (r) for (const principal of r.observers.values()) {
-      if (principal.valid()) principal.observeEvent?.(JSON.stringify(f))
+      if (principal.valid()) {
+        principal.observeEvent?.(JSON.stringify(f))
+        if (principal.key.startsWith('user:')) this.onNativeEvent(principal.key.split(':')[1]!, r.profile, r.stored, p)
+      }
     }
     for (const c of this.channels.values()) {
       if (c.kind !== 'chat' || c.principal.upstreamKey !== u.principal.upstreamKey || !c.principal.valid()) continue
@@ -380,35 +390,22 @@ export class RealtimeBroker {
     this.onActivity({ kind: 'reset', name: reason })
     for (const c of this.channels.values()) if (c.kind === 'chat' && c.principal.upstreamKey === u.principal.upstreamKey) this.emit(c, 'reset', { reason })
   }
-  private async connectGroup(c: RealtimeChannel): Promise<void> {
-    const url = await c.principal.url('groups', c.group)
-    const validator = new GroupFrameValidator(c.group!.epoch, c.group!.cursor)
-    await new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(url, { agent: c.principal.agent, headers: { Origin: `${url.protocol === 'wss:' ? 'https:' : 'http:'}//${url.host}` }, maxPayload: 2 * 1024 * 1024, handshakeTimeout: 15_000 })
-      c.socket = ws
-      const timer = setTimeout(() => { ws.terminate(); reject(new Error('Group ready timeout')) }, 20_000)
-      ws.on('message', (data, binary) => {
-        try {
-          if (!validator.accept(data, binary)) return
-          const frame = JSON.parse(data.toString()) as Frame
-          this.onActivity({ kind: 'group', name: String(frame.event ?? frame.type), roomId: frame.roomId })
-          if (frame.type === 'group.ready') { clearTimeout(timer); resolve() }
-          if (frame.type === 'group.event') c.group!.cursor = frame.cursor
-          this.emit(c, 'frame', frame)
-        } catch { this.emit(c, 'reset', { reason: 'group_gap' }); ws.close() }
-      })
-      ws.on('error', () => { clearTimeout(timer); reject(new Error('Group connection failed')) })
-      ws.on('close', () => { clearTimeout(timer); reject(new Error('Group disconnected')); this.onActivity({ kind: 'group', name: 'group_disconnected' }); if (this.channels.has(c.id)) this.emit(c, 'reset', { reason: 'group_disconnected' }) })
-    })
-  }
   private emit(c: RealtimeChannel, event: StreamEntry['event'], value: Frame): void {
-    const data = JSON.stringify(value)
+    const publicValue = this.withoutProtectedSessions(value)
+    if (!publicValue) return
+    const data = JSON.stringify(publicValue)
     const entry: StreamEntry = { id: `${this.epoch}:${++c.seq}`, event, data, at: this.now(), bytes: Buffer.byteLength(data) }
     c.entries.push(entry); c.bytes += entry.bytes
     this.trim(c)
     for (const listener of [...c.listeners]) {
       try { listener(entry) } catch { c.listeners.delete(listener) }
     }
+  }
+  private withoutProtectedSessions(value: any): any {
+    if (Array.isArray(value)) return value.map(v => this.withoutProtectedSessions(v)).filter(v => v !== undefined)
+    if (!value || typeof value !== 'object') return value
+    if (value.source === 'yaoyao_workspace' || ['id','session_id','sessionId','stored_session_id','session_key'].some(k => typeof value[k] === 'string' && this.protectedSession(value[k]))) return undefined
+    return Object.fromEntries(Object.entries(value).map(([k,v]) => [k,this.withoutProtectedSessions(v)]).filter(([,v]) => v !== undefined))
   }
   private trim(c: RealtimeChannel): void {
     const own = [...this.channels.values()].filter(v => v.principal.key === c.principal.key)

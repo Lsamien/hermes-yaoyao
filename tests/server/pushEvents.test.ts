@@ -8,7 +8,6 @@ import { UpstreamServiceSession } from '../../src/server/localAuth.js'
 import {
   ChatPushJobManager,
   ChatPushRelayObserver,
-  GroupPushEventProcessor,
   HermesChatNotificationResolver,
   HermesChatPushJobWatcher,
   type ChatPushJob,
@@ -227,58 +226,6 @@ describe('push event bridge', () => {
     })), false)
     await second.flush()
     expect(coordinator.notifications).toHaveLength(0)
-  })
-
-  it('filters group events by terminal agent state, subscription, and stable event id', async () => {
-    const coordinator = new FakeCoordinator()
-    coordinator.anchor = { epoch, cursor: 5 }
-    coordinator.subscribers.set('room-1', ['user-a', 'user-a', 'user-b'])
-    const processor = new GroupPushEventProcessor({ epoch, cursor: 5 }, coordinator)
-
-    await expect(processor.accept({ type: 'group.ready', epoch, cursor: 5 })).resolves.toBe('ready')
-    await processor.accept({
-      type: 'group.event', epoch, cursor: 6, roomId: 'room-1', event: 'message.upsert',
-      payload: { id: 'message-1', roomId: 'room-1', senderKind: 'agent', status: 'streaming', content: '半成品' },
-    })
-    expect(coordinator.notifications).toHaveLength(0)
-    await processor.accept({
-      type: 'group.event', epoch, cursor: 7, roomId: 'room-1', event: 'message.upsert',
-      payload: {
-        id: 'message-1', roomId: 'room-1', topicId: 'topic-1', senderKind: 'agent', senderName: '夭夭',
-        status: 'completed', content: '团队最终回复',
-      },
-    })
-    expect(coordinator.notifications).toHaveLength(2)
-    expect(coordinator.notifications.every(item => item.kind === 'group.message.completed')).toBe(true)
-    expect((coordinator.notifications[0] as GroupPushCandidate).roomID).toBe('room-1')
-
-    await processor.accept({
-      type: 'group.event', epoch, cursor: 8, roomId: 'room-1', event: 'message.upsert',
-      payload: { id: 'message-1', roomId: 'room-1', senderKind: 'agent', status: 'completed', content: '重复终态' },
-    })
-    expect(coordinator.notifications).toHaveLength(2)
-    await processor.accept({
-      type: 'group.event', epoch, cursor: 9, roomId: 'room-1', event: 'interaction.requested',
-      payload: {
-        id: 'interaction-1', roomId: 'room-1', kind: 'clarification', status: 'pending',
-        payload: { question: '选择哪个？' },
-      },
-    })
-    expect(coordinator.notifications.filter(item => item.kind === 'group.interaction.requested')).toHaveLength(2)
-    expect(coordinator.anchor).toEqual({ epoch, cursor: 9 })
-  })
-
-  it('does not advance the group cursor when durable enqueue fails', async () => {
-    const coordinator = new FakeCoordinator()
-    coordinator.anchor = { epoch, cursor: 1 }
-    coordinator.subscribers.set('room-1', ['user-a'])
-    coordinator.failEnqueue = true
-    const processor = new GroupPushEventProcessor({ epoch, cursor: 1 }, coordinator)
-    await expect(processor.accept({
-      type: 'group.event', epoch, cursor: 2, roomId: 'room-1', event: 'message.upsert',
-      payload: { id: 'message-1', roomId: 'room-1', senderKind: 'agent', status: 'failed', error: '失败' },
-    })).rejects.toThrow('outbox unavailable')
-    expect(coordinator.anchor).toEqual({ epoch, cursor: 1 })
   })
 
   it('resolves the authoritative latest assistant body from Hermes REST', async () => {

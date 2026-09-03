@@ -247,7 +247,9 @@ describe('iOS push routes', () => {
       .set('Origin', 'http://127.0.0.1:8800')
     const installationID = '11111111-1111-4111-8111-111111111111'
     const accountID = '22222222-2222-4222-8222-222222222222'
-    const roomID = '33333333-3333-4333-8333-333333333333'
+    const a = runtime.workspace.createAgent('test-admin', {name:'甲',profile:'default'})
+    const b = runtime.workspace.createAgent('test-admin', {name:'乙',profile:'default'})
+    const roomID = runtime.workspace.createGroup('test-admin', {name:'通知测试',memberIds:[a.id,b.id],administratorId:a.id}).id
     const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
 
     const capabilities = await host(agent.get('/api/push/v1/capabilities')).expect(200)
@@ -307,87 +309,5 @@ describe('iOS push routes', () => {
     await headers(agent.put('/api/push/v1/group-subscriptions/33333333-3333-4333-8333-333333333333'))
       .send({ enabled: 'yes' })
       .expect(400, /enabled must be a boolean/)
-  })
-
-  it('automatically subscribes the current user after Web or native team participation', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'yaoyao-push-auto-subscribe-'))
-    roots.push(home)
-    const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
-      allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
-      mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
-    }
-    const fetchImpl = (async (input: string | URL | Request) => {
-      const url = new URL(input instanceof Request ? input.url : String(input))
-      if (url.pathname === '/api/status') return Response.json({ auth_required: false })
-      if (url.pathname === '/api/profiles') return Response.json({ profiles: [{ name: 'default', is_default: true }] })
-      if (url.pathname === '/api/plugins/yaoyao/profiles') return Response.json({ profiles: [] })
-      if (/\/api\/plugins\/yaoyao\/v1\/rooms\/[0-9a-f-]{36}\/messages$/.test(url.pathname)) {
-        return Response.json({ message: { id: 'message', seq: 7, senderKind: 'human', content: 'hello' }, runs: [] })
-      }
-      return Response.json({ ok: true })
-    }) as typeof fetch
-    const runtime = createAuthenticatedApplication({ config, fetchImpl })
-    runtimes.push(runtime)
-    const agent = request.agent(runtime.app.callback())
-    const firstRoom = '44444444-4444-4444-8444-444444444444'
-    const secondRoom = '55555555-5555-4555-8555-555555555555'
-    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
-
-    await agent.post(`/api/app/groups/rooms/${firstRoom}/messages`)
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ requestId: 'request-web', clientMessageId: 'client-web', content: 'Web 参与', mentionAgentIds: [] })
-      .expect(200)
-    await agent.post(`/api/plugins/yaoyao/v1/rooms/${secondRoom}/messages`)
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .send({ requestId: 'request-ios', clientMessageId: 'client-ios', content: 'iOS 参与', mentionAgentIds: [] })
-      .expect(200)
-
-    const subscriptions = await agent.get('/api/push/v1/group-subscriptions')
-      .set('Host', '127.0.0.1:8800')
-      .expect(200)
-    expect(subscriptions.body.roomIds).toEqual([firstRoom, secondRoom])
-    expect(subscriptions.body.subscriptions.every((item: { lastMessageSeq?: number }) => item.lastMessageSeq === 7)).toBe(true)
-  })
-
-  it('never turns a successful team send into a failure when optional push state is unavailable', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'yaoyao-push-state-failure-'))
-    roots.push(home)
-    mkdirSync(join(home, 'push'))
-    writeFileSync(join(home, 'push', 'state.json'), '{broken', { mode: 0o600 })
-    const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
-      allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
-      mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: true,
-    }
-    const fetchImpl = (async (input: string | URL | Request) => {
-      const path = new URL(input instanceof Request ? input.url : String(input)).pathname
-      if (path === '/api/status') return Response.json({ auth_required: false })
-      if (path === '/api/profiles') return Response.json({ profiles: [{ name: 'default', is_default: true }] })
-      if (path === '/api/plugins/yaoyao/profiles') return Response.json({ profiles: [] })
-      if (path.endsWith('/messages')) {
-        return Response.json({ message: { id: 'accepted', seq: 1, senderKind: 'human', content: '已接收' }, runs: [] })
-      }
-      return Response.json({ ok: true })
-    }) as typeof fetch
-    const push = new PushCoordinator({ home, autoFlush: false })
-    const runtime = createAuthenticatedApplication({ config, fetchImpl, push })
-    runtimes.push(runtime)
-    // The error event is operational telemetry; suppress Koa's default stderr
-    // output while asserting the primary response remains authoritative.
-    runtime.app.on('error', () => undefined)
-    const agent = request.agent(runtime.app.callback())
-    const roomID = '66666666-6666-4666-8666-666666666666'
-    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
-
-    await agent.post(`/api/app/groups/rooms/${roomID}/messages`)
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ requestId: 'request', clientMessageId: 'client', content: '仍应成功', mentionAgentIds: [] })
-      .expect(200, /accepted/)
   })
 })

@@ -13,7 +13,7 @@ const roots: string[] = []
 const host = '127.0.0.1:8800'
 const origin = `http://${host}`
 const base = '/api/app/system/update'
-const latest = { schemaVersion: 1 as const, releaseVersion: '0.3.0', webVersion: '0.3.0', pluginVersion: '9.0.0', gitTag: 'v0.3.0' }
+const latest = { schemaVersion: 1 as const, releaseVersion: '0.3.0', webVersion: '0.3.0', gitTag: 'v0.3.0' }
 
 afterEach(() => {
   for (const runtime of runtimes.splice(0)) runtime.close()

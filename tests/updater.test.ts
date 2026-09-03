@@ -62,7 +62,6 @@ describe('standalone updater primitives', () => {
       schemaVersion: 1,
       releaseVersion: '0.3.0',
       webVersion: '0.3.1',
-      pluginVersion: '1.8.0',
       gitTag: 'v0.3.0',
     })).toThrow('版本组合不一致')
   })

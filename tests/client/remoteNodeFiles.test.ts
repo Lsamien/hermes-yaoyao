@@ -10,7 +10,7 @@ describe('remote node file links', () => {
       '[日志](file:///Users/remote/Agents/run.log)',
     ].join('\n')
     const rewritten = rewriteRemoteNodeFiles(content, node)
-    expect(rewritten).toContain(`/api/plugins/yaoyao/v1/nodes/${node}/files?path=%2FUsers%2Fremote%2FAgents%2Fresult%20one.png`)
+    expect(rewritten).toContain(`/api/app/groups/nodes/${node}/files?path=%2FUsers%2Fremote%2FAgents%2Fresult%20one.png`)
     expect(rewritten).toContain('path=%2FUsers%2Fremote%2FAgents%2Freport.pdf')
     expect(rewritten).toContain('path=%2FUsers%2Fremote%2FAgents%2Frun.log')
     expect(rewritten).not.toContain('](</Users/remote')
@@ -25,8 +25,8 @@ describe('remote node file links', () => {
 
     const rewritten = rewriteRemoteNodeFiles(content, node)
 
-    expect(rewritten).toContain(`![smoke_zimage_turbo_00001_.png](/api/plugins/yaoyao/v1/nodes/${node}/files?path=%2FUsers%2Fsamien%2FAgents%2Fsmoke_zimage_turbo_00001_.png)`)
-    expect(rewritten).toContain(`[远程 报告.pdf](/api/plugins/yaoyao/v1/nodes/${node}/files?path=%2FUsers%2Fsamien%2FAgents%2F%E8%BF%9C%E7%A8%8B%20%E6%8A%A5%E5%91%8A.pdf)`)
+    expect(rewritten).toContain(`![smoke_zimage_turbo_00001_.png](/api/app/groups/nodes/${node}/files?path=%2FUsers%2Fsamien%2FAgents%2Fsmoke_zimage_turbo_00001_.png)`)
+    expect(rewritten).toContain(`[远程 报告.pdf](/api/app/groups/nodes/${node}/files?path=%2FUsers%2Fsamien%2FAgents%2F%E8%BF%9C%E7%A8%8B%20%E6%8A%A5%E5%91%8A.pdf)`)
     expect(rewritten).not.toContain('MEDIA:')
   })
 

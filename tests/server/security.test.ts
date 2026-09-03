@@ -133,17 +133,9 @@ describe('server security boundary', () => {
     const value = loadServerConfig(isolatedEnv())
     expect(value.host).toBe('127.0.0.1')
     expect(value.insecureLan).toBe(false)
-    expect(value.yaoyaoPluginSource).toBe(
-      'https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao',
-    )
+    expect(value).not.toHaveProperty('yaoyaoPluginSource')
     expect(value.releaseSource).toBe('https://git.samien.cn/samien/hermes-yaoyao.git')
     expect(value.allowRemoteUpdate).toBe(false)
-  })
-
-  it('rejects credentials embedded in the configured Yaoyao plugin source', () => {
-    expect(() => loadServerConfig(isolatedEnv({
-      HERMES_YAOYAO_PLUGIN_SOURCE: 'https://user:secret@git.example/yaoyao.git#hermes-plugins/yaoyao',
-    }))).toThrow(/must not contain credentials/)
   })
 
   it('requires a credential-free HTTPS or SSH system release source', () => {

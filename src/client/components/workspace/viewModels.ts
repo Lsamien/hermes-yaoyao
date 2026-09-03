@@ -271,7 +271,7 @@ export function rewriteRemoteNodeFiles(content: string, nodeId: string, streamin
   return normalizeAssistantMediaMarkdown(content, streaming).replace(
     /(!?\[[^\]]*\]\()<?(?:file:\/\/)?(\/(?:Users|private|var|tmp)\/[^)>\n]+)>?(\))/g,
     (_match, prefix: string, path: string, suffix: string) => (
-      `${prefix}/api/plugins/yaoyao/v1/nodes/${encodeURIComponent(nodeId)}/files?path=${encodeURIComponent(path)}${suffix}`
+      `${prefix}/api/app/groups/nodes/${encodeURIComponent(nodeId)}/files?path=${encodeURIComponent(path)}${suffix}`
     ),
   )
 }
@@ -336,6 +336,7 @@ export function fileToUi(item: FileLibraryItem): UiLibraryItem {
     downloadUrl: item.downloadUrl,
     sourceLabel: origin?.sessionTitle || origin?.authorName || origin?.profile,
     sourceSessionId: origin?.sessionId,
+    sourceWorkspaceConversationId: origin?.workspaceConversationId,
     sourceMessageId: origin?.messageId,
     sourceProfile: origin?.profile,
   }

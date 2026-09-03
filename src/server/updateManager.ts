@@ -60,8 +60,6 @@ interface StoredUpdateJob extends UpdateJob {
 
 export interface SystemUpdateStatus {
   current: ReleaseManifest
-  installedPluginVersion?: string
-  versionsMatch: boolean
   installationMode: 'source' | 'release'
   latest?: ReleaseManifest
   updateAvailable: boolean
@@ -254,13 +252,11 @@ export class SystemUpdateManager {
     return id ? this.storedJob(id) : undefined
   }
 
-  status(installedPluginVersion?: string, latest?: ReleaseManifest): SystemUpdateStatus {
+  status(latest?: ReleaseManifest): SystemUpdateStatus {
     const current = this.currentManifest()
     const job = this.latestJob()
     return {
       current,
-      installedPluginVersion,
-      versionsMatch: installedPluginVersion === current.pluginVersion,
       installationMode: this.projectRoot.startsWith(`${this.releaseRoot}/`) ? 'release' : 'source',
       latest,
       updateAvailable: Boolean(latest && compareReleaseVersions(latest.releaseVersion, current.releaseVersion) > 0),
@@ -271,10 +267,10 @@ export class SystemUpdateManager {
     }
   }
 
-  async check(installedPluginVersion?: string): Promise<SystemUpdateStatus> {
+  async check(): Promise<SystemUpdateStatus> {
     const current = this.currentManifest()
     const latest = await this.inspectRemote(this.releaseSource, current)
-    return this.status(installedPluginVersion, latest?.manifest)
+    return this.status(latest?.manifest)
   }
 
   private acquire(jobID: string): void {
@@ -351,7 +347,7 @@ export class SystemUpdateManager {
     return job
   }
 
-  async startUpdate(targetVersion: string, installedPluginVersion?: string): Promise<UpdateJob> {
+  async startUpdate(targetVersion: string): Promise<UpdateJob> {
     if (this.platform !== 'darwin') throw new Error('当前环境不支持服务内升级')
     const current = this.currentManifest()
     const latest = await this.inspectRemote(this.releaseSource, current)

@@ -1,284 +1,35 @@
-# 夭夭 Agent 安装手册
+# 部署夭夭 Web
 
-适用于需要部署或升级夭夭 Web 与 Hermes Dashboard 插件的自动化 Agent。
+## 前提
 
-## 发布版本
+- Node.js 24。
+- 可访问的 Hermes Dashboard/Gateway（通常为 9119），支持会话创建、恢复、提示词提交、附件及审批 RPC。
+- 不需要 Yaoyao 插件，不会修改外部 Hermes 的插件目录或重启外部 Hermes。
 
-| 项目 | 版本 | 校验位置 |
-| --- | --- | --- |
-| Git 发布标签 | `v0.2.31` | `release.json` 的 `gitTag` 与 `git describe --tags --exact-match HEAD` |
-| 夭夭 Web | `0.2.31` | `release.json` 与 `package.json` 的 `version` |
-| Hermes Dashboard 插件 | `1.7.3` | `hermes-plugins/yaoyao/dashboard/manifest.json` 的 `version` |
+## 源码安装
 
-以下步骤以仓库根目录为工作目录。不要使用浮动分支替代发布标签。
+在仓库执行 `npm ci`、`npm run build`，然后执行 `npm start`。Web 默认监听 `127.0.0.1:8800`。
 
-本版客户端只支持 HTTP+SSE，旧 WebSocket、票据和租约入口返回 410。升级服务端时必须同步更新 iOS 客户端；Web 静态资源随本版发布。上游 9119 与 Python 插件未迁移，插件版本仍为 1.7.3。
+上游地址由 `HERMES_YAOYAO_UPSTREAM` 配置。远端凭据在 Web 系统设置中保存。需要环境配置时使用 `HERMES_YAOYAO_UPSTREAM_USERNAME` 和 `HERMES_YAOYAO_UPSTREAM_PASSWORD`，不要把凭据嵌入 URL。
 
-v0.2.28 增加服务端热点读取缓存与 30 秒上游登录状态检查复用；实际请求仍携带凭据，客户端权限仍逐次校验。已有 HTTP+SSE 版 iOS 无需因本次缓存优化重新打包。缓存边界见 [读取缓存说明](read-cache.md)。
+首次登录使用 `admin/admin`，随后必须修改密码。iOS 使用 Web 的账号或手机登录二维码。
 
-## 网络默认值与局域网策略
+## 局域网与容器
 
-通过 `service install` 安装的受管服务默认只将 8800 开放到可信局域网：
+局域网部署可设置 `HERMES_YAOYAO_HOST=0.0.0.0` 和 `HERMES_YAOYAO_ALLOW_INSECURE_LAN=1`，并在 `HERMES_YAOYAO_ALLOWED_HOSTS` 中列入访问地址。公网部署配置 TLS。
 
-| 端口 | 服务 | 默认监听地址 | 开启局域网的责任边界 |
-| --- | --- | --- | --- |
-| `9119` | Hermes Dashboard | `127.0.0.1` | 缺失时在回环启动，不生成密码，不改动已有服务 |
-| `8800` | 夭夭 Web | `0.0.0.0` | LaunchAgent 显式写入可信局域网 HTTP 开关 |
+容器保持 `HERMES_YAOYAO_SUPERVISE_DASHBOARD=0`，使用外部 Hermes 上游。数据目录 `/var/lib/hermes-yaoyao` 必须持久化；无需挂载 Hermes 文件系统或 Docker socket。
 
-新启动的受管 9119 不跟随 8800 暴露到局域网。已有 9119 的绑定和认证保持原状；手动 `npm start` 和 Docker 部署仍使用各自的绑定配置。
+## 验收
 
-受管 `service install` 会覆盖 8800 遗留的 loopback 环境并保持 8800 局域网监听。若 8800 也必须仅本机访问，请使用手动 `npm start` 或 Docker 的回环绑定，不要使用受管 LaunchAgent。
+- `/healthz` 检查 Web 自身；`/readyz` 检查 Hermes 上游。
+- 登录后 `/api/app/capabilities` 声明新聊天功能。
+- 创建角色、发送消息、上传并下载附件、创建固定成员群聊。
+- 用同一账号在 iOS 和 Web 查看相同历史；另一账号看不到这些聊天。
+- 全过程不应访问 `/api/plugins/yaoyao/`、插件安装或插件升级接口。
 
-默认局域网模式会显式设置 `HERMES_YAOYAO_ALLOW_INSECURE_LAN=1`，只适合受信网络。跨不受信网络部署时必须设置 `HERMES_YAOYAO_TLS_CERT` 和 `HERMES_YAOYAO_TLS_KEY`，并使用防火墙或反向代理限制访问；`hermes dashboard --insecure` 不会关闭认证，不能将它当成局域网开关。
+## 数据和发布
 
-## 受管 9119 的默认认证与持续监督
+备份整个 `HERMES_YAOYAO_HOME`，包含 SQLite、上传与归档文件、用户凭据和密钥。正常的数据库持久化不依赖旧插件存储维护工具。
 
-夭夭 Web LaunchAgent 默认启用 `HERMES_YAOYAO_SUPERVISE_DASHBOARD=1`。仅当上游为 `http://127.0.0.1:9119` 时，每 5 秒检查该端口；未监听时执行 `hermes dashboard --host 127.0.0.1 --no-open`。不再自动生成 9119 服务账号、密码或签名密钥；不会因安装检查而停止或重绑定已有 Dashboard。
-
-直连回环且 Hermes 声明 `auth_required=false` 时，8800 自动取得并验证 Hermes 原生会话令牌；REST 和 WebSocket 都使用该令牌，不是跳过鉴权。令牌只驻留服务端内存，重启失效后自动重新取得。详见 [本机授权边界](loopback-authorization.md)。
-
-8800 自己的默认管理员仍为 `admin/admin`，首次登录必须修改。已有或外部 9119 若仍声明 `auth_required=true`，必须在 8800“系统管理”中配置服务账号；已有账号和密码不会被删除，`--insecure` 也不会绕过该认证。
-
-以下仅用于需要账号鉴权的部署，不是本机安装的必做步骤。可用下列命令以 scrypt 哈希方式配置账号；不要将密码放入命令历史、Git 或日志。
-
-```bash
-HERMES_AGENT_HOME="${HERMES_AGENT_HOME:-$HOME/.hermes/hermes-agent}"
-read -r -p 'Dashboard username: ' DASHBOARD_USERNAME
-read -r -s -p 'Dashboard password: ' DASHBOARD_PASSWORD
-printf '\n'
-
-DASHBOARD_PASSWORD_HASH="$(
-  DASHBOARD_PASSWORD="$DASHBOARD_PASSWORD" \
-    "$HERMES_AGENT_HOME/venv/bin/python" -c \
-    'import os; from plugins.dashboard_auth.basic import hash_password; print(hash_password(os.environ["DASHBOARD_PASSWORD"]))'
-)"
-DASHBOARD_SECRET="$("$HERMES_AGENT_HOME/venv/bin/python" -c 'import secrets; print(secrets.token_urlsafe(32))')"
-
-hermes config set dashboard.basic_auth.username "$DASHBOARD_USERNAME"
-hermes config set dashboard.basic_auth.password_hash "$DASHBOARD_PASSWORD_HASH"
-hermes config set dashboard.basic_auth.secret "$DASHBOARD_SECRET"
-
-unset DASHBOARD_PASSWORD DASHBOARD_PASSWORD_HASH DASHBOARD_SECRET
-```
-
-`password_hash` 优先于明文 `password`。`secret` 使认证会话可跨 Dashboard 重启继续有效。若 Dashboard 由 LaunchAgent 或其他监督器运行，配置变更后必须通过**同一个监督器**重启它，确保新认证提供方被加载。
-
-受管服务负责启动和重启 9119，不能再同时安装独立的 Dashboard LaunchAgent 或手动长期运行 `hermes dashboard`。认证加载可在本机无密码回显地检查：
-
-```bash
-hermes config get dashboard.basic_auth.username
-curl --fail --silent --show-error http://127.0.0.1:9119/api/auth/providers
-```
-
-第二条命令应能返回包含用户名密码登录提供方的 JSON。不要在自动化日志、命令行、环境变量转储或 Git 配置中记录替换后的明文密码。
-
-## 1. 获取并校验指定发布版本
-
-```bash
-RELEASE_VERSION=v0.2.31
-git fetch --tags
-git checkout "$RELEASE_VERSION"
-
-test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_VERSION"
-test "$(node -p \"require('./package.json').version\")" = "0.2.31"
-test "$(node -e \"console.log(require('./hermes-plugins/yaoyao/dashboard/manifest.json').version)\")" = "1.7.3"
-npm run release:verify
-```
-
-这会进入 detached HEAD 状态，属于部署发布版本的预期行为。若 Agent 负责修改代码，应另行创建工作分支，不要在此发布检出上修改。
-
-## 2. 安装或升级 Hermes Dashboard 插件
-
-前提：目标机器已安装 Hermes，且 `hermes dashboard --status` 可执行。插件必须完整放在 `<Hermes 数据目录>/plugins/yaoyao/dashboard/`，不能只复制 Python 文件或前端 `dist/` 目录。
-
-```bash
-HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-PLUGIN_DIR="$HERMES_HOME/plugins/yaoyao/dashboard"
-BACKUP_DIR="${PLUGIN_DIR}.backup-$(date +%Y%m%d%H%M%S)"
-
-if [ -d "$PLUGIN_DIR" ]; then
-  cp -a "$PLUGIN_DIR" "$BACKUP_DIR"
-fi
-
-mkdir -p "$PLUGIN_DIR"
-rsync -a --delete \
-  --exclude '__pycache__/' \
-  --exclude '*.py[cod]' \
-  --exclude '.pytest_cache/' \
-  hermes-plugins/yaoyao/dashboard/ "$PLUGIN_DIR/"
-
-test -f "$PLUGIN_DIR/manifest.json"
-test -f "$PLUGIN_DIR/plugin_api.py"
-test -f "$PLUGIN_DIR/group_plugin_api.py"
-test -f "$PLUGIN_DIR/dist/index.js"
-test "$(node -e \"console.log(require(process.argv[1]).version)\" "$PLUGIN_DIR/manifest.json")" = "1.7.3"
-```
-
-`rsync --delete` 的范围严格限于 `$PLUGIN_DIR`，不会删除其他 Hermes 插件或用户数据。若目标目录已有额外的本机定制文件，应先将其移出目录或改用不带 `--delete` 的同步命令。
-
-不要提交、复制或恢复 `data/`、`__pycache__/`、`.pytest_cache/` 等运行时内容。归档数据库和本机状态不属于插件发布物。
-
-当前兼容版本首次启动时，会把每个 Profile 的旧目录
-`<profile-home>/plugins/yaoyao/data` 原子迁移到
-`<profile-home>/plugin-data/yaoyao`。后者独立于插件安装树，后续通过 Hermes
-插件接口替换 `plugins/yaoyao` 时不会丢失运行数据。若两个目录同时包含数据，
-插件不会自动合并，运行时仍只读取 `plugin-data/yaoyao`；应人工核对后移出旧目录，
-最终只保留这一权威数据目录。
-
-完成这次兼容版本启动后，后续可在已登录的 8800 会话中调用：
-
-```http
-POST /api/app/plugins/yaoyao/install
-Content-Type: application/json
-
-{"force":true}
-```
-
-默认安装源是
-`https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao`，可由服务端
-环境变量 `HERMES_YAOYAO_PLUGIN_SOURCE` 覆盖。接口不接受请求体覆盖仓库地址，
-并会在调用 9119 的通用安装接口前检查持久数据迁移状态。
-
-## 3. 由 8800 服务担任唯一 Dashboard 监督者
-
-插件文件只有在 Dashboard 重载后才会生效。安装本项目的受管服务后，8800 服务是 Dashboard 的唯一持续监督者；不要保留其他 Dashboard LaunchAgent 或手动常驻进程。
-
-| Dashboard 情况 | 正确做法 | 禁止做法 |
-| --- | --- | --- |
-| 需要让新插件生效 | 执行 `hermes dashboard --stop`，等待 8800 监督器在 5 秒内自动启动 | 另起常驻 `hermes dashboard` 进程 |
-| 9119 未监听 | 等待 8800 监督器自动启动；检查其日志 | 手动重复启动多个 Dashboard |
-
-## 4. 显式启用夭夭 Dashboard 插件
-
-夭夭位于用户插件目录，Dashboard 会先发现其 `manifest.json`，但不会自动执行用户提供的 JavaScript 或 Python 代码。只有插件名同时满足 `plugins.enabled` 包含 `yaoyao` 且未出现在 `plugins.disabled` 中时，Dashboard 才会展示夭夭标签、提供静态资源并挂载 `/api/plugins/yaoyao/`。
-
-先读取当前列表：
-
-```bash
-hermes config get plugins.enabled
-```
-
-当列表为空时，设置唯一的启用项：
-
-```bash
-hermes config set plugins.enabled '["yaoyao"]'
-```
-
-如果列表已有其他插件名，必须保留它们并在同一 JSON 列表中加入 `yaoyao`；不要以该示例覆盖已有启用项。随后执行：
-
-```bash
-hermes dashboard --stop
-```
-
-8800 监督器会在下一轮检查中自动重新启动 9119。不要补充 `hermes dashboard --no-open`，否则可能与监督器竞争端口。
-
-验证时使用 Dashboard 专用清单，而不是通用 `hermes plugins list`：
-
-```bash
-curl --noproxy '*' --fail --silent http://127.0.0.1:9119/api/dashboard/plugins
-tail -n 100 ~/.hermes/logs/gui.log
-```
-
-验收条件：清单包含 `"name":"yaoyao"`，日志包含 `Mounted plugin API routes: /api/plugins/yaoyao/`。匿名请求 `/api/plugins/yaoyao/...` 返回 `401` 是认证生效的信号，不表示插件加载失败。
-
-## 5. 验证插件和 Dashboard
-
-```bash
-hermes dashboard --status
-lsof -nP -iTCP:9119 -sTCP:LISTEN
-```
-
-验收条件：Dashboard 状态正常，且只有一个 `9119` TCP 监听器。插件路由位于 `/api/plugins/yaoyao/`，该 API 需要 Hermes 登录会话或原生本机令牌；不要为了探测路由而关闭认证。新启动的受管 Dashboard 默认只监听 `127.0.0.1`。
-
-## 6. 可选：部署夭夭 Web
-
-夭夭 Web 默认使用端口 `8800` 并连接 Dashboard `9119`。通过 LaunchAgent 安装后，8800 默认监听 `0.0.0.0`，新启动的 9119 只监听 `127.0.0.1`；8800 停止或卸载时不会主动停止正在运行的 Dashboard。
-
-```bash
-npm ci
-npm run build
-node bin/hermes-yaoyao.mjs service install
-node bin/hermes-yaoyao.mjs service status
-```
-
-若需要显式指定 Dashboard 上游，只在安装服务前设置 `HERMES_YAOYAO_UPSTREAM`。默认值为 `http://127.0.0.1:9119`，因为 8800 仍通过本机回环访问受监督的 9119。受管升级会迁移旧版 `127.0.0.1/0` 环境并继续使用局域网监听。
-
-受管服务的配置被写入 `~/Library/LaunchAgents/com.samien.hermes-yaoyao.plist`。任何监听、TLS、上游或监督配置变更后，都要再次执行 `service install`，随后确认状态、两个监听器和日志：
-
-```bash
-node bin/hermes-yaoyao.mjs service status
-lsof -nP -iTCP:8800 -sTCP:LISTEN
-lsof -nP -iTCP:9119 -sTCP:LISTEN
-tail -n 100 ~/Library/Logs/hermes-yaoyao.log
-```
-
-若 `launchctl bootstrap` 报 `Bootstrap failed: 5: Input/output error`，先验证 plist，再使用已验证的兼容回退加载同一份文件：
-
-```bash
-plutil -lint ~/Library/LaunchAgents/com.samien.hermes-yaoyao.plist
-launchctl load -w ~/Library/LaunchAgents/com.samien.hermes-yaoyao.plist
-```
-
-### 推送状态 v2 与 Android FCM
-
-Web `0.2.16` 及后续版本会在首次写入时把 `$HERMES_YAOYAO_HOME/push/state.json` 从 schema 1
-迁移为 schema 2；已有 APNs 安装、待发送队列、团队订阅、事件去重、游标和聊天恢复
-任务都会保留。旧版 Web 不能直接读取 schema 2，因此升级前必须备份整个 `push/`
-目录；若回滚 Web，也要同步恢复这份升级前备份，不能只切换 `current` 符号链接。
-
-Android FCM 的服务账号 JSON 必须位于发布目录和 Git 仓库之外，权限建议为 `0600`。
-可在 8800“系统管理 → Android 消息推送”填写其绝对路径、Firebase Project ID 和
-固定包名 `cn.samien.yaoyao.hermes`。使用环境变量管理时配置以下三项并重新执行
-`service install`；任一项出现时三项都必须有效，Web 界面只读：
-
-```bash
-HERMES_YAOYAO_FCM_SERVICE_ACCOUNT_FILE=/absolute/path/to/firebase-service-account.json \
-HERMES_YAOYAO_FCM_PROJECT_ID=your-firebase-project-id \
-HERMES_YAOYAO_FCM_PACKAGE_NAME=cn.samien.yaoyao.hermes \
-node bin/hermes-yaoyao.mjs service install
-```
-
-服务账号文件、OAuth Token、FID 和 Android 的 `google-services.json` 都不得进入
-Git、发布目录、命令输出或日志。配置后检查系统管理中的 APNs/FCM 独立状态；一方
-未配置或失败不能使另一方停止。
-
-## 7. 通过受管服务独立升级 Web
-
-首次按第 6 步安装 Web `0.2.31` 后，可在左下角 Agent 菜单打开“系统更新”。
-旧版首次升级仍受旧更新器的上游检查限制，需要在 9119 可用时升级一次，或按第 1、6 步手动部署新版。独立升级能力在运行 `v0.2.30` 后生效。
-检查更新只读取固定的 `HERMES_YAOYAO_RELEASE_SOURCE`，并锁定最新 `vX.Y.Z`
-标签解析到的 Git 提交。更新状态、检查、执行、任务查询和回滚仅要求 8800 本地管理员登录；
-写请求仍验证 Origin、CSRF 和本机访问策略，不要求 9119 可用或通过上游认证。
-不会检查插件持久目录或强制先升级插件。9119 离线时，登录初始化最多等待 3 秒后仍可进入更新页。
-
-升级任务由 8800 外部的独立 updater 执行。运行文件会安装到
-`~/.local/share/hermes-yaoyao/releases/`，LaunchAgent 改为指向稳定的
-`current` 符号链接。切换期间 8800 会短暂不可用，不因 Web 升级重启 9119；任务状态保存在
-`~/.hermes-yaoyao/updates/`，新服务启动后可继续读取。
-
-默认只能从目标 Mac 本机触发“升级”和“回滚”；仅当用户明确允许远程系统管理
-时，才在重新安装 LaunchAgent 前设置 `HERMES_YAOYAO_ALLOW_REMOTE_UPDATE=1`。
-Docker 和其他非 macOS 部署必须替换镜像，不能调用服务内升级接口。
-
-Web 升级成功必须通过自身健康检查，并确认发布目录：
-
-```bash
-curl --noproxy '*' --fail --silent http://127.0.0.1:8800/healthz
-readlink ~/.local/share/hermes-yaoyao/current
-```
-
-下列是独立的上游诊断。9119 离线时可失败，不应因此判定 Web 升级失败或回滚：
-
-```bash
-curl --noproxy '*' --fail --silent http://127.0.0.1:8800/readyz
-curl --noproxy '*' --fail --silent http://127.0.0.1:9119/api/dashboard/plugins
-```
-
-## 8. 失败处理
-
-1. 记录失败的命令、退出码、Dashboard 状态和 `9119` 监听信息。
-2. 若插件重载失败，使用第 2 步生成的 `$BACKUP_DIR` 恢复到 `$PLUGIN_DIR`，执行 `hermes dashboard --stop`，再由 8800 监督器重启 Dashboard。
-3. 若插件文件存在但未显示，先检查 `plugins.enabled` 是否包含 `yaoyao`，再检查 `/api/dashboard/plugins` 和 `gui.log`；不要通过重复复制目录或禁用认证来“尝试修复”。
-4. 不要通过多次执行 `hermes dashboard --no-open`、重复安装 LaunchAgent 或停止无关 Gateway 来“尝试修复”。这些操作会掩盖真正错误，或产生重复监听进程。
-
-版本不匹配、没有可用备份或无法确认 Dashboard 所有者时，停止自动化流程并报告，而不是猜测或覆盖现有安装。
+本次升级不迁移旧数据。旧插件及数据文件保留在原处，不自动卸载或删除。首次切换整体部署新 Web 和 iOS；此后只升级 Web 自身版本。

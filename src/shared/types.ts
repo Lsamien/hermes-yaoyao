@@ -463,6 +463,7 @@ export interface GroupSocketEnvelope {
 }
 
 export interface FileOrigin {
+  workspaceConversationId?: string
   id?: number | string
   profile?: string
   sessionId?: string

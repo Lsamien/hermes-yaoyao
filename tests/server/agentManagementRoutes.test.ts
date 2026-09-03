@@ -101,11 +101,9 @@ describe('Agent management admin routes', () => {
       ['POST', '/api/providers/custom-endpoints/validate', ''],
       ['POST', '/api/providers/custom-endpoints/local/activate', '?profile=worker'],
       ['DELETE', '/api/providers/custom-endpoints/local', '?profile=worker'],
-      ['GET', '/api/plugins/yaoyao/voice/settings', ''],
-      ['PUT', '/api/plugins/yaoyao/voice/settings', ''],
     ])
     expect(featureCalls[1]!.body).toMatchObject({ name: 'Local', model: 'model-a' })
-    expect(featureCalls[6]!.body).not.toHaveProperty('apiKey')
+    expect(calls.some(call => call.url.pathname.includes('/plugins/yaoyao'))).toBe(false)
     const configWrite = calls.find(call => call.url.pathname === '/api/config' && call.method === 'PUT')!
     expect(configWrite.body).toMatchObject({ config: { custom_providers: [{ name: 'tingly', base_url: 'http://tingly.test/v2', model: 'omni-2', models: { omni: {}, 'omni-2': {} }, models_discovered: false }] } })
     const envWrite = calls.find(call => call.url.pathname === '/api/env' && call.method === 'PUT')!

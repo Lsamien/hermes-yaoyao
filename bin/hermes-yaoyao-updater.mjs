@@ -31,7 +31,7 @@ function writeJSON(path, value) {
 
 export function validateManifest(value) {
   if (!value || typeof value !== 'object' || value.schemaVersion !== 1) fail('release.json 格式无效')
-  for (const key of ['releaseVersion', 'webVersion', 'pluginVersion']) {
+  for (const key of ['releaseVersion', 'webVersion']) {
     if (typeof value[key] !== 'string' || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value[key])) {
       fail(`release.json ${key} 无效`)
     }
@@ -231,7 +231,7 @@ function stageRelease(job, jobPath) {
   updateJob(jobPath, { state: 'downloading', message: `正在下载 ${target.gitTag}` })
   run('git', ['clone', '--quiet', '--depth', '1', '--single-branch', '--branch', target.gitTag, plan.source, staging], { timeout: 600_000 })
   const manifest = validateManifest(readJSON(join(staging, 'release.json')))
-  for (const field of ['schemaVersion', 'releaseVersion', 'webVersion', 'pluginVersion', 'gitTag']) {
+  for (const field of ['schemaVersion', 'releaseVersion', 'webVersion', 'gitTag']) {
     if (manifest[field] !== target[field]) fail('下载的发布清单与检查结果不一致')
   }
   const commit = run('git', ['rev-parse', 'HEAD'], { cwd: staging }).trim()
@@ -253,9 +253,6 @@ async function runUpdate(jobPath, job) {
   const { plan, target, id } = job
   if (!target) fail('升级任务缺少目标发布清单')
   const { finalRoot, commit } = stageRelease(job, jobPath)
-  const pluginSource = join(finalRoot, 'hermes-plugins', 'yaoyao')
-  const pluginManifest = readJSON(join(pluginSource, 'dashboard', 'manifest.json'))
-  if (pluginManifest.version !== target.pluginVersion) fail('构建产物中的插件版本与发布清单不一致')
 
   const previousCurrentTarget = currentTarget(plan.releaseRoot)
   let transitioned = false

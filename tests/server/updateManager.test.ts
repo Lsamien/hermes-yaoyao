@@ -12,14 +12,12 @@ const current = {
   schemaVersion: 1 as const,
   releaseVersion: '0.2.0',
   webVersion: '0.2.0',
-  pluginVersion: '1.7.1',
   gitTag: 'v0.2.0',
 }
 const latest = {
   schemaVersion: 1 as const,
   releaseVersion: '0.3.0',
   webVersion: '0.3.0',
-  pluginVersion: '1.8.0',
   gitTag: 'v0.3.0',
 }
 const latestRemote = { manifest: latest, commit: 'a'.repeat(40) }
@@ -58,11 +56,11 @@ describe('system release contract', () => {
     expect(releaseManifestURL('/srv/git/hermes-yaoyao.git', 'v0.2.1')).toBeUndefined()
   })
 
-  it('validates paired versions and semantic ordering', () => {
+  it('validates Web versions and semantic ordering', () => {
     expect(parseReleaseManifest(current)).toEqual(current)
     expect(compareReleaseVersions('0.3.0', '0.2.9')).toBeGreaterThan(0)
     expect(compareReleaseVersions('1.0.0', '1.0.0-beta.1')).toBeGreaterThan(0)
-    expect(() => parseReleaseManifest({ ...current, pluginVersion: 'latest' })).toThrow('pluginVersion')
+    expect(parseReleaseManifest(current)).not.toHaveProperty('pluginVersion')
   })
 
   it('locks an annotated remote tag to its peeled Git commit', async () => {
@@ -81,20 +79,20 @@ describe('system release contract', () => {
 })
 
 describe('SystemUpdateManager', () => {
-  it('reports the current Web/plugin pair and discovers a newer fixed release', async () => {
+  it('reports the current Web release and discovers a newer fixed release', async () => {
     const { manager } = fixture()
-    const status = await manager.check('1.7.1')
+    const status = await manager.check()
 
     expect(status.current).toEqual(current)
     expect(status.latest).toEqual(latest)
     expect(status.updateAvailable).toBe(true)
-    expect(status.versionsMatch).toBe(true)
+    expect(status).not.toHaveProperty('installedPluginVersion')
     expect(status.installationMode).toBe('source')
   })
 
   it('creates a durable updater job without exposing its internal plan', async () => {
     const { manager, launched } = fixture()
-    const job = await manager.startUpdate('0.3.0', '1.7.1')
+    const job = await manager.startUpdate('0.3.0')
 
     expect(job).toMatchObject({ operation: 'update', state: 'queued', target: latest })
     expect(launched).toHaveLength(1)
@@ -102,13 +100,13 @@ describe('SystemUpdateManager', () => {
     const stored = JSON.parse(readFileSync(launched[0]!, 'utf8')) as Record<string, unknown>
     expect(stored.plan).toBeTruthy()
     expect(manager.job(job.id)).not.toHaveProperty('plan')
-    await expect(manager.startUpdate('0.3.0', '1.7.1')).rejects.toThrow('正在执行')
+    await expect(manager.startUpdate('0.3.0')).rejects.toThrow('正在执行')
   })
 
   it('rejects arbitrary target versions and rollback without a recovery record', async () => {
     const { manager } = fixture()
 
-    await expect(manager.startUpdate('9.9.9', '1.7.1')).rejects.toThrow('不是当前发布源')
+    await expect(manager.startUpdate('9.9.9')).rejects.toThrow('不是当前发布源')
     expect(() => manager.startRollback()).toThrow('没有可回滚')
   })
 })

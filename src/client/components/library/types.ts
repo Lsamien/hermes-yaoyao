@@ -19,6 +19,7 @@ export type UiLibraryItem = {
   downloadUrl?: string
   sourceLabel?: string
   sourceSessionId?: string
+  sourceWorkspaceConversationId?: string
   sourceMessageId?: string
   sourceProfile?: string
   textContent?: string

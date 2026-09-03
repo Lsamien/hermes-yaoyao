@@ -6,6 +6,8 @@ import AgentIdentityPanel from '@/components/app/AgentIdentityPanel.vue'
 import DuplexVoicePanel from '@/components/app/DuplexVoicePanel.vue'
 import ModelServicesPanel from '@/components/app/ModelServicesPanel.vue'
 import NodePairingPanel from '@/components/app/NodePairingPanel.vue'
+import WorkspaceNodesPanel from '@/components/workspace/WorkspaceNodesPanel.vue'
+import WorkspaceVoiceProviders from '@/components/workspace/WorkspaceVoiceProviders.vue'
 import SystemManagementPanel from '@/components/app/SystemManagementPanel.vue'
 import SystemOverviewPanel from '@/components/app/SystemOverviewPanel.vue'
 import SystemUpdatePanel from '@/components/app/SystemUpdatePanel.vue'
@@ -342,8 +344,8 @@ watch(() => [props.open, props.initialPage] as const, ([open, initialPage]) => {
                 <SystemManagementPanel v-else-if="activePage === 'system-users' && isAdmin" section="users" :active="true" @dirty-change="setDirty('system-users', $event)" />
                 <SystemManagementPanel v-else-if="activePage === 'system-connection' && isAdmin" section="connection" :active="true" :upstream-ready="upstreamReady" :upstream-error="upstreamError" @dirty-change="setDirty('system-connection', $event)" />
                 <SystemManagementPanel v-else-if="activePage === 'system-push' && isAdmin" section="push" :active="true" @dirty-change="setDirty('system-push', $event)" />
-                <NodePairingPanel v-else-if="activePage === 'system-nodes' && isAdmin" mode="nodes" :active="true" :is-admin="true" @dirty-change="setDirty('system-nodes', $event)" />
-                <DuplexVoicePanel v-else-if="activePage === 'system-voice' && isAdmin" @dirty-change="setDirty('system-voice', $event)" />
+                <WorkspaceNodesPanel v-else-if="activePage === 'system-nodes' && isAdmin" />
+                <section v-else-if="activePage === 'system-voice' && isAdmin"><DuplexVoicePanel @dirty-change="setDirty('system-voice', $event)" /><WorkspaceVoiceProviders /></section>
                 <SystemUpdatePanel v-else-if="activePage === 'system-update' && isAdmin" :active="true" @lock-change="updateLocked = $event" />
               </div>
               <footer v-if="showFixedFooter" class="settings-content__footer">

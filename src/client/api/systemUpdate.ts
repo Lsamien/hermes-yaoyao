@@ -5,7 +5,6 @@ export interface ReleaseManifest {
   schemaVersion: 1
   releaseVersion: string
   webVersion: string
-  pluginVersion: string
   gitTag: string
 }
 
@@ -34,8 +33,6 @@ export interface UpdateJob {
 
 export interface SystemUpdateStatus {
   current: ReleaseManifest
-  installedPluginVersion?: string
-  versionsMatch: boolean
   installationMode: 'source' | 'release'
   latest?: ReleaseManifest
   updateAvailable: boolean
@@ -70,17 +67,4 @@ export function systemUpdateJob(jobID: string): Promise<UpdateJob> {
 
 export function rollbackSystemUpdate(): Promise<UpdateJob> {
   return apiRequest('/api/app/system/update/rollback', { method: 'POST', body: {} })
-}
-
-export function reconcileYaoyaoPlugin(): Promise<{
-  ok: boolean
-  updated: boolean
-  installedPluginVersion?: string
-  expectedPluginVersion: string
-}> {
-  return apiRequest('/api/app/plugins/yaoyao/reconcile', {
-    method: 'POST',
-    body: {},
-    timeoutMs: 90_000,
-  })
 }

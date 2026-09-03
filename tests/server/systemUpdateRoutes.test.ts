@@ -42,7 +42,7 @@ describe('system update routes', () => {
     const projectRoot = join(root, 'project')
     mkdirSync(projectRoot)
     writeFileSync(join(projectRoot, 'release.json'), JSON.stringify({
-      schemaVersion: 1, releaseVersion: '0.2.0', webVersion: '0.2.0', pluginVersion: '1.7.1', gitTag: 'v0.2.0',
+      schemaVersion: 1, releaseVersion: '0.2.0', webVersion: '0.2.0', gitTag: 'v0.2.0',
     }))
     const config: ServerConfig = {
       host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
@@ -53,7 +53,7 @@ describe('system update routes', () => {
     }
     const launched: string[] = []
     const latest = {
-      schemaVersion: 1 as const, releaseVersion: '0.3.0', webVersion: '0.3.0', pluginVersion: '1.8.0', gitTag: 'v0.3.0',
+      schemaVersion: 1 as const, releaseVersion: '0.3.0', webVersion: '0.3.0', gitTag: 'v0.3.0',
     }
     const updates = new SystemUpdateManager(config, {
       projectRoot,

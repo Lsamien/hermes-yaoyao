@@ -505,6 +505,7 @@ export function normalizeFile(value: unknown, fallbackProfile?: string): FileLib
       id: origin.id as number | string | undefined,
       profile: string(origin.profile) || fallbackProfile || undefined,
       sessionId: string(pick(origin, 'sessionId', 'session_id')) || undefined,
+      workspaceConversationId: string(origin.workspaceConversationId) || undefined,
       sessionTitle: string(pick(origin, 'sessionTitle', 'session_title')) || undefined,
       messageId: string(pick(origin, 'messageId', 'message_id')) || undefined,
       authorKind: string(pick(origin, 'authorKind', 'author_kind')) as FileLibraryItem['origins'][number]['authorKind'] || undefined,

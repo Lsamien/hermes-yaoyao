@@ -67,6 +67,10 @@ async function addMediaToComposer(media: PreviewMedia) {
 }
 
 async function openSource(item: UiLibraryItem) {
+  if (item.sourceWorkspaceConversationId) {
+    await router.push(`/conversations/${encodeURIComponent(item.sourceWorkspaceConversationId)}`)
+    return
+  }
   if (!item.sourceSessionId) return
   if (item.sourceProfile && auth.profiles.some(profile => profile.name === item.sourceProfile)) {
     auth.selectProfile(item.sourceProfile)
@@ -104,6 +108,7 @@ async function createChat() {
 }
 
 onMounted(() => {
+  files.profile = undefined
   void files.load(true)
   void chat.loadSessions(auth.activeProfile?.name)
   void chat.loadUnread(auth.activeProfile?.name)

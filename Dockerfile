@@ -13,7 +13,6 @@ COPY index.html ./
 COPY public ./public
 COPY scripts ./scripts
 COPY src ./src
-COPY hermes-plugins/yaoyao ./hermes-plugins/yaoyao
 
 RUN npm run build \
   && npm prune --omit=dev
@@ -34,10 +33,6 @@ COPY --chown=node:node package.json package-lock.json release.json ./
 COPY --chown=node:node --from=builder /app/node_modules ./node_modules
 COPY --chown=node:node --from=builder /app/dist ./dist
 COPY --chown=node:node --from=builder /app/dist-server ./dist-server
-# Keep the Dashboard plugin in the offline image as an installation payload.
-# Hermes itself owns plugin discovery, configuration, and restart, so this is
-# deliberately not copied into the Web container's runtime data directory.
-COPY --chown=node:node hermes-plugins/yaoyao /opt/hermes-yaoyao-plugin
 
 USER node
 

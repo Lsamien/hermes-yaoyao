@@ -105,8 +105,8 @@ function profileTitle(profile?: Profile): string {
 }
 
 const navItems: NavItem[] = [
-  { key: 'chat', label: '对话', path: '/chat', icon: 'chat' },
-  { key: 'groups', label: '团队', path: '/groups', icon: 'groups' },
+  { key: 'chat', label: '原生对话', path: '/chat', icon: 'chat' },
+  { key: 'groups', label: '聊天', path: '/conversations', icon: 'groups' },
   { key: 'kanban', label: '看板', path: '/kanban', icon: 'board' },
   { key: 'files', label: '文件库', path: '/files', icon: 'files' },
 ]
@@ -114,8 +114,9 @@ const navItems: NavItem[] = [
 // The active workspace is already represented by its main canvas and sidebar
 // context. Keep this strip focused on destinations the user can switch to.
 const featureNavItems = computed(() => navItems.filter(item => item.key !== activeNav.value.key
-  && !(activeNav.value.key === 'groups' && item.key === 'files')))
+ ))
 
+const applicationWorkspace = computed(() => route.path.startsWith('/conversations'))
 const activeNav = computed(() => {
   const item = navItems.find(entry => route.path.startsWith(entry.path))
   return item ?? navItems[0]
@@ -123,7 +124,7 @@ const activeNav = computed(() => {
 
 const contextHeading = computed(() => ({
   chat: '历史记录',
-  groups: '话题列表',
+  groups: '聊天列表',
   kanban: '看板列表',
   files: '历史记录',
 })[activeNav.value.key])
@@ -276,7 +277,7 @@ onBeforeUnmount(() => {
       <button ref="mobileNavigationTrigger" class="icon-button" type="button" aria-label="打开导航" @click="openMobileDrawer">
         <AppIcon name="menu" :size="20" />
       </button>
-      <button class="mobile-brand" type="button" aria-label="返回对话" @click="navigate('/chat')">
+      <button class="mobile-brand" type="button" aria-label="返回聊天" @click="navigate('/conversations')">
         <BrandMark :size="28" compact />
       </button>
       <button class="icon-button" type="button" :aria-label="theme === 'dark' ? '切换浅色主题' : '切换深色主题'" @click="emit('toggleTheme')">
@@ -291,7 +292,7 @@ onBeforeUnmount(() => {
       :inert="mobileDrawerOpen"
     >
       <div class="sidebar-brand-row">
-        <button class="rail__brand sidebar-brand" type="button" aria-label="返回对话" title="夭夭 Web" @click="navigate('/chat')">
+        <button class="rail__brand sidebar-brand" type="button" aria-label="返回聊天" title="夭夭 Web" @click="navigate('/conversations')">
           <BrandMark :size="sidebarCollapsed ? 26 : 32" :label="false" compact bare />
         </button>
       </div>
@@ -361,15 +362,15 @@ onBeforeUnmount(() => {
 
       <div class="sidebar-footer">
         <div class="sidebar-account-switcher">
-          <button class="sidebar-account-switcher__main" type="button" :title="`切换 Agent：${profileTitle(activeProfile)}`" aria-haspopup="listbox" :aria-expanded="profileMenuOpen" @click="toggleProfileMenu">
-            <AgentAvatar :name="profileTitle(activeProfile)" :avatar="activeProfile?.agentAvatar || ''" :size="30" />
+          <button class="sidebar-account-switcher__main" type="button" :title="applicationWorkspace ? '当前账号' : `切换 Agent：${profileTitle(activeProfile)}`" :aria-haspopup="applicationWorkspace ? undefined : 'listbox'" :aria-expanded="applicationWorkspace ? undefined : profileMenuOpen" @click="applicationWorkspace ? openSettings('account-security', $event) : toggleProfileMenu($event)">
+            <AgentAvatar :name="applicationWorkspace ? userName : profileTitle(activeProfile)" :avatar="applicationWorkspace ? '' : activeProfile?.agentAvatar || ''" :size="30" />
             <span class="account-copy">
-              <strong>{{ profileTitle(activeProfile) }}</strong>
-              <span>{{ activeProfile?.name || userName || '未选择 Agent' }}</span>
+              <strong>{{ applicationWorkspace ? userName : profileTitle(activeProfile) }}</strong>
+              <span>{{ applicationWorkspace ? '当前账号' : activeProfile?.name || userName || '未选择 Agent' }}</span>
             </span>
-            <AppIcon class="sidebar-account-switcher__chevron" name="chevron-down" :size="14" />
+            <AppIcon v-if="!applicationWorkspace" class="sidebar-account-switcher__chevron" name="chevron-down" :size="14" />
           </button>
-          <button class="sidebar-settings-trigger" type="button" title="设置中心" aria-label="打开设置中心" @click="openSettings('agent-identity', $event)">
+          <button class="sidebar-settings-trigger" type="button" title="设置中心" aria-label="打开设置中心" @click="openSettings(applicationWorkspace ? 'account-security' : 'agent-identity', $event)">
             <AppIcon name="settings" :size="17" />
           </button>
           <Transition name="menu-fade">
@@ -405,7 +406,7 @@ onBeforeUnmount(() => {
       :inert="!mobileDrawerOpen"
     >
       <div class="mobile-drawer__header">
-        <button class="sidebar-brand" type="button" aria-label="返回对话" @click="navigate('/chat')">
+        <button class="sidebar-brand" type="button" aria-label="返回聊天" @click="navigate('/conversations')">
           <BrandMark :size="32" compact />
         </button>
         <button ref="mobileDrawerClose" class="icon-button" type="button" aria-label="关闭导航" @click="closeMobileDrawer">
@@ -467,15 +468,15 @@ onBeforeUnmount(() => {
 
       <div class="sidebar-footer mobile-drawer__footer">
         <div class="sidebar-account-switcher">
-          <button class="sidebar-account-switcher__main" type="button" :title="`切换 Agent：${profileTitle(activeProfile)}`" aria-haspopup="listbox" :aria-expanded="profileMenuOpen" @click="toggleProfileMenu">
-            <AgentAvatar :name="profileTitle(activeProfile)" :avatar="activeProfile?.agentAvatar || ''" :size="30" />
+          <button class="sidebar-account-switcher__main" type="button" :title="applicationWorkspace ? '当前账号' : `切换 Agent：${profileTitle(activeProfile)}`" :aria-haspopup="applicationWorkspace ? undefined : 'listbox'" :aria-expanded="applicationWorkspace ? undefined : profileMenuOpen" @click="applicationWorkspace ? openSettings('account-security', $event) : toggleProfileMenu($event)">
+            <AgentAvatar :name="applicationWorkspace ? userName : profileTitle(activeProfile)" :avatar="applicationWorkspace ? '' : activeProfile?.agentAvatar || ''" :size="30" />
             <span class="account-copy">
-              <strong>{{ profileTitle(activeProfile) }}</strong>
-              <span>{{ activeProfile?.name || userName || '未选择 Agent' }}</span>
+              <strong>{{ applicationWorkspace ? userName : profileTitle(activeProfile) }}</strong>
+              <span>{{ applicationWorkspace ? '当前账号' : activeProfile?.name || userName || '未选择 Agent' }}</span>
             </span>
-            <AppIcon class="sidebar-account-switcher__chevron" name="chevron-down" :size="14" />
+            <AppIcon v-if="!applicationWorkspace" class="sidebar-account-switcher__chevron" name="chevron-down" :size="14" />
           </button>
-          <button class="sidebar-settings-trigger" type="button" title="设置中心" aria-label="打开设置中心" @click="openSettings('agent-identity', $event)">
+          <button class="sidebar-settings-trigger" type="button" title="设置中心" aria-label="打开设置中心" @click="openSettings(applicationWorkspace ? 'account-security' : 'agent-identity', $event)">
             <AppIcon name="settings" :size="17" />
           </button>
           <Transition name="menu-fade">

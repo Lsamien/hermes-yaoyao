@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import { defineStore } from 'pinia'
 import type { FileKind, FileLibraryItem } from '@shared/types'
 import { getFiles } from '@/api/files'
@@ -45,7 +45,7 @@ export const useFilesStore = defineStore('files', () => {
         const page = await getFiles({
           search: query.value.trim() || undefined,
           kind: kindFilter.value,
-          profile: profile.value ?? auth.activeProfile?.name,
+          profile: profile.value,
           cursor,
           limit: 50,
         })
@@ -67,6 +67,15 @@ export const useFilesStore = defineStore('files', () => {
   }
 
   const reset = () => load(true)
+  watch(() => auth.user?.id, () => {
+    loadGeneration += 1
+    items.value = []
+    profile.value = undefined
+    nextCursor.value = undefined
+    visitedCursors.clear()
+    isLoading.value = false
+    error.value = undefined
+  }, { flush: 'sync' })
   const loadMore = () => load(false)
   return { items, filteredItems, nextCursor, hasMore, isLoading, error, query, kindFilter, profile, load, reset, loadMore }
 })

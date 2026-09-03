@@ -205,13 +205,8 @@ describe('Hermes node pairing', () => {
       .set('X-File-Name-B64', Buffer.from('note.txt').toString('base64url'))
       .set('X-Mime-Type', 'text/plain')
       .send(attachment)
-      .expect(200)
-    expect(upstreamRequests.at(-1)).toMatchObject({
-      path: '/api/plugins/yaoyao/v1/node-worker/sessions/runtime-1/attachments',
-      contentType: 'application/octet-stream',
-      nodeClient: claim.body.deviceId,
-      body: attachment,
-    })
+      .expect(410)
+    expect(upstreamRequests.some(r => r.path.includes('/node-worker/'))).toBe(false)
 
     await request(runtime.app.callback())
       .delete(`/api/app/paired-devices/${claim.body.deviceId}`)

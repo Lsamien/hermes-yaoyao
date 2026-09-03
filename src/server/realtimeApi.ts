@@ -71,7 +71,7 @@ export class RealtimeAPI {
         } else credential = await this.session.webSocketCredential()
         const url = new URL(this.config.upstream)
         url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-        url.pathname = `${url.pathname.replace(/\/$/, '')}/api/${kind === 'chat' ? 'ws' : 'plugins/yaoyao/v1/events'}`
+        url.pathname = `${url.pathname.replace(/\/$/, '')}/api/ws`
         url.search = ''; url.searchParams.set(credential.name, credential.value)
         if (anchor) { url.searchParams.set('epoch', anchor.epoch); url.searchParams.set('cursor', String(anchor.cursor)) }
         return url
@@ -146,7 +146,7 @@ export class RealtimeAPI {
       ctx.set('Cache-Control', 'no-store')
       const path = match![2]!
       if (ctx.method === 'GET' && path === '/capabilities') {
-        ctx.body = { protocolVersion: 1, channels: ['chat', 'groups'], brokerEpoch: this.broker.epoch,
+        ctx.body = { protocolVersion: 1, channels: ['chat'], brokerEpoch: this.broker.epoch,
           ...(device ? {} : { csrfToken: this.csrf.issue(ctx) }) }
         return
       }

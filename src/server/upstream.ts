@@ -187,7 +187,6 @@ export class UpstreamClient {
       } else response = await load()
       // Snapshot-after-anchor ordering: no room snapshot fetched before this fresh
       // journal cursor may be reused to bootstrap a stream starting at that cursor.
-      if (path === '/api/plugins/yaoyao/v1/capabilities' && response.status === 200) this.invalidateReads(['groups'])
       return response
     } finally {
       if (tags) this.invalidateReads(tags)

@@ -41,7 +41,6 @@ export interface ServerConfig {
   insecureLan: boolean
   production: boolean
   superviseDashboard?: boolean
-  yaoyaoPluginSource?: string
   releaseSource?: string
   releaseRoot?: string
   allowRemoteUpdate?: boolean
@@ -56,7 +55,6 @@ export interface ServerConfig {
   allowedHostsSettings?: AllowedHostsConfigurationSnapshot
 }
 
-export const DEFAULT_YAOYAO_PLUGIN_SOURCE = 'https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao'
 export const DEFAULT_YAOYAO_RELEASE_SOURCE = 'https://git.samien.cn/samien/hermes-yaoyao.git'
 
 function flag(value: string | undefined): boolean {
@@ -81,22 +79,6 @@ function parseUpstream(value: string | undefined): URL {
   }
   upstream.pathname = upstream.pathname.replace(/\/+$/, '') || '/'
   return upstream
-}
-
-function parsePluginSource(value: string | undefined): string {
-  const source = value?.trim() || DEFAULT_YAOYAO_PLUGIN_SOURCE
-  if (source.length > 2_048 || /[\u0000-\u001f\u007f]/.test(source)) {
-    throw new Error('HERMES_YAOYAO_PLUGIN_SOURCE is invalid')
-  }
-  if (source.startsWith('https://') || source.startsWith('http://')) {
-    const url = new URL(source)
-    if (url.username || url.password) {
-      throw new Error('HERMES_YAOYAO_PLUGIN_SOURCE must not contain credentials')
-    }
-  } else if (!source.startsWith('git@') && !source.startsWith('ssh://')) {
-    throw new Error('HERMES_YAOYAO_PLUGIN_SOURCE must be an HTTPS or SSH Git source')
-  }
-  return source
 }
 
 function parseReleaseSource(value: string | undefined): string {
@@ -170,7 +152,6 @@ export function loadServerConfig(
   const allowInsecureLan = flag(env.HERMES_YAOYAO_ALLOW_INSECURE_LAN)
   const production = env.NODE_ENV === 'production'
   const superviseDashboard = flag(env.HERMES_YAOYAO_SUPERVISE_DASHBOARD)
-  const yaoyaoPluginSource = parsePluginSource(env.HERMES_YAOYAO_PLUGIN_SOURCE)
   const releaseSource = parseReleaseSource(env.HERMES_YAOYAO_RELEASE_SOURCE)
   const releaseRoot = resolve(env.HERMES_YAOYAO_RELEASE_ROOT?.trim() || `${homedir()}/.local/share/hermes-yaoyao`)
   const allowRemoteUpdate = flag(env.HERMES_YAOYAO_ALLOW_REMOTE_UPDATE)
@@ -208,7 +189,6 @@ export function loadServerConfig(
     insecureLan,
     production,
     superviseDashboard,
-    yaoyaoPluginSource,
     releaseSource,
     releaseRoot,
     allowRemoteUpdate,

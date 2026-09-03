@@ -78,7 +78,7 @@ function fakeGateway(records: RecordedRequest[]): typeof fetch {
           user_id: 'user-1', display_name: '测试用户', provider: 'basic',
         })
       case '/api/profiles':
-        return jsonResponse({ profiles: [{ name: 'default', is_default: true }] })
+        return jsonResponse({ profiles: [{ name: 'default', is_default: true, display_name: '竹儿' }] })
       case '/api/plugins/yaoyao/profiles':
         return jsonResponse({ profiles: [{ name: 'default', botName: '竹儿', agentName: '旧插件名称', isDefault: true }] })
       case '/api/auth/providers':
@@ -115,187 +115,6 @@ describe('8800 BFF', () => {
     const restarted = createApplication({ config, fetchImpl: fakeGateway([]) })
     runtimes.push(restarted)
     expect(restarted.csrf.verify(cookies, bootstrap.body.csrfToken)).toBe(true)
-  })
-
-  it('installs a fresh Yaoyao plugin through authenticated 9119 without restarting it', async () => {
-    const records: RecordedRequest[] = []
-    const baseGateway = fakeGateway(records)
-    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(input instanceof Request ? input.url : String(input))
-      if (url.pathname === '/api/dashboard/plugins') return jsonResponse([])
-      if (url.pathname === '/api/dashboard/agent-plugins/install') {
-        const rawBody = typeof init?.body === 'string' ? init.body : '{}'
-        records.push({
-          path: url.pathname,
-          method: init?.method ?? 'GET',
-          search: url.searchParams,
-          headers: new Headers(init?.headers),
-          body: JSON.parse(rawBody),
-        })
-        return jsonResponse({ ok: true, plugin_name: 'yaoyao', enabled: true })
-      }
-      return baseGateway(input, init)
-    }) as typeof fetch
-    const runtime = createApplication({
-      config: makeConfig(),
-      fetchImpl,
-    })
-    runtimes.push(runtime)
-    const bootstrap = await request(runtime.app.callback())
-      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
-
-    const response = await request(runtime.app.callback())
-      .post('/api/app/plugins/yaoyao/install')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .set('Cookie', cookieHeader(bootstrap))
-      .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ force: false })
-      .expect(200)
-
-    const install = records.find((entry) => entry.path === '/api/dashboard/agent-plugins/install')
-    expect(install?.body).toEqual({
-      identifier: 'https://git.samien.cn/samien/hermes-yaoyao.git#hermes-plugins/yaoyao',
-      force: false,
-      enable: true,
-    })
-    expect(response.body).toMatchObject({
-      ok: true,
-      plugin_name: 'yaoyao',
-      restarted: false,
-      restartRequired: false,
-    })
-  })
-
-  it('automatically reconciles an older Yaoyao plugin through 9119', async () => {
-    const records: RecordedRequest[] = []
-    const baseGateway = fakeGateway(records)
-    let pluginVersion = '1.7.1'
-    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(input instanceof Request ? input.url : String(input))
-      if (url.pathname === '/api/dashboard/plugins') {
-        return jsonResponse([{ name: 'yaoyao', version: pluginVersion }])
-      }
-      if (url.pathname === '/api/plugins/yaoyao/maintenance/storage') {
-        return jsonResponse({ ready: true })
-      }
-      if (url.pathname === '/api/dashboard/agent-plugins/install') {
-        const rawBody = typeof init?.body === 'string' ? init.body : '{}'
-        records.push({
-          path: url.pathname,
-          method: init?.method ?? 'GET',
-          search: url.searchParams,
-          headers: new Headers(init?.headers),
-          body: JSON.parse(rawBody),
-        })
-        pluginVersion = '1.7.3'
-        return jsonResponse({ ok: true, plugin_name: 'yaoyao', enabled: true })
-      }
-      return baseGateway(input, init)
-    }) as typeof fetch
-    const runtime = createApplication({ config: makeConfig(), fetchImpl })
-    runtimes.push(runtime)
-    const bootstrap = await request(runtime.app.callback())
-      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
-
-    const response = await request(runtime.app.callback())
-      .post('/api/app/plugins/yaoyao/reconcile')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .set('Cookie', cookieHeader(bootstrap))
-      .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({})
-      .expect(200)
-
-    expect(response.body).toMatchObject({
-      updated: true,
-      installedPluginVersion: '1.7.3',
-      expectedPluginVersion: '1.7.3',
-      restarted: false,
-      restartRequired: false,
-    })
-    expect(records.find(entry => entry.path === '/api/dashboard/agent-plugins/install')?.body)
-      .toMatchObject({ force: true, enable: true })
-  })
-
-  it('refuses to replace an existing Yaoyao before durable storage is ready', async () => {
-    const records: RecordedRequest[] = []
-    const baseGateway = fakeGateway(records)
-    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(input instanceof Request ? input.url : String(input))
-      if (url.pathname === '/api/dashboard/plugins') {
-        return jsonResponse([{ name: 'yaoyao', version: '1.7.1' }])
-      }
-      if (url.pathname === '/api/plugins/yaoyao/maintenance/storage') {
-        return jsonResponse({ detail: 'Not Found' }, { status: 404 })
-      }
-      return baseGateway(input, init)
-    }) as typeof fetch
-    const runtime = createApplication({ config: makeConfig(), fetchImpl })
-    runtimes.push(runtime)
-    const bootstrap = await request(runtime.app.callback())
-      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
-
-    const response = await request(runtime.app.callback())
-      .post('/api/app/plugins/yaoyao/install')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .set('Cookie', cookieHeader(bootstrap))
-      .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ force: true })
-      .expect(409)
-
-    expect(response.body.code).toBe('yaoyao_storage_migration_required')
-    expect(records.some((entry) => entry.path === '/api/dashboard/agent-plugins/install')).toBe(false)
-  })
-
-  it('upgrades an existing Yaoyao only after storage readiness and explicit force', async () => {
-    const records: RecordedRequest[] = []
-    const baseGateway = fakeGateway(records)
-    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(input instanceof Request ? input.url : String(input))
-      if (url.pathname === '/api/dashboard/plugins') {
-        return jsonResponse([{ name: 'yaoyao', version: '1.7.1' }])
-      }
-      if (url.pathname === '/api/plugins/yaoyao/maintenance/storage') {
-        return jsonResponse({ ready: true, profiles: [{ profile: 'default', ready: true }] })
-      }
-      if (url.pathname === '/api/dashboard/agent-plugins/install') {
-        const rawBody = typeof init?.body === 'string' ? init.body : '{}'
-        records.push({
-          path: url.pathname,
-          method: init?.method ?? 'GET',
-          search: url.searchParams,
-          headers: new Headers(init?.headers),
-          body: JSON.parse(rawBody),
-        })
-        return jsonResponse({ ok: true, plugin_name: 'yaoyao', enabled: true })
-      }
-      return baseGateway(input, init)
-    }) as typeof fetch
-    const runtime = createApplication({ config: makeConfig(), fetchImpl })
-    runtimes.push(runtime)
-    const bootstrap = await request(runtime.app.callback())
-      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
-    const common = request(runtime.app.callback())
-      .post('/api/app/plugins/yaoyao/install')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .set('Cookie', cookieHeader(bootstrap))
-      .set('X-CSRF-Token', bootstrap.body.csrfToken)
-
-    await common.send({ force: false }).expect(409)
-    await request(runtime.app.callback())
-      .post('/api/app/plugins/yaoyao/install')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .set('Cookie', cookieHeader(bootstrap))
-      .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ force: true })
-      .expect(200)
-
-    const install = records.find((entry) => entry.path === '/api/dashboard/agent-plugins/install')
-    expect(install?.body).toMatchObject({ force: true, enable: true })
   })
   it('serves authenticated historical media only from the configured root', async () => {
     const config = makeConfig()
@@ -358,7 +177,6 @@ describe('8800 BFF', () => {
     expect(records.map((entry) => entry.path)).toEqual([
       '/api/status', '/api/auth/me', '/api/status',
       '/api/profiles',
-      '/api/plugins/yaoyao/profiles',
     ])
     expect(response.body).toMatchObject({
       authRequired: true,
@@ -386,7 +204,7 @@ describe('8800 BFF', () => {
       .set('Host', '127.0.0.1:8800')
       .expect(200)
     expect(records.map(entry => entry.path)).toEqual([
-      '/api/status', '/api/auth/me', '/api/profiles', '/api/plugins/yaoyao/profiles',
+      '/api/status', '/api/auth/me', '/api/profiles',
     ])
     expect(response.body.profiles).toEqual([
       { name: 'default', is_default: true, agentName: '竹儿', display_name: '竹儿', description: '竹儿' },
@@ -493,7 +311,7 @@ describe('8800 BFF', () => {
       .set('Host', '127.0.0.1:8800')
       .expect(200)
     expect(records.at(-1)?.path).toBe('/api/profiles/sessions')
-    expect(records.at(-1)?.search.get('exclude_sources')).toBe('cron,ios_group')
+    expect(records.at(-1)?.search.get('exclude_sources')).toBe('cron,ios_group,yaoyao_workspace')
 
     await request(runtime.app.callback())
       .get('/api/app/sessions/session-1/messages?offset=3&limit=50&order=oldest&include_compacted=false&profile=default')
@@ -505,98 +323,6 @@ describe('8800 BFF', () => {
     expect(history.search.get('order')).toBe('latest')
     expect(history.search.get('include_compacted')).toBe('true')
     expect(history.search.get('profile')).toBe('default')
-  })
-
-  it('proxies topic pagination and forwards topic-scoped message queries', async () => {
-    const records: RecordedRequest[] = []
-    const runtime = createApplication({ config: makeConfig(), fetchImpl: fakeGateway(records) })
-    runtimes.push(runtime)
-    const roomID = '11111111-1111-4111-8111-111111111111'
-    const topicID = '22222222-2222-4222-8222-222222222222'
-
-    await request(runtime.app.callback())
-      .get('/api/app/groups/topics?limit=40&cursor=next-global-topic&archived=true&ignored=drop-me')
-      .set('Host', '127.0.0.1:8800')
-      .expect(200)
-    const globalTopics = records.at(-1)!
-    expect(globalTopics.path).toBe('/api/plugins/yaoyao/v1/topics')
-    expect(globalTopics.search.get('limit')).toBe('40')
-    expect(globalTopics.search.get('cursor')).toBe('next-global-topic')
-    expect(globalTopics.search.has('archived')).toBe(false)
-    expect(globalTopics.search.has('ignored')).toBe(false)
-
-    await request(runtime.app.callback())
-      .get(`/api/app/groups/rooms/${roomID}/topics?limit=25&cursor=next-topic&archived=true&ignored=drop-me`)
-      .set('Host', '127.0.0.1:8800')
-      .expect(200)
-    const topics = records.at(-1)!
-    expect(topics.path).toBe(`/api/plugins/yaoyao/v1/rooms/${roomID}/topics`)
-    expect(topics.search.get('limit')).toBe('25')
-    expect(topics.search.get('cursor')).toBe('next-topic')
-    expect(topics.search.get('archived')).toBe('true')
-    expect(topics.search.has('ignored')).toBe(false)
-
-    const bootstrap = await request(runtime.app.callback())
-      .get('/api/app/bootstrap')
-      .set('Host', '127.0.0.1:8800')
-      .expect(200)
-    await request(runtime.app.callback())
-      .patch(`/api/app/groups/rooms/${roomID}/topics/${topicID}`)
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .set('Cookie', cookieHeader(bootstrap))
-      .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ requestId: '33333333-3333-4333-8333-333333333333', title: '新标题' })
-      .expect(200)
-    const renamed = records.at(-1)!
-    expect(renamed.method).toBe('PATCH')
-    expect(renamed.path).toBe(`/api/plugins/yaoyao/v1/rooms/${roomID}/topics/${topicID}`)
-    expect(renamed.body).toEqual({ requestId: '33333333-3333-4333-8333-333333333333', title: '新标题' })
-
-    await request(runtime.app.callback())
-      .delete(`/api/app/groups/rooms/${roomID}/topics/${topicID}`)
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .set('Cookie', cookieHeader(bootstrap))
-      .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ requestId: '55555555-5555-4555-8555-555555555555' })
-      .expect(200)
-    expect(records.at(-1)?.method).toBe('DELETE')
-    expect(records.at(-1)?.path).toBe(`/api/plugins/yaoyao/v1/rooms/${roomID}/topics/${topicID}`)
-
-    await request(runtime.app.callback())
-      .post(`/api/app/groups/rooms/${roomID}/topics/${topicID}/restore`)
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .set('Cookie', cookieHeader(bootstrap))
-      .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ requestId: '66666666-6666-4666-8666-666666666666' })
-      .expect(200)
-    expect(records.at(-1)?.method).toBe('POST')
-    expect(records.at(-1)?.path).toBe(`/api/plugins/yaoyao/v1/rooms/${roomID}/topics/${topicID}/restore`)
-
-    await request(runtime.app.callback())
-      .patch(`/api/app/groups/rooms/${roomID}/topics/${topicID}/read`)
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .set('Cookie', cookieHeader(bootstrap))
-      .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ requestId: '44444444-4444-4444-8444-444444444444', throughSeq: 42 })
-      .expect(200)
-    const markedRead = records.at(-1)!
-    expect(markedRead.method).toBe('PATCH')
-    expect(markedRead.path).toBe(`/api/plugins/yaoyao/v1/rooms/${roomID}/topics/${topicID}/read`)
-    expect(markedRead.body).toEqual({ requestId: '44444444-4444-4444-8444-444444444444', throughSeq: 42 })
-
-    await request(runtime.app.callback())
-      .get(`/api/app/groups/rooms/${roomID}/messages?topicId=${topicID}&beforeSeq=40&limit=20`)
-      .set('Host', '127.0.0.1:8800')
-      .expect(200)
-    const messages = records.at(-1)!
-    expect(messages.path).toBe(`/api/plugins/yaoyao/v1/rooms/${roomID}/messages`)
-    expect(messages.search.get('topicId')).toBe(topicID)
-    expect(messages.search.get('beforeSeq')).toBe('40')
-    expect(messages.search.get('limit')).toBe('20')
   })
 
   it('keeps unknown API routes out of the SPA fallback', async () => {
@@ -659,51 +385,14 @@ describe('8800 BFF', () => {
     }) as typeof fetch
     const runtime = createApplication({ config: makeConfig(), fetchImpl })
     runtimes.push(runtime)
+    const file = join(runtime.config.home, 'unsafe.html')
+    writeFileSync(file, '<script>window.pwned=true</script>')
+    runtime.workspace.put('test-admin','file','1',{id:'1',name:'unsafe.html',path:file,mimeType:'text/html',size:37,sender:'agent',createdAt:Date.now()})
     const response = await request(runtime.app.callback())
       .get('/api/app/files/1/preview')
       .set('Host', '127.0.0.1:8800')
       .expect(200)
     expect(response.headers['content-type']).toMatch(/^application\/octet-stream/)
     expect(response.headers['content-disposition']).toContain('attachment')
-  })
-
-  it('stores group files opaquely and injects the local path only upstream', async () => {
-    const records: RecordedRequest[] = []
-    const runtime = createApplication({ config: makeConfig(), fetchImpl: fakeGateway(records) })
-    runtimes.push(runtime)
-    const bootstrap = await request(runtime.app.callback())
-      .get('/api/app/bootstrap')
-      .set('Host', '127.0.0.1:8800')
-      .expect(200)
-    const cookies = cookieHeader(bootstrap)
-    const upload = await request(runtime.app.callback())
-      .post('/api/app/group-uploads')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .set('Cookie', cookies)
-      .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .attach('files', Buffer.from('hello'), { filename: 'hello.txt', contentType: 'text/plain' })
-      .expect(201)
-    expect(upload.body.files[0]).toMatchObject({ name: 'hello.txt', size: 5 })
-    expect(upload.body.files[0].path).toBeUndefined()
-
-    await request(runtime.app.callback())
-      .post('/api/app/groups/rooms/11111111-1111-4111-8111-111111111111/messages')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
-      .set('Cookie', cookies)
-      .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({
-        requestId: '22222222-2222-4222-8222-222222222222',
-        clientMessageId: '33333333-3333-4333-8333-333333333333',
-        content: '请看文件',
-        mentionAgentIds: [],
-        uploadIds: [upload.body.files[0].id],
-      })
-      .expect(200)
-    const sent = records.at(-1)?.body as { content: string; uploadIds?: unknown }
-    expect(sent.uploadIds).toBeUndefined()
-    expect(sent.content).toContain('请看文件')
-    expect(sent.content).toContain(runtime.uploads.uploadRoot)
   })
 })

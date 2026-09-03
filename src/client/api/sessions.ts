@@ -2,7 +2,7 @@ import type { ChatMessage, JsonValue, SessionSummary } from '@shared/types'
 import { apiRequest, apiUrl, unwrapData } from './client'
 import { normalizeChatMessage, normalizeSession, number, record, values } from '@/utils/normalize'
 
-const EXCLUDED_SOURCES = 'cron,ios_group'
+const EXCLUDED_SOURCES = 'cron,ios_group,yaoyao_workspace'
 
 export interface SessionPage {
   items: SessionSummary[]
@@ -33,7 +33,7 @@ export async function getSessions(profile?: string, cursor?: string, limit = 100
   const source = record(payload)
   const rawItems = values(source.items ?? source.sessions ?? payload)
   const items = rawItems.map(item => normalizeSession(item, profile)).filter(session => session.id)
-    .filter(session => !['cron', 'ios_group'].includes(session.source))
+    .filter(session => !['cron', 'ios_group', 'yaoyao_workspace'].includes(session.source))
   const total = number(source.total)
   const nextOffset = offset + items.length
   return {
@@ -56,7 +56,7 @@ export async function searchSessions(query: string, profile?: string, limit = 10
   })))
   const source = record(payload)
   return values(source.items ?? source.sessions ?? source.results ?? payload).map(item => normalizeSession(item, profile))
-    .filter(session => session.id && !['cron', 'ios_group'].includes(session.source))
+    .filter(session => session.id && !['cron', 'ios_group', 'yaoyao_workspace'].includes(session.source))
 }
 
 export async function getSession(id: string, profile?: string): Promise<SessionSummary> {
