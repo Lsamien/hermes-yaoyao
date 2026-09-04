@@ -42,6 +42,7 @@ test('separates writable Web chats from read-only Hermes history', async ({ page
   await expect(sidebar.getByText('Hermes 外部历史', { exact: true })).toHaveCount(0)
   await sidebar.getByRole('button', { name: '历史记录', exact: true }).click()
   await expect(page).toHaveURL(/\/history/)
+  await expect(page.getByText('选择历史记录', { exact: true })).toBeVisible()
   await expect(sidebar.getByText('Hermes 外部历史', { exact: true })).toBeVisible()
   await expect(sidebar.getByText('夭夭 Web 验收会话', { exact: true })).toHaveCount(0)
   await sidebar.getByText('Hermes 外部历史', { exact: true }).click()

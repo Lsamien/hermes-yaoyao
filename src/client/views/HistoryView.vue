@@ -422,8 +422,9 @@ watch(() => chat.activeSessionId, async id => {
         :show-assistant-identity="false"
         :agent-avatars="agentAvatars"
         :allow-branch="false"
+        empty-title="选择历史记录"
+        empty-description="从左侧选择一条 Hermes 历史会话查看。"
         read-only
-        empty-logo
         transparent-header
         @load-older="chat.loadOlder"
         @preview="openAttachment"
