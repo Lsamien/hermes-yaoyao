@@ -43,16 +43,11 @@ test('opens settings and schedules an independent Web update while all 9119 requ
   const origin = `http://127.0.0.1:${(node.server.address() as AddressInfo).port}`
   try {
     const bootstrap = await (await page.request.get(origin + '/api/app/bootstrap')).json()
-    const login = await page.request.post(origin + '/api/app/login', {
-      headers: { Origin: origin, 'X-CSRF-Token': bootstrap.csrfToken }, data: { username: 'admin', password: 'admin' },
+    const login = await page.request.post(origin + '/api/app/setup', {
+      headers: { Origin: origin, 'X-CSRF-Token': bootstrap.csrfToken }, data: { username: 'admin', password: 'offline-e2e-password' },
     })
     const signedIn = await login.json()
     expect(login.ok(), `${login.status()} ${signedIn.error || ''}`).toBe(true)
-    const changed = await page.request.put(origin + '/api/app/account/credentials', {
-      headers: { Origin: origin, 'X-CSRF-Token': signedIn.csrfToken },
-      data: { currentPassword: 'admin', newPassword: 'offline-e2e-password' },
-    })
-    expect(changed.ok()).toBe(true)
     expect((await page.request.get(origin + '/readyz')).status()).toBe(503)
     await page.goto(origin + '/chat')
     await page.getByRole('button', { name: /^(打开设置中心|设置与模式)$/ }).click()

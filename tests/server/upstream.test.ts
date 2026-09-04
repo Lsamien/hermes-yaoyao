@@ -9,7 +9,7 @@ describe('upstream request boundary', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
-  it('derives proxy scheme from public 8800 TLS and forwards only the trusted peer IP', async () => {
+  it('derives proxy scheme from public 15300 TLS and forwards only the trusted peer IP', async () => {
     let headers = new Headers()
     const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
       headers = new Headers(init?.headers)

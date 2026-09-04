@@ -27,7 +27,7 @@ function isolatedEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
   return {
     host: '127.0.0.1',
-    port: 8800,
+    port: 15300,
     upstream: new URL('http://127.0.0.1:9119'),
     allowedHosts: new Set(),
     home: '/tmp/hermes-yaoyao-test',
@@ -41,15 +41,15 @@ function config(overrides: Partial<ServerConfig> = {}): ServerConfig {
 describe('server security boundary', () => {
   it('accepts loopback/private hosts and configured DNS only', () => {
     const value = config({ allowedHosts: new Set(['yaoyao.internal']) })
-    expect(isAllowedHostHeader('127.0.0.1:8800', value)).toBe(true)
-    expect(isAllowedHostHeader('[::1]:8800', value)).toBe(true)
-    expect(isAllowedHostHeader('192.168.10.8:8800', value)).toBe(true)
-    expect(isAllowedHostHeader('yaoyao.internal:8800', value)).toBe(true)
+    expect(isAllowedHostHeader('127.0.0.1:15300', value)).toBe(true)
+    expect(isAllowedHostHeader('[::1]:15300', value)).toBe(true)
+    expect(isAllowedHostHeader('192.168.10.8:15300', value)).toBe(true)
+    expect(isAllowedHostHeader('yaoyao.internal:15300', value)).toBe(true)
     expect(isAllowedHostHeader('127.0.0.1:9999', value)).toBe(false)
     expect(isAllowedHostHeader('127.0.0.1', value)).toBe(true)
     expect(isAllowedHostHeader('192.168.10.8:443', value)).toBe(true)
     expect(isAllowedHostHeader('yaoyao.internal', value)).toBe(true)
-    expect(isAllowedHostHeader('attacker.example:8800', value)).toBe(false)
+    expect(isAllowedHostHeader('attacker.example:15300', value)).toBe(false)
     expect(isAllowedHostHeader('127.0.0.1@attacker.example', value)).toBe(false)
   })
 
@@ -81,7 +81,7 @@ describe('server security boundary', () => {
 
   it('accepts configured IPv6 addresses and brackets them in WebSocket CSP origins', () => {
     const allowed = new Set(['2001:db8::10'])
-    expect(isAllowedHostHeader('[2001:db8::10]:8800', config({ allowedHosts: allowed }))).toBe(true)
+    expect(isAllowedHostHeader('[2001:db8::10]:15300', config({ allowedHosts: allowed }))).toBe(true)
     expect(isExactOrigin('https://[2001:db8::10]', '10.1.5.100', false, allowed)).toBe(true)
     const headers: Record<string, string> = {}
     const ctx = { host: '10.1.5.100', set(name: string, value: string) { headers[name] = value } } as unknown as Koa.Context
@@ -91,10 +91,10 @@ describe('server security boundary', () => {
   })
 
   it('requires an exact scheme and host Origin', () => {
-    expect(isExactOrigin('http://127.0.0.1:8800', '127.0.0.1:8800', false)).toBe(true)
-    expect(isExactOrigin('https://127.0.0.1:8800', '127.0.0.1:8800', false)).toBe(true)
-    expect(isExactOrigin('http://127.0.0.1:8801', '127.0.0.1:8800', false)).toBe(false)
-    expect(isExactOrigin('null', '127.0.0.1:8800', false)).toBe(false)
+    expect(isExactOrigin('http://127.0.0.1:15300', '127.0.0.1:15300', false)).toBe(true)
+    expect(isExactOrigin('https://127.0.0.1:15300', '127.0.0.1:15300', false)).toBe(true)
+    expect(isExactOrigin('http://127.0.0.1:8801', '127.0.0.1:15300', false)).toBe(false)
+    expect(isExactOrigin('null', '127.0.0.1:15300', false)).toBe(false)
   })
 
   it('uses a signed double-submit CSRF token', () => {

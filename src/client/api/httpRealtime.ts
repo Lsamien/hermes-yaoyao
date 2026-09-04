@@ -18,7 +18,7 @@ export class HTTPRealtimeChannel {
     let value: { protocolVersion: number; csrfToken?: string }
     try { value = await apiRequest('/api/realtime/capabilities') }
     catch (e) {
-      if (e instanceof ApiError && [404, 405, 410].includes(e.status)) throw new ApiError('此服务端不支持 HTTP+SSE，请升级 8800 服务', 409, 'HTTP_SSE_REQUIRED')
+      if (e instanceof ApiError && [404, 405, 410].includes(e.status)) throw new ApiError('此服务端不支持 HTTP+SSE，请升级 15300 服务', 409, 'HTTP_SSE_REQUIRED')
       throw e
     }
     if (value.protocolVersion !== 1) throw new ApiError('不支持的实时协议版本', 409, 'UNSUPPORTED_REALTIME_PROTOCOL')

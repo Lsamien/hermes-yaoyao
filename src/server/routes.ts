@@ -646,6 +646,7 @@ async function bootstrap(
       status: { state: 'ready' },
       authRequired: true,
       authenticated: false,
+      setupRequired: dependencies.auth.setupRequired,
       profiles: [],
       csrfToken,
       insecureLan: dependencies.config.insecureLan,
@@ -676,7 +677,7 @@ async function bootstrap(
           }
         })(),
         new Promise<never>((_resolve, reject) => {
-          timeout = setTimeout(() => reject(new Error('9119 连接超时；仍可管理 8800 和升级 Web')), 3_000)
+          timeout = setTimeout(() => reject(new Error('9119 连接超时；仍可管理 15300 和升级 Web')), 3_000)
           timeout.unref()
         }),
       ])
@@ -713,6 +714,14 @@ async function login(ctx: Koa.Context, dependencies: RouteDependencies): Promise
   }
 
   dependencies.auth.login(ctx, username, password)
+  await bootstrap(ctx, dependencies, true)
+}
+
+async function setup(ctx: Koa.Context, dependencies: RouteDependencies): Promise<void> {
+  const request = body(ctx)
+  const username = typeof request.username === 'string' ? request.username : ''
+  const password = typeof request.password === 'string' ? request.password : ''
+  dependencies.auth.setupAdmin(ctx, username, password)
   await bootstrap(ctx, dependencies, true)
 }
 
@@ -952,7 +961,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       auth_required: true,
       gateway_running: true,
       server_kind: 'yaoyao-web',
-      node_transport: '8800',
+      node_transport: '15300',
     })
   })
   router.get('/api/auth/providers', (ctx) => {
@@ -1418,6 +1427,9 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
   router.get('/api/app/bootstrap', async (ctx) => {
     await bootstrap(ctx, dependencies)
   })
+  router.post('/api/app/setup', async (ctx) => {
+    await setup(ctx, dependencies)
+  })
   router.post('/api/app/login', async (ctx) => {
     await login(ctx, dependencies)
   })
@@ -1865,7 +1877,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       search: new URLSearchParams(ctx.querystring),
       body: ['GET', 'HEAD'].includes(ctx.method) ? undefined : optionalBody(ctx),
       // Hermes binds WebSocket tickets to the request address. The relay's
-      // upstream connection originates from 8800 itself, so forwarding the
+      // upstream connection originates from 15300 itself, so forwarding the
       // phone's address here would make 9119 reject the ticket during Upgrade.
       clientAddress: upstreamPath === '/api/auth/ws-ticket'
         ? undefined : ctx.req.socket.remoteAddress,

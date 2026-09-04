@@ -7,24 +7,20 @@ const mediaPaths = [
 const mediaNames = mediaPaths.map(path => path.split('/').at(-1)!)
 
 async function signIn(request: APIRequestContext, origin: string) {
-  for (const password of ['e2e-password', 'admin']) {
-    const bootstrap = await (await request.get('/api/app/bootstrap')).json()
-    const login = await request.post('/api/app/login', {
+  const bootstrap = await (await request.get('/api/app/bootstrap')).json()
+  if (bootstrap.setupRequired) {
+    const setup = await request.post('/api/app/setup', {
       headers: { Origin: origin, 'X-CSRF-Token': bootstrap.csrfToken },
-      data: { username: 'admin', password },
+      data: { username: 'admin', password: 'e2e-password' },
     })
-    if (!login.ok()) continue
-    const account = await login.json()
-    if (account.user.mustChangePassword) {
-      const changed = await request.put('/api/app/account/credentials', {
-        headers: { Origin: origin, 'X-CSRF-Token': account.csrfToken },
-        data: { currentPassword: password, newPassword: 'e2e-password', username: 'admin' },
-      })
-      expect(changed.ok()).toBe(true)
-    }
+    expect(setup.ok()).toBe(true)
     return
   }
-  throw new Error('Could not sign in to the fixture Web server')
+  const login = await request.post('/api/app/login', {
+    headers: { Origin: origin, 'X-CSRF-Token': bootstrap.csrfToken },
+    data: { username: 'admin', password: 'e2e-password' },
+  })
+  expect(login.ok()).toBe(true)
 }
 
 async function expectDecodedImage(image: Locator) {

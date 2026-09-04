@@ -29,7 +29,7 @@ function temporaryHome(): string {
 
 function config(home: string, allowedHosts = new Set<string>()): ServerConfig {
   return {
-    host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+    host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
     allowedHosts, home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
     mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
   }
@@ -41,7 +41,7 @@ describe('allowed hosts configuration', () => {
     expect(normalizeAllowedHost('[2001:db8::10]')).toBe('2001:db8::10')
     expect(normalizeAllowedHost('例子.测试')).toBe('xn--fsqu00a.xn--0zwm56d')
     expect(() => normalizeAllowedHost('https://yaoyao.example.com')).toThrow(/不能包含协议/)
-    expect(() => normalizeAllowedHost('203.0.113.10:8800')).toThrow(/不能附加端口/)
+    expect(() => normalizeAllowedHost('203.0.113.10:15300')).toThrow(/不能附加端口/)
   })
 
   it('persists Web entries with restrictive permissions and merges environment entries after restart', () => {
@@ -84,11 +84,11 @@ describe('allowed hosts configuration', () => {
     const runtime = createAuthenticatedApplication({ config: serverConfig })
     runtimes.push(runtime)
     const agent = request.agent(runtime.app.callback())
-    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:15300').expect(200)
 
     const saved = await agent.put('/api/app/system/allowed-hosts')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
       .send({ hosts: ['yaoyao.example.com', '203.0.113.10'] })
       .expect(200)

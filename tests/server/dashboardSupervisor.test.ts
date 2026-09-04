@@ -22,7 +22,7 @@ describe('DashboardSupervisor', () => {
     const f = supervisor()
     await f.instance.checkNow()
     expect(f.calls).toEqual([])
-    expect(f.launches).toEqual([['dashboard', '--host', '127.0.0.1', '--no-open']])
+    expect(f.launches).toEqual([['dashboard', '--host', '127.0.0.1']])
     await f.instance.checkNow()
     expect(f.launches).toHaveLength(1)
   })
@@ -37,7 +37,7 @@ describe('DashboardSupervisor', () => {
     const f = supervisor(true)
     await f.instance.restart()
     expect(f.calls).toEqual([['dashboard', '--stop']])
-    expect(f.launches).toEqual([['dashboard', '--host', '127.0.0.1', '--no-open']])
+    expect(f.launches).toEqual([['dashboard', '--host', '127.0.0.1']])
   })
   it('coalesces concurrent checks', async () => {
     const f = supervisor()

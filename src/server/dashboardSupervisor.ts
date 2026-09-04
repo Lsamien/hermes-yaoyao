@@ -48,7 +48,7 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
-/** Keeps the local Hermes Dashboard available for the managed 8800 service. */
+/** Keeps the local Hermes Dashboard available for the managed 15300 service. */
 export class DashboardSupervisor {
   private readonly command: string
   private readonly dashboardHost = '127.0.0.1'
@@ -101,7 +101,7 @@ export class DashboardSupervisor {
       const running = await this.probe('127.0.0.1', DASHBOARD_PORT)
       if (running) return
       this.log(`Hermes Dashboard is unavailable on 9119; starting it on ${this.dashboardHost}.`)
-      this.launch(['dashboard', '--host', this.dashboardHost, '--no-open'])
+      this.launch(['dashboard', '--host', this.dashboardHost])
     } catch (error) {
       this.log(`Hermes Dashboard supervision failed: ${error instanceof Error ? error.message : String(error)}`)
     } finally {

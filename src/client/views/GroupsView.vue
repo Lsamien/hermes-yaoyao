@@ -535,7 +535,7 @@ async function loadPushSubscriptions() {
       ? await getGroupPushSubscriptions()
       : new Set()
   } catch {
-    // Older 8800 installations do not expose push capability. Keep group chat
+    // Older 15300 installations do not expose push capability. Keep group chat
     // fully functional and simply omit the subscription control.
     pushProtocolSupported.value = false
     pushConfigured.value = false

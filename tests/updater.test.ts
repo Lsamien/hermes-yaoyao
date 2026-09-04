@@ -21,12 +21,12 @@ afterEach(() => {
 describe('standalone updater primitives', () => {
   it('accepts a healthy Web without probing 9119 or upstream-dependent readiness', async () => {
     const fetchImpl = vi.fn(async (url: string) => {
-      if (url !== 'http://127.0.0.1:8800/healthz') throw new Error('9119 offline')
+      if (url !== 'http://127.0.0.1:15300/healthz') throw new Error('9119 offline')
       return Response.json({ ok: true })
     })
     await verifyRuntime(1_000, fetchImpl)
     expect(fetchImpl).toHaveBeenCalledTimes(1)
-    expect(fetchImpl.mock.calls[0]?.[0]).toBe('http://127.0.0.1:8800/healthz')
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('http://127.0.0.1:15300/healthz')
   })
 
   it('still fails an unhealthy Web and retries transient startup failures', async () => {

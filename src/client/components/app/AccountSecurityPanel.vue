@@ -173,7 +173,7 @@ watch(canSave, value => emit('can-save-change', value), { immediate: true, flush
       <div>
         <p class="panel-eyebrow">当前账号</p>
         <h2>登录与安全</h2>
-        <p class="panel-description">管理此 8800 Web 账号的登录凭据。修改成功后，请使用新凭据登录。</p>
+        <p class="panel-description">管理此 15300 Web 账号的登录凭据。修改成功后，请使用新凭据登录。</p>
       </div>
       <span class="account-badge">{{ auth.user?.username || '当前账号' }}</span>
     </header>
@@ -191,7 +191,7 @@ watch(canSave, value => emit('can-save-change', value), { immediate: true, flush
       <label v-if="isAdmin" class="field">
         <span>管理员用户名</span>
         <input v-model="username" name="username" autocomplete="username" :disabled="busy" />
-        <small>仅修改当前 8800 Web 管理账号，不会更改 9119 服务账号。</small>
+        <small>仅修改当前 15300 Web 管理账号，不会更改 9119 服务账号。</small>
       </label>
 
       <h3 class="security-section-title security-section-title--password">修改密码</h3>

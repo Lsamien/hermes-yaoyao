@@ -40,8 +40,8 @@ class TestAuth extends LocalAuthStore {
 function req(method: 'get' | 'post' | 'put' | 'patch' | 'delete', path: string, user = 'first') {
   return request(runtime.app.callback())
     [method](path)
-    .set('Host', '127.0.0.1:8800')
-    .set('Origin', 'http://127.0.0.1:8800')
+    .set('Host', '127.0.0.1:15300')
+    .set('Origin', 'http://127.0.0.1:15300')
     .set('Cookie', cookie)
     .set('X-CSRF-Token', csrf)
     .set('x-test-user', user)
@@ -76,7 +76,7 @@ beforeEach(async () => {
   })
   const b = await request(runtime.app.callback())
     .get('/api/app/bootstrap')
-    .set('Host', '127.0.0.1:8800')
+    .set('Host', '127.0.0.1:15300')
     .expect(200)
   cookie = (b.headers['set-cookie'] as unknown as string[]).map((v) => v.split(';')[0]).join('; ')
   csrf = b.body.csrfToken

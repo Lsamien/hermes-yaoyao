@@ -94,7 +94,7 @@ describe('HTTP+SSE migration', () => {
     const home = mkdtempSync(join(tmpdir(), 'hermes-yaoyao-paired-ws-'))
     homes.push(home)
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800,
+      host: '127.0.0.1', port: 15300,
       upstream: new URL(`http://127.0.0.1:${upstreamPort}`),
       allowedHosts: new Set(), home,
       mediaRoot: join(home, 'media'), attachmentsRoot: join(home, 'attachments'), imagesRoot: join(home, 'images'), mediaOwner: 'tester',
@@ -168,7 +168,7 @@ describe('HTTP+SSE migration', () => {
     homes.push(home)
     const config: ServerConfig = {
       host: '127.0.0.1',
-      port: 8800,
+      port: 15300,
       upstream: new URL('http://127.0.0.1:9119'),
       allowedHosts: new Set(),
       home,

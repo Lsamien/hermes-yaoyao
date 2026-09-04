@@ -13,6 +13,7 @@ function normalizeBootstrap(payload: unknown): BootstrapResponse {
   const response: BootstrapResponse = {
     status: string(status.state ?? root.state) || undefined,
     authRequired,
+    setupRequired: bool(root.setupRequired ?? root.setup_required),
     profiles,
     csrfToken,
     insecureLan: bool(root.insecureLan ?? root.insecure_lan),
@@ -45,6 +46,14 @@ export async function login(input: LoginInput): Promise<BootstrapResponse> {
   const response = normalizeBootstrap(payload)
   if (!response.user && response.authRequired) return bootstrap()
   return response
+}
+
+export async function setup(input: LoginInput): Promise<BootstrapResponse> {
+  return normalizeBootstrap(await apiRequest<unknown>('/api/app/setup', {
+    method: 'POST',
+    body: input as unknown as JsonValue,
+    notifyUnauthorized: false,
+  }))
 }
 
 export async function logout(): Promise<void> {

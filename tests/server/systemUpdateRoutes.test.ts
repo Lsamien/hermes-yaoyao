@@ -45,7 +45,7 @@ describe('system update routes', () => {
       schemaVersion: 1, releaseVersion: '0.2.0', webVersion: '0.2.0', gitTag: 'v0.2.0',
     }))
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
       allowedHosts: new Set(), home: join(root, 'data'), mediaRoot: join(root, 'media'),
       attachmentsRoot: join(root, 'attachments'), imagesRoot: join(root, 'images'), mediaOwner: 'tester',
       allowInsecureLan: false, insecureLan: false, production: false,
@@ -79,17 +79,17 @@ describe('system update routes', () => {
     const runtime = createApplication({ config, fetchImpl, updates })
     runtimes.push(runtime)
     const bootstrap = await request(runtime.app.callback())
-      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+      .get('/api/app/bootstrap').set('Host', '127.0.0.1:15300').expect(200)
     const cookie = cookieHeader(bootstrap)
     const mutation = (path: string) => request(runtime.app.callback())
       .post(path)
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .set('Cookie', cookie)
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
 
     const status = await request(runtime.app.callback())
-      .get('/api/app/system/update/status').set('Host', '127.0.0.1:8800').set('Cookie', cookie).expect(200)
+      .get('/api/app/system/update/status').set('Host', '127.0.0.1:15300').set('Cookie', cookie).expect(200)
     expect(status.body).toMatchObject({ updateAvailable: false })
     expect(status.body.installedPluginVersion).toBeUndefined()
 
@@ -103,7 +103,7 @@ describe('system update routes', () => {
 
     const jobResponse = await request(runtime.app.callback())
       .get(`/api/app/system/update/jobs/${queued.body.id}`)
-      .set('Host', '127.0.0.1:8800').set('Cookie', cookie)
+      .set('Host', '127.0.0.1:15300').set('Cookie', cookie)
       .expect(200)
     expect(jobResponse.body).toMatchObject({ id: queued.body.id, state: 'queued' })
   })

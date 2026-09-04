@@ -8,11 +8,11 @@
 
 ## 源码安装
 
-在仓库执行 `npm ci`、`npm run build`，然后执行 `npm start`。Web 默认监听 `127.0.0.1:8800`。
+在仓库执行 `npm ci`、`npm run build`，然后执行 `npm start`。Web 默认监听 `127.0.0.1:15300`。
 
 上游地址由 `HERMES_YAOYAO_UPSTREAM` 配置。远端凭据在 Web 系统设置中保存。需要环境配置时使用 `HERMES_YAOYAO_UPSTREAM_USERNAME` 和 `HERMES_YAOYAO_UPSTREAM_PASSWORD`，不要把凭据嵌入 URL。
 
-首次登录使用 `admin/admin`，随后必须修改密码。iOS 使用 Web 的账号或手机登录二维码。
+首次打开 Web 时创建管理员账号和至少 8 位的密码。服务不会生成固定的默认账号或密码；iOS 使用 Web 账号或手机登录二维码。
 
 ## 局域网与容器
 

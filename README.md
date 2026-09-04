@@ -24,7 +24,7 @@ npm run build
 npm start
 ```
 
-默认 Web 地址为 `http://127.0.0.1:8800`，上游为 `http://127.0.0.1:9119`。首次使用 `admin/admin` 登录并修改密码。远端 Hermes 的凭据可在系统设置中配置。
+默认 Web 地址为 `http://127.0.0.1:15300`，上游为 `http://127.0.0.1:9119`。首次打开 Web 时自行创建管理员账号；服务不会生成固定的默认账号或密码。远端 Hermes 的凭据可在系统设置中配置。
 
 ```sh
 HERMES_YAOYAO_UPSTREAM=http://服务器:9119 npm start

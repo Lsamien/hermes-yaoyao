@@ -138,7 +138,7 @@ export function validateAPNsConfiguration(
     if (cause instanceof HttpError) throw cause
     throw new HttpError(
       400,
-      '8800 cannot read the APNs key file; check the local path and service account permissions',
+      '15300 cannot read the APNs key file; check the local path and service account permissions',
       'invalid_apns_key_file',
     )
   }

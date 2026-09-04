@@ -25,7 +25,7 @@ function temporaryHome(): string {
 function config(home: string): ServerConfig {
   return {
     host: '127.0.0.1',
-    port: 8800,
+    port: 15300,
     upstream: new URL('http://127.0.0.1:9119'),
     allowedHosts: new Set(),
     home,
@@ -145,21 +145,21 @@ describe('Hermes node pairing', () => {
 
     const bootstrap = await request(runtime.app.callback())
       .get('/api/app/bootstrap')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200)
     const cookie = cookies(bootstrap)
     await request(runtime.app.callback())
       .post('/api/app/pairings')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .set('Cookie', cookie)
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
       .send({ scopes: ['unknown.scope'] })
       .expect(400)
     const pairing = await request(runtime.app.callback())
       .post('/api/app/pairings')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .set('Cookie', cookie)
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
       .send({
@@ -172,20 +172,20 @@ describe('Hermes node pairing', () => {
     expect(deepLink.searchParams.get('secret')).toBeTruthy()
     const claim = await request(runtime.app.callback())
       .post('/api/pair/v1/claim')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .send({
         pairingId: pairing.body.pairingId,
         secret: deepLink.searchParams.get('secret'),
         deviceName: 'YaoYao iPhone',
       })
       .expect(201)
-    expect(claim.body.serverUrl).toBe(`http://127.0.0.1:8800/node/${claim.body.deviceId}`)
+    expect(claim.body.serverUrl).toBe(`http://127.0.0.1:15300/node/${claim.body.deviceId}`)
     expect(readFileSync(join(home, 'paired-devices.json'), 'utf8'))
       .not.toContain('paired-access')
 
     const profiles = await request(runtime.app.callback())
       .get(`/node/${claim.body.deviceId}/api/profiles`)
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .set('Authorization', `Bearer ${claim.body.token}`)
       .expect(200)
     expect(profiles.body.profiles[0].name).toBe('default')
@@ -199,7 +199,7 @@ describe('Hermes node pairing', () => {
     const attachment = Buffer.from('remote attachment')
     await request(runtime.app.callback())
       .post(`/node/${claim.body.deviceId}/api/plugins/yaoyao/v1/node-worker/sessions/runtime-1/attachments`)
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .set('Authorization', `Bearer ${claim.body.token}`)
       .set('Content-Type', 'application/octet-stream')
       .set('X-File-Name-B64', Buffer.from('note.txt').toString('base64url'))
@@ -210,14 +210,14 @@ describe('Hermes node pairing', () => {
 
     await request(runtime.app.callback())
       .delete(`/api/app/paired-devices/${claim.body.deviceId}`)
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .set('Cookie', cookie)
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
       .expect(200)
     await request(runtime.app.callback())
       .get(`/node/${claim.body.deviceId}/api/profiles`)
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .set('Authorization', `Bearer ${claim.body.token}`)
       .expect(401)
   })

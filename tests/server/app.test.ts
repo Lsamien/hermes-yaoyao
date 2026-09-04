@@ -34,7 +34,7 @@ function makeConfig(upstream = 'http://127.0.0.1:9119'): ServerConfig {
   homes.push(home)
   return {
     host: '127.0.0.1',
-    port: 8800,
+    port: 15300,
     upstream: new URL(upstream),
     allowedHosts: new Set(),
     home,
@@ -103,12 +103,12 @@ function cookieHeader(response: request.Response): string {
   return values.map((value) => value.split(';', 1)[0]).join('; ')
 }
 
-describe('8800 BFF', () => {
-  it('keeps existing CSRF tokens valid across an 8800 restart', async () => {
+describe('15300 BFF', () => {
+  it('keeps existing CSRF tokens valid across an 15300 restart', async () => {
     const config = makeConfig()
     const first = createApplication({ config, fetchImpl: fakeGateway([]) })
     const bootstrap = await request(first.app.callback())
-      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+      .get('/api/app/bootstrap').set('Host', '127.0.0.1:15300').expect(200)
     const cookies = cookieHeader(bootstrap)
     first.close()
 
@@ -122,15 +122,15 @@ describe('8800 BFF', () => {
     const runtime = createApplication({ config, fetchImpl: fakeGateway([]) })
     runtimes.push(runtime)
     const bootstrap = await request(runtime.app.callback())
-      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+      .get('/api/app/bootstrap').set('Host', '127.0.0.1:15300').expect(200)
     const cookies = cookieHeader(bootstrap)
 
     const response = await request(runtime.app.callback())
-      .get('/Users/samien/Agents/报告.txt').set('Host', '127.0.0.1:8800').set('Cookie', cookies).expect(200)
+      .get('/Users/samien/Agents/报告.txt').set('Host', '127.0.0.1:15300').set('Cookie', cookies).expect(200)
     expect(response.text).toBe('历史文件内容')
     expect(response.headers['content-disposition']).toContain('inline')
     await request(runtime.app.callback())
-      .get('/Users/samien/Agents/../state.db').set('Host', '127.0.0.1:8800').set('Cookie', cookies).expect(404)
+      .get('/Users/samien/Agents/../state.db').set('Host', '127.0.0.1:15300').set('Cookie', cookies).expect(404)
   })
   it('serves persisted Hermes attachment references from the restricted attachment root', async () => {
     const config = makeConfig()
@@ -138,18 +138,18 @@ describe('8800 BFF', () => {
     const runtime = createApplication({ config, fetchImpl: fakeGateway([]) })
     runtimes.push(runtime)
     const bootstrap = await request(runtime.app.callback())
-      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+      .get('/api/app/bootstrap').set('Host', '127.0.0.1:15300').expect(200)
     const response = await request(runtime.app.callback())
       .get('/Users/samien/.hermes/attachments/报告.docx')
-      .set('Host', '127.0.0.1:8800').set('Cookie', cookieHeader(bootstrap)).expect(200)
+      .set('Host', '127.0.0.1:15300').set('Cookie', cookieHeader(bootstrap)).expect(200)
     expect(response.headers['content-length']).toBe(String(Buffer.byteLength('document bytes')))
     expect(response.headers['content-disposition']).toContain('inline')
     await request(runtime.app.callback())
       .get('/attachments/报告.docx')
-      .set('Host', '127.0.0.1:8800').set('Cookie', cookieHeader(bootstrap)).expect(200)
+      .set('Host', '127.0.0.1:15300').set('Cookie', cookieHeader(bootstrap)).expect(200)
     await request(runtime.app.callback())
       .get('/attachments/../state.db')
-      .set('Host', '127.0.0.1:8800').set('Cookie', cookieHeader(bootstrap)).expect(404)
+      .set('Host', '127.0.0.1:15300').set('Cookie', cookieHeader(bootstrap)).expect(404)
   })
   it('serves persisted Hermes image references from the restricted images root', async () => {
     const config = makeConfig()
@@ -157,14 +157,14 @@ describe('8800 BFF', () => {
     const runtime = createApplication({ config, fetchImpl: fakeGateway([]) })
     runtimes.push(runtime)
     const bootstrap = await request(runtime.app.callback())
-      .get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+      .get('/api/app/bootstrap').set('Host', '127.0.0.1:15300').expect(200)
     const response = await request(runtime.app.callback())
       .get('/Users/samien/.hermes/images/照片.png')
-      .set('Host', '127.0.0.1:8800').set('Cookie', cookieHeader(bootstrap)).expect(200)
+      .set('Host', '127.0.0.1:15300').set('Cookie', cookieHeader(bootstrap)).expect(200)
     expect(response.body.toString()).toBe('image bytes')
     await request(runtime.app.callback())
       .get('/Users/samien/.hermes/images/../state.db')
-      .set('Host', '127.0.0.1:8800').set('Cookie', cookieHeader(bootstrap)).expect(404)
+      .set('Host', '127.0.0.1:15300').set('Cookie', cookieHeader(bootstrap)).expect(404)
   })
   it('bootstraps sequentially without exposing the upstream address', async () => {
     const records: RecordedRequest[] = []
@@ -172,7 +172,7 @@ describe('8800 BFF', () => {
     runtimes.push(runtime)
     const response = await request(runtime.app.callback())
       .get('/api/app/bootstrap')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200)
     expect(records.map((entry) => entry.path)).toEqual([
       '/api/status', '/api/auth/me', '/api/status',
@@ -201,7 +201,7 @@ describe('8800 BFF', () => {
     runtimes.push(runtime)
     const response = await request(runtime.app.callback())
       .get('/api/app/profiles')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200)
     expect(records.map(entry => entry.path)).toEqual([
       '/api/status', '/api/auth/me', '/api/profiles',
@@ -217,13 +217,13 @@ describe('8800 BFF', () => {
     runtimes.push(runtime)
     const lan = await request(runtime.app.callback())
       .get('/healthz')
-      .set('Host', '192.168.153.155:8800')
+      .set('Host', '192.168.153.155:15300')
       .expect(200)
     expect(lan.headers['cross-origin-opener-policy']).toBeUndefined()
 
     const loopback = await request(runtime.app.callback())
       .get('/healthz')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200)
     expect(loopback.headers['cross-origin-opener-policy']).toBe('same-origin')
   })
@@ -250,18 +250,18 @@ describe('8800 BFF', () => {
 
     const unread = await request(runtime.app.callback())
       .get('/api/app/sessions/unread?profile=yaoer')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200)
     expect(unread.body).toEqual({ profile: 'yaoer', total_unread: 0, sessions: [], supported: false })
 
     const bootstrap = await request(runtime.app.callback())
       .get('/api/app/bootstrap')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200)
     const marked = await request(runtime.app.callback())
       .patch('/api/app/sessions/unread/session-1?profile=yaoer')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .set('Cookie', cookieHeader(bootstrap))
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
       .send({ readMessageCount: 12 })
@@ -275,30 +275,32 @@ describe('8800 BFF', () => {
     runtimes.push(runtime)
     const bootstrap = await request(runtime.app.callback())
       .get('/api/app/bootstrap')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200)
     const cookies = cookieHeader(bootstrap)
     await request(runtime.app.callback())
-      .post('/api/app/login')
-      .set('Host', '127.0.0.1:8800')
+      .post('/api/app/setup')
+      .set('Host', '127.0.0.1:15300')
       .set('Cookie', cookies)
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ username: 'admin', password: 'admin' })
+      .send({ username: 'owner', password: 'fixture-password' })
       .expect(403)
 
     records.length = 0
     const response = await request(runtime.app.callback())
-      .post('/api/app/login')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .post('/api/app/setup')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .set('Cookie', cookies)
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ username: 'admin', password: 'admin' })
+      .send({ username: 'owner', password: 'fixture-password' })
       .expect(200)
-    expect(records).toEqual([])
+    expect(records.every(record => record.method === 'GET')).toBe(true)
+    expect(records.some(record => record.path === '/auth/password-login')).toBe(false)
+    expect(JSON.stringify(records)).not.toContain('fixture-password')
     expect(response.body.authenticated).toBe(true)
-    expect(response.body.user).toMatchObject({ username: 'admin', role: 'admin', mustChangePassword: true })
-    expect(response.body.profiles).toEqual([])
+    expect(response.body.user).toMatchObject({ username: 'owner', role: 'admin', mustChangePassword: false })
+    expect(response.body.profiles).toHaveLength(1)
     expect(JSON.stringify(response.body)).not.toContain('passwordHash')
   })
 
@@ -308,14 +310,14 @@ describe('8800 BFF', () => {
     runtimes.push(runtime)
     await request(runtime.app.callback())
       .get('/api/app/sessions?exclude_sources=evil')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200)
     expect(records.at(-1)?.path).toBe('/api/profiles/sessions')
     expect(records.at(-1)?.search.get('exclude_sources')).toBe('cron,ios_group,yaoyao_workspace')
 
     await request(runtime.app.callback())
       .get('/api/app/sessions/session-1/messages?offset=3&limit=50&order=oldest&include_compacted=false&profile=default')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200)
     const history = records.at(-1)!
     expect(history.search.get('offset')).toBe('3')
@@ -330,7 +332,7 @@ describe('8800 BFF', () => {
     runtimes.push(runtime)
     const response = await request(runtime.app.callback())
       .get('/api/anything')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(404)
     expect(response.body.code).toBe('node_route_not_found')
   })
@@ -340,11 +342,11 @@ describe('8800 BFF', () => {
     runtimes.push(runtime)
     const first = await request(runtime.app.callback())
       .get('/api/app/bootstrap')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200)
     const second = await request(runtime.app.callback())
       .get('/api/app/bootstrap')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .set('Cookie', cookieHeader(first))
       .expect(200)
     expect(second.body.csrfToken).toBe(first.body.csrfToken)
@@ -361,19 +363,19 @@ describe('8800 BFF', () => {
     runtimes.push(runtime)
     const bootstrap = await request(runtime.app.callback())
       .get('/api/app/bootstrap')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200)
     await request(runtime.app.callback())
       .post('/api/app/group-uploads')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .set('Cookie', cookieHeader(bootstrap))
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
       .attach('files', Buffer.from('hello'), { filename: 'hello.txt', contentType: 'text/plain' })
       .expect(401)
   })
 
-  it('forces active file content to download instead of executing on the 8800 origin', async () => {
+  it('forces active file content to download instead of executing on the 15300 origin', async () => {
     const fetchImpl = (async (input: string | URL | Request) => {
       const path = new URL(input instanceof Request ? input.url : String(input)).pathname
       if (path === '/api/status') return jsonResponse({ auth_required: true })
@@ -390,7 +392,7 @@ describe('8800 BFF', () => {
     runtime.workspace.put('test-admin','file','1',{id:'1',name:'unsafe.html',path:file,mimeType:'text/html',size:37,sender:'agent',createdAt:Date.now()})
     const response = await request(runtime.app.callback())
       .get('/api/app/files/1/preview')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200)
     expect(response.headers['content-type']).toMatch(/^application\/octet-stream/)
     expect(response.headers['content-disposition']).toContain('attachment')

@@ -15,21 +15,21 @@ afterEach(() => {
 })
 
 describe('Agent management admin routes', () => {
-  it('rejects default-model writes from a regular 8800 user', async () => {
+  it('rejects default-model writes from a regular 15300 user', async () => {
     const home = mkdtempSync(join(tmpdir(), 'yaoyao-agent-model-user-'))
     roots.push(home)
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
       allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
       mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
     }
     const runtime = createUserAuthenticatedApplication({ config })
     runtimes.push(runtime)
     const agent = request.agent(runtime.app.callback())
-    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:15300').expect(200)
     await agent.put('/api/app/admin/profiles/default/model')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
       .send({ provider: 'opencode-free', model: 'free-a' })
       .expect(403, /需要管理员权限/)
@@ -39,7 +39,7 @@ describe('Agent management admin routes', () => {
     const home = mkdtempSync(join(tmpdir(), 'yaoyao-agent-management-'))
     roots.push(home)
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
       allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
       mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
     }
@@ -71,26 +71,26 @@ describe('Agent management admin routes', () => {
     const runtime = createAuthenticatedApplication({ config, fetchImpl })
     runtimes.push(runtime)
     const agent = request.agent(runtime.app.callback())
-    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:15300').expect(200)
     const headers = (value: request.Test) => value
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
 
-    await agent.get('/api/app/admin/model-services?profile=worker').set('Host', '127.0.0.1:8800').expect(200)
+    await agent.get('/api/app/admin/model-services?profile=worker').set('Host', '127.0.0.1:15300').expect(200)
     await headers(agent.post('/api/app/admin/model-services?profile=worker')).send({ name: 'Local', base_url: 'http://127.0.0.1:9000/v1', model: 'model-a', discover_models: true, make_default: false }).expect(200)
     await headers(agent.post('/api/app/admin/model-services/validate')).send({ name: 'Local', base_url: 'http://127.0.0.1:9000/v1', model: 'model-a', discover_models: true, make_default: false }).expect(200)
     await headers(agent.post('/api/app/admin/model-services/local/activate?profile=worker')).send({}).expect(200)
     await headers(agent.put('/api/app/admin/profiles/worker/model')).send({ provider: 'opencode-free', model: 'free-a' }).expect(200)
     await headers(agent.delete('/api/app/admin/model-services/local?profile=worker')).send({}).expect(200)
-    const legacy = await agent.get('/api/app/admin/legacy-model-services?profile=worker').set('Host', '127.0.0.1:8800').expect(200)
+    const legacy = await agent.get('/api/app/admin/legacy-model-services?profile=worker').set('Host', '127.0.0.1:15300').expect(200)
     expect(legacy.body.items[0]).toMatchObject({ id: 'custom:tingly', models: ['omni', 'old'], has_api_key: true, can_edit_api_key: true, is_current: true })
     expect(JSON.stringify(legacy.body)).not.toContain('TINGLY_API_KEY')
     await headers(agent.put('/api/app/admin/legacy-model-services/custom%3Atingly?profile=worker')).send({
       name: 'tingly', base_url: 'http://tingly.test/v2', model: 'omni-2', models: ['omni', 'omni-2'],
       discover_models: false, make_default: false, api_key: 'replacement-secret',
     }).expect(200)
-    const voice = await agent.get('/api/app/admin/duplex-voice').set('Host', '127.0.0.1:8800').expect(200)
+    const voice = await agent.get('/api/app/admin/duplex-voice').set('Host', '127.0.0.1:15300').expect(200)
     expect(voice.body).not.toHaveProperty('apiKey')
     await headers(agent.put('/api/app/admin/duplex-voice')).send({ voices: [{ id: 'voice-a', name: '音色 A' }], currentVoiceId: 'voice-a' }).expect(200)
 
@@ -113,7 +113,7 @@ describe('Agent management admin routes', () => {
       .toEqual({ provider: 'opencode-free', model: 'free-a' })
 
     unsupported = true
-    await agent.get('/api/app/admin/model-services?profile=worker').set('Host', '127.0.0.1:8800')
+    await agent.get('/api/app/admin/model-services?profile=worker').set('Host', '127.0.0.1:15300')
       .expect(501, /当前上游版本不支持此管理功能/)
   })
 })

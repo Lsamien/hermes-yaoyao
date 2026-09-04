@@ -31,7 +31,7 @@ function fixture() {
   roots.push(root)
   writeFileSync(join(root, 'release.json'), JSON.stringify(current))
   const config: ServerConfig = {
-    host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+    host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
     allowedHosts: new Set(), home: join(root, 'data'), mediaRoot: join(root, 'media'),
     attachmentsRoot: join(root, 'attachments'), imagesRoot: join(root, 'images'),
     mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,

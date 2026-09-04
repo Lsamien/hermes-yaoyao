@@ -8,7 +8,7 @@ import { createApplication, type ApplicationRuntime } from '../../src/server/app
 import type { ServerConfig } from '../../src/server/config.js'
 import { createAuthenticatedApplication } from './authenticatedApplication.js'
 
-const HOST = '127.0.0.1:8800'
+const HOST = '127.0.0.1:15300'
 const IMAGE_NAME = 'openai_codex_gpt-image-2-high_20260902_194820_1d225f08.png'
 const IMAGE = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR5kAAAAASUVORK5CYII=', 'base64')
 const homes: string[] = []
@@ -29,7 +29,7 @@ function config(): ServerConfig {
   const home = mkdtempSync(join(tmpdir(), 'yaoyao-hermes-media-'))
   homes.push(home)
   return {
-    host: '127.0.0.1', port: 8800,
+    host: '127.0.0.1', port: 15300,
     upstream: new URL('http://10.10.1.200:9119'),
     upstreamUsername: 'fixture-service', upstreamPassword: 'fixture-password',
     allowedHosts: new Set(), home,

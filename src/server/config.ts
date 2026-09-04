@@ -62,7 +62,7 @@ function flag(value: string | undefined): boolean {
 }
 
 function parsePort(value: string | undefined): number {
-  const port = Number(value ?? '8800')
+  const port = Number(value ?? '15300')
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new Error('HERMES_YAOYAO_PORT must be an integer between 1 and 65535')
   }

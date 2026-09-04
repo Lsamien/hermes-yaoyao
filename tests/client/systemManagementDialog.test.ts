@@ -84,7 +84,7 @@ afterEach(() => {
 })
 
 describe('System management APNs configuration', () => {
-  it('shows automatic loopback authentication and separate 8800/9119 network boundaries', async () => {
+  it('shows automatic loopback authentication and separate 15300/9119 network boundaries', async () => {
     const wrapper = await mountOpen()
 
     expect(document.body.textContent).toContain('本机 Session Token（自动）')
@@ -281,10 +281,10 @@ describe('System management APNs configuration', () => {
     development.checked = true
     development.dispatchEvent(new Event('change'))
     await nextTick()
-    vi.mocked(savePushSystemConfig).mockRejectedValueOnce(new Error('8800 无法读取该密钥文件，请检查路径和服务账户权限'))
+    vi.mocked(savePushSystemConfig).mockRejectedValueOnce(new Error('15300 无法读取该密钥文件，请检查路径和服务账户权限'))
     button('验证并启用')!.click()
     await flushPromises()
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain('8800 无法读取该密钥文件')
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('15300 无法读取该密钥文件')
     expect(input('push-key-file').value).toBe('/srv/secrets/AuthKey_TEST.p8')
     wrapper.unmount()
   })

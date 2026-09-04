@@ -44,7 +44,7 @@ describe('iOS push routes', () => {
       token_uri: 'https://oauth2.googleapis.com/token',
     }), { mode: 0o600 })
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
       allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
       mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
     }
@@ -61,10 +61,10 @@ describe('iOS push routes', () => {
     const runtime = createAuthenticatedApplication({ config, push, fcmConfiguration })
     runtimes.push(runtime)
     const agent = request.agent(runtime.app.callback())
-    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:15300').expect(200)
     const mutation = () => agent.put('/api/app/system/push-config/fcm')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .send({
         serviceAccountFile,
         projectId: 'yaoyao-test-project',
@@ -95,8 +95,8 @@ describe('iOS push routes', () => {
     const accountID = '22222222-2222-4222-8222-222222222222'
     const fid = 'fcm-registration-id-1234567890'
     const registered = await agent.put(`/api/push/v1/installations/${installationID}/accounts/${accountID}`)
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .send({ platform: 'android', fid, appVersion: '1.0.0' })
       .expect(200)
     expect(registered.body.installation).toMatchObject({
@@ -106,7 +106,7 @@ describe('iOS push routes', () => {
     expect(push.fcmStatus()).toMatchObject({ registrationCount: 1 })
 
     const capabilities = await agent.get('/api/push/v1/capabilities')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200)
     expect(capabilities.body).toMatchObject({
       enabled: false,
@@ -126,7 +126,7 @@ describe('iOS push routes', () => {
     writeFileSync(keyFile, privateKey, { mode: 0o644 })
     chmodSync(keyFile, 0o644)
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
       allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
       mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
     }
@@ -143,10 +143,10 @@ describe('iOS push routes', () => {
     const runtime = createAuthenticatedApplication({ config, push, apnsConfiguration })
     runtimes.push(runtime)
     const agent = request.agent(runtime.app.callback())
-    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:15300').expect(200)
     const mutation = () => agent.put('/api/app/system/push-config')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .send({
         keyFile,
         keyId: 'KEY1234567',
@@ -168,7 +168,7 @@ describe('iOS push routes', () => {
     })
     expect(statSync(apnsConfigurationPath(home)).mode & 0o777).toBe(0o600)
     await agent.get('/api/app/system/push-status')
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .expect(200, /"source":"file"/)
   })
 
@@ -188,7 +188,7 @@ describe('iOS push routes', () => {
     })
     const initial = { ...validated, source: 'environment' as const, editable: false }
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
       allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
       mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
       apns: validated.config,
@@ -203,11 +203,11 @@ describe('iOS push routes', () => {
     const runtime = createAuthenticatedApplication({ config, push, apnsConfiguration })
     runtimes.push(runtime)
     const agent = request.agent(runtime.app.callback())
-    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:15300').expect(200)
 
     const response = await agent.put('/api/app/system/push-config')
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
       .set('X-CSRF-Token', bootstrap.body.csrfToken)
       .send({
         keyFile, keyId: 'KEY1234567', teamId: 'TEAM123456', topic: 'cn.samien.yaoyao.hermes',
@@ -221,7 +221,7 @@ describe('iOS push routes', () => {
     const home = mkdtempSync(join(tmpdir(), 'yaoyao-push-routes-'))
     roots.push(home)
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
       allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
       mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
       apns: { keyFile: join(home, 'unused.p8'), keyId: 'KEY123', teamId: 'TEAM123', topic: 'cn.samien.yaoyao.hermes' },
@@ -243,14 +243,14 @@ describe('iOS push routes', () => {
     const runtime = createAuthenticatedApplication({ config, push, fetchImpl })
     runtimes.push(runtime)
     const agent = request.agent(runtime.app.callback())
-    const host = (value: request.Test) => value.set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+    const host = (value: request.Test) => value.set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
     const installationID = '11111111-1111-4111-8111-111111111111'
     const accountID = '22222222-2222-4222-8222-222222222222'
     const a = runtime.workspace.createAgent('test-admin', {name:'甲',profile:'default'})
     const b = runtime.workspace.createAgent('test-admin', {name:'乙',profile:'default'})
     const roomID = runtime.workspace.createGroup('test-admin', {name:'通知测试',memberIds:[a.id,b.id],administratorId:a.id}).id
-    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
+    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:15300').expect(200)
 
     const capabilities = await host(agent.get('/api/push/v1/capabilities')).expect(200)
     expect(capabilities.body).toMatchObject({
@@ -259,7 +259,7 @@ describe('iOS push routes', () => {
       topic: 'cn.samien.yaoyao.hermes',
       maximumSummaryCharacters: 180,
     })
-    await agent.get('/api/app/push/v1/capabilities').set('Host', '127.0.0.1:8800').expect(200)
+    await agent.get('/api/app/push/v1/capabilities').set('Host', '127.0.0.1:15300').expect(200)
 
     const registered = await host(agent.put(`/api/push/v1/installations/${installationID}/accounts/${accountID}`))
       .send({ token: 'ab'.repeat(32), environment: 'development', appVersion: '1.2 (139)' })
@@ -292,7 +292,7 @@ describe('iOS push routes', () => {
     const home = mkdtempSync(join(tmpdir(), 'yaoyao-push-validation-'))
     roots.push(home)
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
       allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
       mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
     }
@@ -300,8 +300,8 @@ describe('iOS push routes', () => {
     runtimes.push(runtime)
     const agent = request.agent(runtime.app.callback())
     const headers = (value: request.Test) => value
-      .set('Host', '127.0.0.1:8800')
-      .set('Origin', 'http://127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
+      .set('Origin', 'http://127.0.0.1:15300')
 
     await headers(agent.put('/api/push/v1/installations/11111111-1111-4111-8111-111111111111/accounts/22222222-2222-4222-8222-222222222222'))
       .send({ token: 'not-a-token', environment: 'unknown' })

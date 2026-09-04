@@ -49,7 +49,7 @@ async function poll(next: UpdateJob) {
     try {
       job.value = await systemUpdateJob(next.id)
     } catch {
-      // 8800 会在原子切换期间短暂不可用；继续等待新服务读取同一任务文件。
+      // 15300 会在原子切换期间短暂不可用；继续等待新服务读取同一任务文件。
     }
   }
   if (token === pollToken && job.value && !['succeeded', 'failed', 'rolled_back'].includes(job.value.state)) {

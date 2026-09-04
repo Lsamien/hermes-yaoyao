@@ -119,6 +119,27 @@ export class LocalAuthStore {
     this.#loadSessions()
   }
 
+  get setupRequired(): boolean {
+    return this.#users.length === 0
+  }
+
+  setupAdmin(
+    ctx: Koa.Context,
+    usernameValue: string,
+    passwordValue: string,
+  ): LocalUser {
+    if (!this.setupRequired) {
+      throw new HttpError(409, '管理员已经初始化', 'setup_already_completed')
+    }
+    const username = canonicalUsername(usernameValue)
+    const password = validatePassword(passwordValue)
+    const now = Date.now()
+    const admin = this.#newUser(username, password, 'admin', false, now)
+    this.#users = [admin]
+    this.#saveUsers()
+    return this.#issueSession(ctx, admin)
+  }
+
   login(ctx: Koa.Context, usernameValue: string, password: string): LocalUser {
     const normalized = usernameValue.trim().toLocaleLowerCase('en-US')
     const user = this.#users.find(candidate => candidate.normalizedUsername === normalized)
@@ -391,13 +412,9 @@ export class LocalAuthStore {
       return value.users
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw new Error('8800 用户库损坏，已停止启动以避免覆盖数据')
+        throw new Error('15300 用户库损坏，已停止启动以避免覆盖数据')
       }
-      const now = Date.now()
-      const users = [this.#newUser('admin', 'admin', 'admin', true, now)]
-      this.#users = users
-      this.#saveUsers()
-      return users
+      return []
     }
   }
 

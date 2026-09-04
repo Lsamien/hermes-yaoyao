@@ -104,7 +104,7 @@ export function validateFCMConfiguration(
     if (cause instanceof HttpError) throw cause
     throw new HttpError(
       400,
-      '8800 cannot read the FCM service account file; check the local path and service account permissions',
+      '15300 cannot read the FCM service account file; check the local path and service account permissions',
       'invalid_fcm_service_account_file',
     )
   }

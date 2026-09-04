@@ -315,8 +315,8 @@ onBeforeUnmount(resetTransientState)
 
 <template>
   <section class="pairing-panel" :aria-label="mode === 'account' ? '手机登录' : '节点与设备'">
-    <p v-if="mode === 'account'" class="pairing-intro">手机扫描登录二维码后，会把这台 8800 保存为普通服务器账号；不会添加成子节点。</p>
-    <p v-else class="pairing-intro">管理当前 8800 的直接子节点与已授权设备。账号登录设备不会在这里显示。</p>
+    <p v-if="mode === 'account'" class="pairing-intro">手机扫描登录二维码后，会把这台 15300 保存为普通服务器账号；不会添加成子节点。</p>
+    <p v-else class="pairing-intro">管理当前 15300 的直接子节点与已授权设备。账号登录设备不会在这里显示。</p>
     <p v-if="mode === 'account' && insecureTransport" class="pairing-warning"><AppIcon name="alert" :size="16" />当前是局域网 HTTP，二维码免密配对仅适用于可信网络。正式使用请配置 HTTPS/WSS 或 Tailscale。</p>
     <p v-if="error" class="pairing-error" role="alert">{{ error }}</p>
 
@@ -335,7 +335,7 @@ onBeforeUnmount(resetTransientState)
 
     <template v-else-if="isAdmin">
       <section class="device-section device-section--first">
-        <div class="device-heading"><strong>授权为 8800 子节点</strong><small>管理员</small></div>
+        <div class="device-heading"><strong>授权为 15300 子节点</strong><small>管理员</small></div>
         <section v-if="pairing" class="qr-card">
           <img v-if="qrImage" :src="qrImage" alt="添加此 Hermes 节点的二维码" />
           <strong>仅用于子节点配对</strong>
@@ -356,7 +356,7 @@ onBeforeUnmount(resetTransientState)
       </section>
 
       <section class="device-section child-section">
-        <div class="device-heading"><strong>添加 8800 子节点</strong><small>只管理直接子节点</small></div>
+        <div class="device-heading"><strong>添加 15300 子节点</strong><small>只管理直接子节点</small></div>
         <label><span>节点名称（可选）</span><input v-model="childName" :disabled="busy" placeholder="例如：办公室 Mac" /></label>
         <label><span>子节点配对码</span><textarea v-model="childCode" rows="3" :disabled="busy" placeholder="粘贴子节点生成的 yaoyao://pair…" /></label>
         <video v-if="scanning" ref="scanVideo" class="scanner-video" muted playsinline />

@@ -1561,7 +1561,7 @@ export class PushCoordinator {
       })
     } catch {
       // The in-memory status remains available when the push state volume is
-      // the reason persistence failed. Never let optional push stop 8800.
+      // the reason persistence failed. Never let optional push stop 15300.
     }
   }
 

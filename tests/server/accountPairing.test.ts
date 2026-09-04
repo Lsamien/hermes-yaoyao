@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AccountLoginPairingStore } from '../../src/server/accountPairing.js'
 
-describe('8800 account login pairing', () => {
+describe('15300 account login pairing', () => {
   it('issues a one-time expiring claim for a normal server account', () => {
     let now = 1_000
     const store = new AccountLoginPairingStore(() => now)

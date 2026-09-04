@@ -15,6 +15,14 @@ describe('hermes-yaoyao LaunchAgent plist', () => {
     expect(launchAgentPlist()).toContain('<key>HERMES_YAOYAO_SUPERVISE_DASHBOARD</key>')
   })
 
+  it('uses 15300 without injecting credentials into 9119 startup', () => {
+    const plist = launchAgentPlist({ environment: {} })
+
+    expect(plist).toContain('<key>HERMES_YAOYAO_PORT</key>\n      <string>15300</string>')
+    expect(plist).not.toContain('HERMES_YAOYAO_UPSTREAM_USERNAME')
+    expect(plist).not.toContain('HERMES_YAOYAO_UPSTREAM_PASSWORD')
+  })
+
   it('binds managed Web to the trusted LAN and enables local Dashboard supervision by default', () => {
     const plist = launchAgentPlist({ environment: {} })
 

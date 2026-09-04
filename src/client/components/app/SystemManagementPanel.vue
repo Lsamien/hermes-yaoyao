@@ -304,7 +304,7 @@ async function savePush() {
   pushError.value = ''
   pushNotice.value = ''
   if (!keyFile.startsWith('/')) {
-    pushError.value = '请输入 8800 所在机器上的 .p8 文件绝对路径'
+    pushError.value = '请输入 15300 所在机器上的 .p8 文件绝对路径'
     return
   }
   if (!/^[A-Za-z0-9]{1,128}$/.test(keyId)) {
@@ -347,7 +347,7 @@ async function saveFCM() {
   fcmError.value = ''
   fcmNotice.value = ''
   if (!serviceAccountFile.startsWith('/')) {
-    fcmError.value = '请输入 8800 所在机器上的服务账号 JSON 文件绝对路径'
+    fcmError.value = '请输入 15300 所在机器上的服务账号 JSON 文件绝对路径'
     return
   }
   if (!/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(projectId)) {
@@ -419,13 +419,13 @@ watch(() => [props.active, props.section] as const, ([active, section]) => {
       <div class="connection-summary" aria-label="Hermes 连接状态">
         <span><small>9119 地址</small><b>{{ connectionStatus?.endpoint || '等待检测' }}</b></span>
         <span><small>认证模式</small><b>{{ authModeLabel }}</b></span>
-        <span><small>8800 网络范围</small><b>{{ connectionStatus?.webNetworkScope === 'local' ? '仅本机' : '局域网可访问' }}</b></span>
+        <span><small>15300 网络范围</small><b>{{ connectionStatus?.webNetworkScope === 'local' ? '仅本机' : '局域网可访问' }}</b></span>
         <span><small>9119 网络范围</small><b>{{ connectionStatus?.networkScope === 'network' ? '网络可访问' : '仅本机' }}</b></span>
         <span class="wide"><small>最近验证</small><b>{{ verifiedAtLabel }}</b></span>
       </div>
-      <p v-if="connectionStatus?.authMode === 'loopback-token'" class="connection-mode-note">9119 使用本机临时 Token，8800 会自动读取并在 9119 重启后刷新；Token 不会在设置中显示。</p>
+      <p v-if="connectionStatus?.authMode === 'loopback-token'" class="connection-mode-note">9119 使用本机临时 Token，15300 会自动读取并在 9119 重启后刷新；Token 不会在设置中显示。</p>
       <p v-else-if="connectionStatus?.authMode === 'loopback-direct'" class="connection-mode-note">当前 9119 允许本机直接访问，不需要账号或 Token；该兼容模式只允许回环地址使用。</p>
-      <p class="network-description">直连本机 127.0.0.1 或 ::1 且 Hermes 启用本机授权时，自动使用临时会话令牌，无需配置用户名和密码。远程上游或已启用账号鉴权的 9119 仍需服务账号；8800 登录保护保持不变，不会自动修改 Hermes 账号配置。</p>
+      <p class="network-description">直连本机 127.0.0.1 或 ::1 且 Hermes 启用本机授权时，自动使用临时会话令牌，无需配置用户名和密码。远程上游或已启用账号鉴权的 9119 仍需服务账号；15300 登录保护保持不变，不会自动修改 Hermes 账号配置。</p>
       <h4 v-if="passwordAuthentication">服务账号（按需配置）</h4>
       <form v-if="passwordAuthentication" @submit.prevent="saveUpstream">
         <label><span>9119 用户名</span><input v-model="upstreamUsername" name="upstream-username" autocomplete="off" :disabled="busy" /></label>
@@ -434,7 +434,7 @@ watch(() => [props.active, props.section] as const, ([active, section]) => {
       </form>
       <div class="block network-access-block">
         <h3>外网访问地址</h3>
-        <p class="network-description">允许通过指定域名或公网 IP 访问 8800。每行填写一个地址，不要包含 <code>http://</code>、端口或路径。</p>
+        <p class="network-description">允许通过指定域名或公网 IP 访问 15300。每行填写一个地址，不要包含 <code>http://</code>、端口或路径。</p>
         <form class="allowed-hosts-form" @submit.prevent="saveAllowedHosts">
           <label>
             <span>允许的域名和 IP</span>
@@ -465,9 +465,9 @@ watch(() => [props.active, props.section] as const, ([active, section]) => {
 
         <template v-if="pushStatus?.managementAvailable">
           <p v-if="pushManagedByEnvironment" class="push-managed-note">当前 APNs 配置由服务环境变量管理，Web 仅可查看。请修改 LaunchAgent、Docker 或进程环境后重启服务。</p>
-          <p v-else-if="!pushStatus.editable" class="push-managed-note">当前 APNs 配置为只读，请在 8800 服务端修改后重启服务。</p>
+          <p v-else-if="!pushStatus.editable" class="push-managed-note">当前 APNs 配置为只读，请在 15300 服务端修改后重启服务。</p>
           <form class="push-config-form" @submit.prevent="savePush">
-            <label class="wide"><span>.p8 本地路径</span><input v-model="pushKeyFile" name="push-key-file" :readonly="!pushStatus.editable || pushBusy || fcmBusy" autocomplete="off" spellcheck="false" placeholder="/Users/…/AuthKey_XXXXXXXXXX.p8" /><small>填写 8800 所在机器上的绝对路径，私钥内容不会经过浏览器。</small></label>
+            <label class="wide"><span>.p8 本地路径</span><input v-model="pushKeyFile" name="push-key-file" :readonly="!pushStatus.editable || pushBusy || fcmBusy" autocomplete="off" spellcheck="false" placeholder="/Users/…/AuthKey_XXXXXXXXXX.p8" /><small>填写 15300 所在机器上的绝对路径，私钥内容不会经过浏览器。</small></label>
             <label><span>Key ID</span><input v-model="pushKeyId" name="push-key-id" :readonly="!pushStatus.editable || pushBusy || fcmBusy" autocomplete="off" spellcheck="false" /></label>
             <label><span>Team ID</span><input v-model="pushTeamId" name="push-team-id" :readonly="!pushStatus.editable || pushBusy || fcmBusy" autocomplete="off" spellcheck="false" /></label>
             <label class="wide"><span>Topic（Bundle ID）</span><input v-model="pushTopic" name="push-topic" :readonly="!pushStatus.editable || pushBusy || fcmBusy" autocomplete="off" spellcheck="false" /></label>
@@ -498,9 +498,9 @@ watch(() => [props.active, props.section] as const, ([active, section]) => {
 
         <template v-if="fcmStatus?.managementAvailable">
           <p v-if="fcmManagedByEnvironment" class="push-managed-note">当前 FCM 配置由服务环境变量管理，Web 仅可查看。请修改 LaunchAgent、Docker 或进程环境后重启服务。</p>
-          <p v-else-if="!fcmStatus.editable" class="push-managed-note">当前 FCM 配置为只读，请在 8800 服务端修改后重启服务。</p>
+          <p v-else-if="!fcmStatus.editable" class="push-managed-note">当前 FCM 配置为只读，请在 15300 服务端修改后重启服务。</p>
           <form class="push-config-form" @submit.prevent="saveFCM">
-            <label class="wide"><span>服务账号 JSON 本地路径</span><input v-model="fcmServiceAccountFile" name="fcm-service-account-file" :readonly="!fcmStatus.editable || fcmBusy || pushBusy" autocomplete="off" spellcheck="false" placeholder="/Users/…/firebase-service-account.json" /><small>只填写 8800 所在机器上的绝对路径；JSON 内容和私钥不会经过浏览器，也不会写入夭夭配置。</small></label>
+            <label class="wide"><span>服务账号 JSON 本地路径</span><input v-model="fcmServiceAccountFile" name="fcm-service-account-file" :readonly="!fcmStatus.editable || fcmBusy || pushBusy" autocomplete="off" spellcheck="false" placeholder="/Users/…/firebase-service-account.json" /><small>只填写 15300 所在机器上的绝对路径；JSON 内容和私钥不会经过浏览器，也不会写入夭夭配置。</small></label>
             <label><span>Firebase Project ID</span><input v-model="fcmProjectId" name="fcm-project-id" :readonly="!fcmStatus.editable || fcmBusy || pushBusy" autocomplete="off" spellcheck="false" /></label>
             <label><span>Android 包名</span><input v-model="fcmPackageName" name="fcm-package-name" :readonly="!fcmStatus.editable || fcmBusy || pushBusy" autocomplete="off" spellcheck="false" /></label>
             <div v-if="fcmStatus.warnings.length" class="wide push-warnings" aria-live="polite">

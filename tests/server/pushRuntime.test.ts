@@ -21,7 +21,7 @@ describe('dynamic push runtime', () => {
     const home = mkdtempSync(join(tmpdir(), 'yaoyao-push-runtime-'))
     roots.push(home)
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
       allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home, imagesRoot: home,
       mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
     }

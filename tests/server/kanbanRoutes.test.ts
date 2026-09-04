@@ -10,7 +10,7 @@ import {
   createUserAuthenticatedApplication,
 } from './authenticatedApplication.js'
 
-const HOST = '127.0.0.1:8800'
+const HOST = '127.0.0.1:15300'
 const ORIGIN = `http://${HOST}`
 const roots: string[] = []
 const runtimes: ApplicationRuntime[] = []
@@ -39,7 +39,7 @@ function testConfig(): ServerConfig {
   roots.push(home)
   return {
     host: '127.0.0.1',
-    port: 8800,
+    port: 15300,
     upstream: new URL('http://127.0.0.1:9119'),
     allowedHosts: new Set(),
     home,
@@ -306,7 +306,7 @@ describe('Kanban proxy routes', () => {
     }
   })
 
-  it('maps server-owned upstream 401 responses without expiring the local 8800 session', async () => {
+  it('maps server-owned upstream 401 responses without expiring the local 15300 session', async () => {
     const fixture = upstreamFixture()
     const config = testConfig()
     config.production = true

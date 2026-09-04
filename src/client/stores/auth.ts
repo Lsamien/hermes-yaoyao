@@ -16,6 +16,7 @@ export const useAuthStore = defineStore('auth', () => {
   const csrfToken = ref('')
   const error = ref<string>()
   const authRequired = ref(true)
+  const setupRequired = ref(false)
   const insecureLan = ref(false)
   const groupUploadsEnabled = ref(false)
   const upstreamReady = ref(false)
@@ -28,6 +29,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   function publish(response: BootstrapResponse): void {
     authRequired.value = response.authRequired
+    setupRequired.value = Boolean(response.setupRequired)
     csrfToken.value = response.csrfToken
     insecureLan.value = Boolean(response.insecureLan)
     groupUploadsEnabled.value = Boolean(response.groupUploadsEnabled)
@@ -80,6 +82,17 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function setup(input: authApi.LoginInput): Promise<void> {
+    status.value = 'authenticating'
+    error.value = undefined
+    try { publish(await authApi.setup(input)) }
+    catch (cause) {
+      status.value = 'anonymous'
+      error.value = message(cause)
+      throw cause
+    }
+  }
+
   async function logout(): Promise<void> {
     try { await authApi.logout() } catch { /* local state still signs out */ }
     status.value = 'anonymous'
@@ -124,8 +137,8 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   return {
-    status, user, profiles, activeProfileName, activeProfile, csrfToken, error, authRequired, insecureLan, groupUploadsEnabled,
-    upstreamReady, upstreamError, isAuthenticated, bootstrap, login, logout, selectProfile, refreshProfiles, refreshProfileAvatars,
+    status, user, profiles, activeProfileName, activeProfile, csrfToken, error, authRequired, setupRequired, insecureLan, groupUploadsEnabled,
+    upstreamReady, upstreamError, isAuthenticated, bootstrap, login, setup, logout, selectProfile, refreshProfiles, refreshProfileAvatars,
     changeCredentials, updateAccountAvatar, expire,
   }
 })

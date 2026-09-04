@@ -46,6 +46,7 @@ export interface ModelOption {
 export interface BootstrapResponse {
   status?: string
   authRequired: boolean
+  setupRequired?: boolean
   user?: CurrentUser
   profiles: Profile[]
   csrfToken: string

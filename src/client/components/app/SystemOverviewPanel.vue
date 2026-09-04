@@ -109,7 +109,7 @@ watch(() => props.active, active => { if (active) void refresh() }, { immediate:
       </button>
     </div>
 
-    <p class="ownership-note">8800 通过官方 API 管理 Hermes 9119；外部文件与进程不在此处控制。</p>
+    <p class="ownership-note">15300 通过官方 API 管理 Hermes 9119；外部文件与进程不在此处控制。</p>
   </section>
 </template>
 

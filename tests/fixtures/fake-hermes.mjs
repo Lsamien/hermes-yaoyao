@@ -26,7 +26,7 @@ let kanbanTaskSequence = 3
 let kanbanEventSequence = 3
 const kanbanTasks = [
   { id: 't_web001', board: 'default', title: '完成 Web 看板验收', body: '覆盖桌面与 390px 响应式布局', status: 'running', assignee: 'yaoyao', tenant: 'web', priority: 3, created_by: 'dashboard', created_at: now() - 1800, started_at: now() - 420, latest_summary: '正在执行浏览器验收', comment_count: 1, link_counts: { parents: 0, children: 1 }, progress: { done: 0, total: 1 } },
-  { id: 't_ios001', board: 'default', title: '核对 iOS 双端口', body: '9119 与 8800 使用同一契约', status: 'ready', assignee: 'yaoer', tenant: 'mobile', priority: 2, created_by: 'dashboard', created_at: now() - 1200, comment_count: 0, link_counts: { parents: 1, children: 0 }, progress: null },
+  { id: 't_ios001', board: 'default', title: '核对 iOS 双端口', body: '9119 与 15300 使用同一契约', status: 'ready', assignee: 'yaoer', tenant: 'mobile', priority: 2, created_by: 'dashboard', created_at: now() - 1200, comment_count: 0, link_counts: { parents: 1, children: 0 }, progress: null },
   { id: 't_done01', board: 'mobile-release', title: '准备发布说明', body: '整理已完成事项', status: 'done', assignee: 'yaoyao', tenant: 'release', priority: 1, created_by: 'dashboard', created_at: now() - 7200, completed_at: now() - 3600, latest_summary: '发布说明已完成', comment_count: 0, link_counts: { parents: 0, children: 0 }, progress: null },
 ]
 const kanbanComments = new Map([

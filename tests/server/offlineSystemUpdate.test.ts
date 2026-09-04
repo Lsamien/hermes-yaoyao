@@ -10,7 +10,7 @@ import { SystemUpdateManager } from '../../src/server/updateManager.js'
 
 const runtimes: ApplicationRuntime[] = []
 const roots: string[] = []
-const host = '127.0.0.1:8800'
+const host = '127.0.0.1:15300'
 const origin = `http://${host}`
 const base = '/api/app/system/update'
 const latest = { schemaVersion: 1 as const, releaseVersion: '0.3.0', webVersion: '0.3.0', gitTag: 'v0.3.0' }
@@ -25,7 +25,7 @@ function fixture() {
   const projectRoot = join(root, 'project'); mkdirSync(projectRoot)
   writeFileSync(join(projectRoot, 'release.json'), JSON.stringify({ ...latest, releaseVersion: '0.2.0', webVersion: '0.2.0', gitTag: 'v0.2.0' }))
   const config: ServerConfig = {
-    host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+    host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
     allowedHosts: new Set(), home: join(root, 'data'), mediaRoot: root,
     attachmentsRoot: root, imagesRoot: root, mediaOwner: 'tester',
     allowInsecureLan: false, insecureLan: false, production: false,
@@ -39,11 +39,14 @@ function fixture() {
   return { runtime, fetchImpl, inspectRemote, launchUpdater, config }
 }
 
-async function login(runtime: ApplicationRuntime, username = 'admin', password = 'admin') {
+async function login(runtime: ApplicationRuntime, username = 'admin', password = 'offline-test-password') {
   const agent = request.agent(runtime.app.callback())
   const boot = await agent.get('/api/app/bootstrap').set('Host', host).expect(200)
-  const signedIn = await agent.post('/api/app/login').set('Host', host).set('Origin', origin)
+  const signedIn = await agent.post(boot.body.setupRequired ? '/api/app/setup' : '/api/app/login').set('Host', host).set('Origin', origin)
     .set('X-CSRF-Token', boot.body.csrfToken).send({ username, password }).expect(200)
+  if (!signedIn.body.user.mustChangePassword) {
+    return { agent, csrf: signedIn.body.csrfToken as string, user: signedIn.body.user }
+  }
   const changed = await agent.put('/api/app/account/credentials').set('Host', host).set('Origin', origin)
     .set('X-CSRF-Token', signedIn.body.csrfToken)
     .send({ currentPassword: password, newPassword: 'offline-test-password', username }).expect(200)
@@ -98,6 +101,7 @@ describe('independent Web updates', () => {
     const admin = await login(f.runtime)
     f.runtime.auth.create(admin.user, 'member', 'temporary-password')
     const member = await login(f.runtime, 'member', 'temporary-password')
+    f.fetchImpl.mockClear()
     for (const path of getPaths) await member.agent.get(base + path).set('Host', host).expect(403)
     for (const path of ['/check', '/apply', '/rollback']) {
       await member.agent.post(base + path).set('Host', host).set('Origin', origin).set('X-CSRF-Token', member.csrf)
@@ -113,13 +117,14 @@ describe('independent Web updates', () => {
   it('preserves local login during a stalled bootstrap and still exposes update status', async () => {
     const f = fixture()
     const { agent } = await login(f.runtime)
+    f.fetchImpl.mockClear()
     let finish!: (response: Response) => void
     f.fetchImpl.mockImplementation(() => new Promise<Response>(resolve => { finish = resolve }))
     const started = Date.now()
     const boot = await agent.get('/api/app/bootstrap').set('Host', host).expect(200)
     expect(Date.now() - started).toBeLessThan(8_000)
     expect(boot.body).toMatchObject({ authenticated: true, upstreamReady: false, user: { role: 'admin' } })
-    expect(boot.body.upstreamError).toContain('仍可管理 8800 和升级 Web')
+    expect(boot.body.upstreamError).toContain('仍可管理 15300 和升级 Web')
     await agent.get(base + '/status').set('Host', host).expect(200)
     expect(f.fetchImpl).toHaveBeenCalledTimes(1)
     finish(Response.json({}, { status: 503 }))
@@ -128,6 +133,7 @@ describe('independent Web updates', () => {
   it('reports real release-source failures without launching or contacting 9119', async () => {
     const f = fixture()
     const { agent, csrf } = await login(f.runtime)
+    f.fetchImpl.mockClear()
     f.inspectRemote.mockRejectedValue(new Error('Git source unreachable'))
     const failed = await agent.post(base + '/check').set('Host', host).set('Origin', origin)
       .set('X-CSRF-Token', csrf).send({}).expect(502)

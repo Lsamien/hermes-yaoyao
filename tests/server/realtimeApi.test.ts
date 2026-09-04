@@ -14,13 +14,13 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-describe('native Hermes chat and history are separated on 8800', () => {
+describe('native Hermes chat and history are separated on 15300', () => {
   it('opens realtime chat while keeping non-Web history mutations read-only', async () => {
     const home = mkdtempSync(join(tmpdir(), 'yaoyao-native-history-'))
     roots.push(home)
     let upstreamCalls = 0, upstreamWrites = 0
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
       allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home,
       imagesRoot: home, mediaOwner: 'test', allowInsecureLan: false,
       insecureLan: false, production: false,
@@ -45,22 +45,18 @@ describe('native Hermes chat and history are separated on 8800', () => {
     })
     runtimes.push(runtime)
     const agent = request.agent(runtime.app.callback())
-    const origin = 'http://127.0.0.1:8800'
-    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:8800').expect(200)
-    const login = await agent.post('/api/app/login').set('Host', '127.0.0.1:8800')
+    const origin = 'http://127.0.0.1:15300'
+    const bootstrap = await agent.get('/api/app/bootstrap').set('Host', '127.0.0.1:15300').expect(200)
+    const setup = await agent.post('/api/app/setup').set('Host', '127.0.0.1:15300')
       .set('Origin', origin).set('X-CSRF-Token', bootstrap.body.csrfToken)
-      .send({ username: 'admin', password: 'admin' }).expect(200)
-    const credentials = await agent.put('/api/app/account/credentials')
-      .set('Host', '127.0.0.1:8800').set('Origin', origin)
-      .set('X-CSRF-Token', login.body.csrfToken)
-      .send({ username: 'owner', currentPassword: 'admin', newPassword: 'fixture-password' }).expect(200)
-    const csrf = credentials.body.csrfToken
+      .send({ username: 'owner', password: 'fixture-password' }).expect(200)
+    const csrf = setup.body.csrfToken
 
-    const capabilities = await agent.get('/api/realtime/capabilities').set('Host', '127.0.0.1:8800').expect(200)
+    const capabilities = await agent.get('/api/realtime/capabilities').set('Host', '127.0.0.1:15300').expect(200)
     expect(capabilities.body.channels).toEqual(['chat'])
     const beforeWrites = upstreamCalls, beforeUpstreamWrites = upstreamWrites
     for (const path of ['/api/app/sessions/session-1', '/api/sessions/session-1']) {
-      const response = await agent.patch(path).set('Host', '127.0.0.1:8800')
+      const response = await agent.patch(path).set('Host', '127.0.0.1:15300')
         .set('Origin', origin).set('X-CSRF-Token', csrf).send({ title: '不能修改' }).expect(410)
       expect(response.body.code).toBe('native_sessions_read_only')
     }
@@ -72,14 +68,14 @@ describe('native Hermes chat and history are separated on 8800', () => {
     })
     const pairedWrite = await request(runtime.app.callback())
       .patch(`/node/${paired.device.id}/api/sessions/session-1`)
-      .set('Host', '127.0.0.1:8800')
+      .set('Host', '127.0.0.1:15300')
       .set('Authorization', `Bearer ${paired.token}`)
       .send({ title: '不能修改' })
       .expect(410)
     expect(pairedWrite.body.code).toBe('native_sessions_read_only')
     expect(upstreamCalls).toBeGreaterThan(beforeWrites)
     expect(upstreamWrites).toBe(beforeUpstreamWrites)
-    await agent.patch('/api/app/sessions/session-web?profile=default').set('Host', '127.0.0.1:8800')
+    await agent.patch('/api/app/sessions/session-web?profile=default').set('Host', '127.0.0.1:15300')
       .set('Origin', origin).set('X-CSRF-Token', csrf).send({ title: '可修改的聊天' }).expect(200)
     expect(upstreamWrites).toBe(beforeUpstreamWrites + 1)
   })

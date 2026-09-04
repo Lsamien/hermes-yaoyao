@@ -5,25 +5,13 @@ const WIDE_DOCX_BASE64 = 'UEsDBAoAAAAIAKwmFF15bjPX6AAAAK0BAAATAAAAW0NvbnRlbnRfVH
 const E2E_PASSWORD = 'e2e-password'
 
 test.beforeAll(async ({ request }) => {
-  const signIn = async (password: string) => {
-    const initial = await request.get('/api/app/bootstrap')
-    const initialBody = await initial.json() as { csrfToken: string }
-    return request.post('/api/app/login', {
-      headers: { Origin: 'http://127.0.0.1:18801', 'X-CSRF-Token': initialBody.csrfToken },
-      data: { username: 'admin', password },
-    })
-  }
-  let login = await signIn(E2E_PASSWORD)
-  if (!login.ok()) login = await signIn('admin')
+  const initial = await request.get('/api/app/bootstrap')
+  const initialBody = await initial.json() as { csrfToken: string; setupRequired?: boolean }
+  const login = await request.post(initialBody.setupRequired ? '/api/app/setup' : '/api/app/login', {
+    headers: { Origin: 'http://127.0.0.1:18801', 'X-CSRF-Token': initialBody.csrfToken },
+    data: { username: 'admin', password: E2E_PASSWORD },
+  })
   expect(login.ok()).toBe(true)
-  const loginBody = await login.json() as { csrfToken: string; user: { mustChangePassword?: boolean } }
-  if (loginBody.user.mustChangePassword) {
-    const changed = await request.put('/api/app/account/credentials', {
-      headers: { Origin: 'http://127.0.0.1:18801', 'X-CSRF-Token': loginBody.csrfToken },
-      data: { currentPassword: 'admin', newPassword: E2E_PASSWORD, username: 'admin' },
-    })
-    expect(changed.ok()).toBe(true)
-  }
 })
 
 test.beforeEach(async ({ page }) => {

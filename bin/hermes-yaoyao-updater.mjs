@@ -210,7 +210,7 @@ export async function verifyRuntime(timeoutMs = 45_000, fetchImpl = fetch) {
     try {
       // /readyz deliberately includes 9119 reachability. Only the Web's own
       // health decides update/rollback success, including older releases.
-      const health = await responseJSON('http://127.0.0.1:8800/healthz', fetchImpl)
+      const health = await responseJSON('http://127.0.0.1:15300/healthz', fetchImpl)
       if (health.ok === true) return
       lastError = 'Web 服务尚未就绪'
     } catch (error) {

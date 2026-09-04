@@ -68,7 +68,7 @@ export function launchAgentPlist(options = {}) {
     PATH: `${dirname(node)}:${join(homedir(), '.local', 'bin')}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
     NODE_ENV: 'production',
     HERMES_YAOYAO_HOME: dataHome,
-    HERMES_YAOYAO_PORT: '8800',
+    HERMES_YAOYAO_PORT: '15300',
     HERMES_YAOYAO_UPSTREAM: 'http://127.0.0.1:9119',
     HERMES_YAOYAO_SUPERVISE_DASHBOARD: '1',
     ...environment(options.environment),

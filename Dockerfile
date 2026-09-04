@@ -21,7 +21,7 @@ FROM node:24-bookworm-slim AS runtime
 
 ENV NODE_ENV=production \
     HERMES_YAOYAO_HOST=0.0.0.0 \
-    HERMES_YAOYAO_PORT=8800 \
+    HERMES_YAOYAO_PORT=15300 \
     HERMES_YAOYAO_HOME=/var/lib/hermes-yaoyao \
     HERMES_YAOYAO_SUPERVISE_DASHBOARD=0
 
@@ -36,9 +36,9 @@ COPY --chown=node:node --from=builder /app/dist-server ./dist-server
 
 USER node
 
-EXPOSE 8800
+EXPOSE 15300
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:8800/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+  CMD ["node", "-e", "fetch('http://127.0.0.1:15300/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
 
 CMD ["node", "dist-server/server/index.js"]

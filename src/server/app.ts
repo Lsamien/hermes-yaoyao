@@ -108,7 +108,7 @@ function persistentCsrfSecret(home: string, override?: Buffer): Buffer {
     writeFileSync(path, generated, { mode: 0o600, flag: 'wx' })
     return generated
   } catch (error) {
-    // Another 8800 process can finish first during launchd hand-off. Never
+    // Another 15300 process can finish first during launchd hand-off. Never
     // rotate its secret; use the one it safely wrote instead.
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') return readFileSync(path)
     throw error
@@ -274,6 +274,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     ctx.state.localAuth = auth
     ctx.state.upstreamSession = upstreamSession
     const anonymous = ctx.path === '/api/app/bootstrap'
+      || ctx.path === '/api/app/setup'
       || ctx.path === '/api/app/login'
       || ctx.path === '/api/status'
       || ctx.path === '/api/auth/providers'

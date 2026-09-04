@@ -1,6 +1,6 @@
 # HTTP + SSE realtime bridge
 
-8800 remains the only client entrypoint. It owns authenticated upstream WebSocket connections to 9119; it does not run a second Agent engine or move Python group data.
+15300 remains the only client entrypoint. It owns authenticated upstream WebSocket connections to 9119; it does not run a second Agent engine or move Python group data.
 
 ## Contract (version 1)
 
@@ -36,7 +36,7 @@ Chat frames retain their upstream seq separately from the opaque SSE `id`. Send 
 - Ordinary chat push recovery uses broker transports. Group push retains its independent durable journal cursor.
 - Different credential scopes are not silently pooled. If they target the same already-owned runtime, the bridge fails closed with `session_scope_conflict` instead of stealing its upstream event receiver.
 
-This does not guarantee Agent survival after 8800/9119 restarts or prolonged upstream loss. Upstream recovery uses `session.events.since` when available; missing/truncated replay falls back to REST history, not to an old client transport. Web and shipping iOS clients require HTTP+SSE capability version 1. Missing capabilities, authentication errors and network errors never downgrade to WebSocket.
+This does not guarantee Agent survival after 15300/9119 restarts or prolonged upstream loss. Upstream recovery uses `session.events.since` when available; missing/truncated replay falls back to REST history, not to an old client transport. Web and shipping iOS clients require HTTP+SSE capability version 1. Missing capabilities, authentication errors and network errors never downgrade to WebSocket.
 
 ## Verification
 

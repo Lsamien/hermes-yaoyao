@@ -475,7 +475,7 @@ describe('push event bridge', () => {
       },
     } as unknown as UpstreamServiceSession
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
+      host: '127.0.0.1', port: 15300, upstream: new URL('http://127.0.0.1:9119'),
       allowedHosts: new Set(), home: '/tmp', mediaRoot: '/tmp/media', attachmentsRoot: '/tmp/attachments',
       imagesRoot: '/tmp/images', mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
     }
@@ -524,7 +524,7 @@ describe('push event bridge', () => {
       await closeServer(upstream)
     })
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL(`http://127.0.0.1:${port}`),
+      host: '127.0.0.1', port: 15300, upstream: new URL(`http://127.0.0.1:${port}`),
       allowedHosts: new Set(), home: '/tmp', mediaRoot: '/tmp/media', attachmentsRoot: '/tmp/attachments',
       imagesRoot: '/tmp/images', mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
     }
@@ -602,7 +602,7 @@ describe('push event bridge', () => {
       await closeServer(upstream)
     })
     const config: ServerConfig = {
-      host: '127.0.0.1', port: 8800, upstream: new URL(`http://127.0.0.1:${port}`),
+      host: '127.0.0.1', port: 15300, upstream: new URL(`http://127.0.0.1:${port}`),
       allowedHosts: new Set(), home: '/tmp', mediaRoot: '/tmp/media', attachmentsRoot: '/tmp/attachments',
       imagesRoot: '/tmp/images', mediaOwner: 'tester', allowInsecureLan: false, insecureLan: false, production: false,
     }
