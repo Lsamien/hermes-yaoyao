@@ -35,6 +35,7 @@ const props = withDefaults(defineProps<{
   agentStates?: Record<string, 'idle' | 'working' | 'waiting' | 'loading' | 'success' | 'failure' | 'notifying'>
   thinking?: boolean
   allowBranch?: boolean
+  readOnly?: boolean
 }>(), {
   title: '',
   subtitle: '',
@@ -56,6 +57,7 @@ const props = withDefaults(defineProps<{
   agentStates: () => ({}),
   thinking: false,
   allowBranch: true,
+  readOnly: false,
 })
 
 const emit = defineEmits<{
@@ -370,8 +372,8 @@ defineExpose({ scrollToMessage, scrollToAnchor, scrollToBottom, isFollowingBotto
                 :aria-label="copiedMessageId === message.id ? '已复制' : copyFailedMessageId === message.id ? '复制失败' : '复制消息'"
                 @click="copyMessage(message)"
               ><AppIcon :name="copiedMessageId === message.id ? 'check' : copyFailedMessageId === message.id ? 'alert' : 'copy'" :size="13" /></button>
-              <button type="button" title="引用" aria-label="引用消息" @click="emit('quote', message)"><AppIcon name="quote" :size="13" /></button>
-              <button v-if="allowBranch && message.role === 'assistant'" type="button" title="从这里分支" aria-label="从这里分支" @click="emit('branch', message)"><AppIcon name="branch" :size="13" /></button>
+              <button v-if="!readOnly" type="button" title="引用" aria-label="引用消息" @click="emit('quote', message)"><AppIcon name="quote" :size="13" /></button>
+              <button v-if="!readOnly && allowBranch && message.role === 'assistant'" type="button" title="从这里分支" aria-label="从这里分支" @click="emit('branch', message)"><AppIcon name="branch" :size="13" /></button>
             </div>
             </template>
           </div>

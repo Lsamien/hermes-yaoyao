@@ -2,8 +2,8 @@ export type InterfaceMode = 'chat' | 'bots'
 const KEY = 'hermes-yaoyao:interface-mode'
 
 export function savedInterfacePath(): '/chat' | '/conversations' {
-  try { return localStorage.getItem(KEY) === 'bots' ? '/conversations' : '/chat' }
-  catch { return '/chat' }
+  try { return localStorage.getItem(KEY) === 'chat' ? '/chat' : '/conversations' }
+  catch { return '/conversations' }
 }
 
 export function rememberInterfacePath(path: string): void {

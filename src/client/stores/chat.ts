@@ -478,10 +478,6 @@ export const useChatStore = defineStore('chat', () => {
     // The runtime is attached lazily by send/interrupt/usage, or when a known
     // in-flight turn reconnects. REST history remains authoritative here.
     if (!state.historySynced) await loadHistory(state)
-    // Context usage comes from the realtime runtime rather than the REST
-    // history response.  Fetch it when opening an existing session so the
-    // composer does not stay at zero until a later event happens to include it.
-    void refreshContextUsage(state).catch(() => undefined)
     const refreshed = sessions.value.find(item => item.id === sessionId && item.profile === selectedProfile)
     syncSelectedModel(refreshed?.model, refreshed?.provider)
   }

@@ -4,7 +4,7 @@ import AppIcon from '@/components/common/AppIcon.vue'
 import PreviewInspector from './PreviewInspector.vue'
 import type { UiLibraryItem } from './types'
 
-const props = withDefaults(defineProps<{ item: UiLibraryItem; items?: UiLibraryItem[] }>(), { items: () => [] })
+const props = withDefaults(defineProps<{ item: UiLibraryItem; items?: UiLibraryItem[]; canAddToComposer?: boolean }>(), { items: () => [], canAddToComposer: true })
 const emit = defineEmits<{ close: []; addToComposer: [item: UiLibraryItem]; source: [item: UiLibraryItem] }>()
 
 const mediaItems = computed(() => {
@@ -59,7 +59,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     <Transition name="preview-modal">
       <div class="preview-modal-layer" @mousedown.self="emit('close')">
         <section class="preview-modal" role="dialog" aria-modal="true" :aria-label="`预览 ${activeItem.title || activeItem.name}`" @pointerdown="startSwipe" @pointerup="finishSwipe" @pointercancel="swipeStart = undefined">
-          <PreviewInspector :item="activeItem" show-close @close="emit('close')" @add-to-composer="emit('addToComposer', $event)" @source="emit('source', $event)" />
+          <PreviewInspector :item="activeItem" show-close :can-add-to-composer="canAddToComposer" @close="emit('close')" @add-to-composer="emit('addToComposer', $event)" @source="emit('source', $event)" />
           <button v-if="canPrevious" class="media-nav media-nav--previous" type="button" aria-label="上一张媒体" title="上一张媒体" @click="previous"><AppIcon name="chevron-left" :size="22" /></button>
           <button v-if="canNext" class="media-nav media-nav--next" type="button" aria-label="下一张媒体" title="下一张媒体" @click="next"><AppIcon class="media-nav__next-icon" name="chevron-left" :size="22" /></button>
         </section>

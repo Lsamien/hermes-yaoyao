@@ -7,7 +7,8 @@ import type { UiLibraryItem } from './types'
 const props = withDefaults(defineProps<{
   item: UiLibraryItem
   showClose?: boolean
-}>(), { showClose: false })
+  canAddToComposer?: boolean
+}>(), { showClose: false, canAddToComposer: true })
 const emit = defineEmits<{ close: []; addToComposer: [item: UiLibraryItem]; source: [item: UiLibraryItem] }>()
 
 const canInline = computed(() => !!props.item.previewUrl)
@@ -125,7 +126,7 @@ onBeforeUnmount(() => officeResizeObserver?.disconnect())
       <div class="preview-header-actions">
         <button v-if="item.sourceSessionId" class="icon-button" type="button" aria-label="跳转到来源消息" title="跳转到来源消息" @click="emit('source', item)"><AppIcon name="external" :size="15" /></button>
         <a v-if="item.downloadUrl || item.previewUrl" class="icon-button" :href="item.downloadUrl || item.previewUrl" download aria-label="下载" title="下载"><AppIcon name="download" :size="16" /></a>
-        <button class="icon-button" type="button" aria-label="加入输入框" title="加入输入框" @click="emit('addToComposer', item)"><AppIcon name="plus" :size="17" /></button>
+        <button v-if="canAddToComposer" class="icon-button" type="button" aria-label="加入输入框" title="加入输入框" @click="emit('addToComposer', item)"><AppIcon name="plus" :size="17" /></button>
         <button v-if="showClose" class="icon-button preview-close" type="button" aria-label="关闭预览" title="关闭预览" @click="emit('close')"><AppIcon name="close" :size="17" /></button>
       </div>
     </header>

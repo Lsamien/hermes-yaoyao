@@ -147,32 +147,14 @@ describe('HTTP+SSE migration', () => {
     })
     expect(retired.status).toBe(410)
     const capabilities = await fetch(`${claim.serverUrl}/api/realtime/capabilities`, { headers: { Authorization: authorization } })
-    expect(await capabilities.json()).toMatchObject({ protocolVersion: 1 })
+    expect(await capabilities.json()).toMatchObject({ protocolVersion: 1, channels: [] })
     const opened = await fetch(`${claim.serverUrl}/api/realtime/channels`, {
       method: 'POST', headers: { Authorization: authorization, 'Content-Type': 'application/json' },
       body: JSON.stringify({ channel: 'chat' }),
     })
-    expect(opened.status).toBe(201)
-    const channel = await opened.json() as { id: string }
-    const stream = await fetch(`${claim.serverUrl}/api/realtime/channels/${channel.id}/events`, {
-      headers: { Authorization: authorization, Accept: 'text/event-stream' },
-    })
-    expect(stream.headers.get('content-type')).toContain('text/event-stream')
-    await stream.body!.cancel()
-    const send = async (id: string, method: string, params: object) => {
-      const response = await fetch(`${claim.serverUrl}/api/realtime/channels/${channel.id}/commands`, {
-        method: 'POST', headers: { Authorization: authorization, 'Content-Type': 'application/json', 'Idempotency-Key': id },
-        body: JSON.stringify({ method, params }),
-      })
-      expect(response.status).toBe(200)
-      expect(await response.json()).toMatchObject({ state: 'confirmed' })
-    }
-    await send('profiles', 'profiles.list', { include_sessions: true })
-    await send('profile-meta', 'profiles.configure', { name: 'default', ui_meta: { 'hermes-bots': { chat: 'stored-session' } } })
-    await send('profile-avatar', 'profiles.set_asset', { name: 'default', asset: 'avatar', data: 'data:image/png;base64,AA==' })
-    await send('hidden-bot', 'session.create', { profile: 'default', title: 'Bot Chat', source: 'ios_bot_group', hidden: true })
-    expect(pairedFrames.map(frame => frame.method)).toEqual(['profiles.list', 'profiles.configure', 'profiles.set_asset', 'session.create'])
-    expect(pairedFrames[3]).toMatchObject({ params: { profile: 'default', source: 'ios_bot_group', hidden: true } })
+    expect(opened.status).toBe(410)
+    expect(await opened.json()).toMatchObject({ code: 'native_sessions_read_only' })
+    expect(pairedFrames).toEqual([])
     const revoke = await fetch(`${origin}/api/pair/v1/devices/${claim.deviceId}`, {
       method: 'DELETE', headers: { Authorization: authorization },
     })

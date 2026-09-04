@@ -146,7 +146,7 @@ export class RealtimeAPI {
       ctx.set('Cache-Control', 'no-store')
       const path = match![2]!
       if (ctx.method === 'GET' && path === '/capabilities') {
-        ctx.body = { protocolVersion: 1, channels: ['chat'], brokerEpoch: this.broker.epoch,
+        ctx.body = { protocolVersion: 1, channels: [], brokerEpoch: this.broker.epoch,
           ...(device ? {} : { csrfToken: this.csrf.issue(ctx) }) }
         return
       }
@@ -154,6 +154,13 @@ export class RealtimeAPI {
       if (ctx.method === 'POST' && path === '/channels') {
         const body = await this.body(ctx)
         if (body.channel !== 'chat' && body.channel !== 'groups') throw new HttpError(400, 'Invalid channel', 'invalid_channel')
+        if (body.channel === 'chat') {
+          throw new HttpError(
+            410,
+            '原生 Hermes 会话仅供历史查看；请在聊天中开始或继续对话',
+            'native_sessions_read_only',
+          )
+        }
         const c = await this.broker.create(principal, body.channel, body.channel === 'groups'
           ? { epoch: canonicalEpoch(body.epoch), cursor: groupCursor(body.cursor) } : undefined)
         ctx.status = 201; ctx.body = { id: c.id, brokerEpoch: this.broker.epoch }; return

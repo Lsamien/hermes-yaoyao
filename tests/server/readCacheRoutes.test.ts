@@ -45,12 +45,16 @@ describe('authenticated read cache routes', () => {
     const after = await agent.get('/api/sessions').set('Host', '127.0.0.1:8800').expect(200)
     expect(after.body.sessions[0].title).toBe('external-change')
     expect(sessionReads).toBe(3)
-    await agent.patch('/api/sessions/one').set('Host', '127.0.0.1:8800').send({ title: 'renamed' }).expect(200)
-    const renamed = await agent.get('/api/sessions').set('Host', '127.0.0.1:8800').expect(200)
-    expect(renamed.body.sessions[0].title).toBe('renamed')
-    expect(sessionReads).toBe(4)
+    await agent.patch('/api/sessions/one').set('Host', '127.0.0.1:8800')
+      .send({ title: 'renamed' }).expect(410, {
+        error: '原生 Hermes 会话仅供历史查看；请在聊天中开始或继续对话',
+        code: 'native_sessions_read_only',
+      })
+    const unchanged = await agent.get('/api/sessions').set('Host', '127.0.0.1:8800').expect(200)
+    expect(unchanged.body.sessions[0].title).toBe('external-change')
+    expect(sessionReads).toBe(3)
     await agent.post('/auth/logout').set('Host', '127.0.0.1:8800').send({}).expect(200)
     await agent.get('/api/sessions').set('Host', '127.0.0.1:8800').expect(401)
-    expect(sessionReads).toBe(4)
+    expect(sessionReads).toBe(3)
   })
 })

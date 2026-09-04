@@ -119,7 +119,7 @@ function profileTitle(profile?: Profile): string {
 }
 
 const navItems: NavItem[] = [
-  { key: 'chat', label: '原生对话', path: '/chat', icon: 'chat' },
+  { key: 'chat', label: '历史记录', path: '/chat', icon: 'chat' },
   { key: 'groups', label: '聊天', path: '/conversations', icon: 'groups' },
   { key: 'kanban', label: '看板', path: '/kanban', icon: 'board' },
   { key: 'files', label: '文件库', path: '/files', icon: 'files' },

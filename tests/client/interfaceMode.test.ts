@@ -4,8 +4,8 @@ import { rememberInterfacePath, savedInterfacePath } from '@/utils/interfaceMode
 beforeEach(() => localStorage.clear())
 
 describe('last interface mode', () => {
-  it('restores Bot mode and chat mode after explicit navigation', () => {
-    expect(savedInterfacePath()).toBe('/chat')
+  it('opens application-owned chats by default and remembers an explicit history choice', () => {
+    expect(savedInterfacePath()).toBe('/conversations')
     rememberInterfacePath('/conversations/existing-group')
     expect(savedInterfacePath()).toBe('/conversations')
     rememberInterfacePath('/files')
@@ -16,8 +16,8 @@ describe('last interface mode', () => {
 
   it('does not mistake unrelated paths or invalid storage for a mode', () => {
     localStorage.setItem('hermes-yaoyao:interface-mode', 'invalid')
-    expect(savedInterfacePath()).toBe('/chat')
+    expect(savedInterfacePath()).toBe('/conversations')
     rememberInterfacePath('/conversations-other')
-    expect(savedInterfacePath()).toBe('/chat')
+    expect(savedInterfacePath()).toBe('/conversations')
   })
 })

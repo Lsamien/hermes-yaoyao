@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import type { FileKind } from '@shared/types'
 import AppIcon from '@/components/common/AppIcon.vue'
-import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 import LibraryGrid from '@/components/library/LibraryGrid.vue'
 import PreviewModal from '@/components/library/PreviewModal.vue'
 import ImagePreviewLightbox from '@/components/library/ImagePreviewLightbox.vue'
@@ -11,7 +10,6 @@ import type { PreviewMedia } from '@/components/library/ImagePreviewLightbox.vue
 import type { LibraryFilterOption, UiLibraryItem } from '@/components/library/types'
 import ResourceSidebar from '@/components/app/ResourceSidebar.vue'
 import WorkspaceView from '@/components/workspace/WorkspaceView.vue'
-import { queueLibraryItemForComposer } from '@/components/workspace/pendingComposer'
 import { fileToUi, sessionSidebarItem } from '@/components/workspace/viewModels'
 import { useFilesStore } from '@/stores/files'
 import { useAuthStore } from '@/stores/auth'
@@ -56,16 +54,6 @@ function updateFilter(value: string) {
   void files.load(true)
 }
 
-async function addToComposer(item: UiLibraryItem) {
-  if (!queueLibraryItemForComposer(item)) return
-  await router.push('/chat')
-}
-
-async function addMediaToComposer(media: PreviewMedia) {
-  const item = items.value.find(candidate => (candidate.previewUrl || candidate.downloadUrl) === media.url)
-  if (item) await addToComposer(item)
-}
-
 async function openSource(item: UiLibraryItem) {
   if (item.sourceWorkspaceConversationId) {
     await router.push(`/conversations/${encodeURIComponent(item.sourceWorkspaceConversationId)}`)
@@ -99,14 +87,6 @@ async function selectSession(id: string) {
   await router.push({ path: `/chat/${encodeURIComponent(id)}`, query: profile ? { profile } : {} })
 }
 
-async function createChat() {
-  selected.value = null
-  mediaIndex.value = null
-  const profile = auth.activeProfile?.name || 'default'
-  const id = chat.createSession(profile)
-  await router.push({ path: `/chat/${encodeURIComponent(id)}`, query: { profile } })
-}
-
 onMounted(() => {
   files.profile = undefined
   void files.load(true)
@@ -128,12 +108,6 @@ watch(() => auth.activeProfile?.name, profile => {
 
 <template>
   <WorkspaceView sidebar-title="历史记录" :sidebar-subtitle="`${chat.sessions.length} 个会话`">
-    <template #sidebar-action>
-      <button type="button" title="新建聊天" aria-label="新建聊天" @click="createChat">
-        <YaoYaoSidebarIcon name="add" />
-        <span>新建聊天</span>
-      </button>
-    </template>
     <template #sidebar>
       <ResourceSidebar
         :items="historyItems"
@@ -143,7 +117,7 @@ watch(() => auth.activeProfile?.name, profile => {
         single-line
         search-placeholder="搜索会话"
         empty-title="还没有会话"
-        empty-description="创建会话后会显示在这里。"
+        empty-description="原生 Hermes 会话会在这里以只读历史显示。"
         @search="historySearch = $event"
         @select="selectSession"
       />
@@ -166,13 +140,12 @@ watch(() => auth.activeProfile?.name, profile => {
         empty-description="聊天中的图片、文档和附件会出现在这里。"
         @select="selectFile"
         @load-more="files.loadMore"
-        @add-to-composer="addToComposer"
         @source="openSource"
       />
     </section>
   </WorkspaceView>
-  <PreviewModal v-if="selected" :item="selected" :items="items" @close="selected = null" @add-to-composer="addToComposer" @source="openSource" />
-  <ImagePreviewLightbox v-model="mediaIndex" :images="lightboxMedia" @add="addMediaToComposer" />
+  <PreviewModal v-if="selected" :item="selected" :items="items" :can-add-to-composer="false" @close="selected = null" @source="openSource" />
+  <ImagePreviewLightbox v-model="mediaIndex" :images="lightboxMedia" :can-add="false" />
 </template>
 
 <style scoped>

@@ -311,6 +311,21 @@ function pairedProxyScope(path: string, method: string): NodeScope {
   return 'sessions.execute'
 }
 
+function isNativeSessionMutation(path: string, method: string): boolean {
+  if (['GET', 'HEAD'].includes(method)) return false
+  return path === '/sessions'
+    || path.startsWith('/sessions/')
+    || /^\/profiles\/[^/]+\/sessions(?:\/|$)/.test(path)
+}
+
+function nativeSessionsReadOnly(): never {
+  throw new HttpError(
+    410,
+    '原生 Hermes 会话仅供历史查看；请在聊天中开始或继续对话',
+    'native_sessions_read_only',
+  )
+}
+
 function pairedProxyPath(rawPath: string): string {
   const path = rawPath.startsWith('/') ? rawPath : `/${rawPath}`
   if (path.includes('\\') || path.includes('\u0000') || path.length > 2_048) {
@@ -1291,6 +1306,9 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       ? ctx.params.nodePath.join('/')
       : ctx.params.nodePath
     const path = pairedProxyPath(rawPath)
+    if (isNativeSessionMutation(path.slice('/api'.length), ctx.method)) {
+      nativeSessionsReadOnly()
+    }
     const scope = pairedProxyScope(path.slice('/api'.length), ctx.method)
     const token = bearerToken(ctx.get('authorization'))
     const cookieHeader = dependencies.pairings.authorize(
@@ -1800,23 +1818,10 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     })
   })
   router.patch('/api/app/sessions/:sessionID', async (ctx) => {
-    const id = safeIdentifier(ctx.params.sessionID, 'session ID')
-    const search = searchFrom(ctx, ['profile'])
-    const request = body(ctx)
-    const profile = search.get('profile')
-    if (profile) request.profile = profile
-    await proxy(ctx, dependencies.upstream, `/api/sessions/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      search,
-      requestBody: request,
-    })
+    nativeSessionsReadOnly()
   })
   router.delete('/api/app/sessions/:sessionID', async (ctx) => {
-    const id = safeIdentifier(ctx.params.sessionID, 'session ID')
-    await proxy(ctx, dependencies.upstream, `/api/sessions/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      search: searchFrom(ctx, ['profile']),
-    })
+    nativeSessionsReadOnly()
   })
 
   router.all('/api/*gatewayPath', async (ctx) => {
@@ -1828,6 +1833,9 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       ? ctx.params.gatewayPath.join('/')
       : ctx.params.gatewayPath
     const upstreamPath = pairedProxyPath(raw)
+    if (isNativeSessionMutation(upstreamPath.slice('/api'.length), ctx.method)) {
+      nativeSessionsReadOnly()
+    }
     const response = await dependencies.upstreamSession.request(upstreamPath, {
       method: ctx.method,
       search: new URLSearchParams(ctx.querystring),

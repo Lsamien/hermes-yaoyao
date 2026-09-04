@@ -5,13 +5,11 @@ import LoadingScreen from '@/components/app/LoadingScreen.vue'
 import LoginView from '@/views/LoginView.vue'
 import PasswordChangeView from '@/views/PasswordChangeView.vue'
 import { useAuthStore } from '@/stores/auth'
-import { useChatStore } from '@/stores/chat'
 import { useKanbanStore } from '@/stores/kanban'
 import { useThemeStore } from '@/stores/theme'
 import AgentIdentityFixture from '@/components/app/AgentIdentityFixture.vue'
 
 const auth = useAuthStore()
-const chat = useChatStore()
 const kanban = useKanbanStore()
 const theme = useThemeStore()
 const route = useRoute()
@@ -25,7 +23,7 @@ const pageTitle = computed(() => {
       ? kanban.selectedBoard?.name || kanban.selectedBoardSlug || '看板'
     : route.path.startsWith('/files')
       ? '文件库'
-      : chat.activeSession?.title || '对话'
+      : '历史记录'
   return `${name} · 夭夭`
 })
 
@@ -36,12 +34,6 @@ watch(() => theme.resolvedTheme, value => {
 }, { immediate: true })
 
 watch(pageTitle, value => { document.title = value }, { immediate: true })
-
-watch(() => auth.isAuthenticated, authenticated => {
-  if (authenticated) {
-    void chat.connect().catch(() => undefined)
-  }
-})
 
 onMounted(() => {
   if (!agentIdentityFixture) void auth.bootstrap()
