@@ -61,6 +61,21 @@ describe('8800 local users', () => {
     expect(store.list(admin).map(item => item.username)).toEqual(['admin'])
   })
 
+  it('persists an account image without invalidating the existing session', () => {
+    const home = mkdtempSync(join(tmpdir(), 'yaoyao-local-auth-')); homes.push(home)
+    const store = new LocalAuthStore(home), login = context()
+    store.login(login, 'admin', 'admin')
+    const authenticated = context(issuedCookie(login))
+    store.changeCredentials(authenticated, 'admin', 'new-password', 'admin')
+    const active = context(issuedCookie(authenticated))
+    const avatar = 'data:image/png;base64,aGVsbG8='
+    expect(store.setAvatar(active, avatar).avatar).toBe(avatar)
+    expect(store.require(active).avatar).toBe(avatar)
+    expect(new LocalAuthStore(home).require(context(issuedCookie(authenticated))).avatar).toBe(avatar)
+    expect(() => store.setAvatar(active, 'https://example.test/avatar.png')).toThrow(/PNG、JPEG/)
+    expect(store.setAvatar(active, null).avatar).toBeUndefined()
+  })
+
   it('encrypts the 9119 service password at rest', () => {
     const home = mkdtempSync(join(tmpdir(), 'yaoyao-local-auth-'))
     homes.push(home)

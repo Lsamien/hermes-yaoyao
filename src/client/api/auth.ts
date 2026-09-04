@@ -76,3 +76,10 @@ export async function changeCredentials(input: {
   })))
   return normalizeUser(payload.user ?? payload)
 }
+
+export async function updateAccountAvatar(avatar: string | null): Promise<CurrentUser> {
+  const payload = record(unwrapData(await apiRequest<unknown>('/api/app/account/avatar', {
+    method: 'PUT', body: { avatar } as unknown as JsonValue,
+  })))
+  return normalizeUser(payload.user ?? payload)
+}

@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest'
-import {AGENT_MASCOT_SHAPES,AGENT_MASCOT_BODIES,AGENT_MASCOT_COLORS,AGENT_MASCOT_EXPRESSIONS,AGENT_IMAGE_CROPS,agentIdentityFromProfile,agentIdentityMetadata,defaultAgentIdentity,decodeAgentAvatar,encodeAgentAvatar,normalizeAvatar,YAOYAO_AGENT_IDENTITY_NAMESPACE} from '../../src/shared/agentIdentity'
+import {AGENT_MASCOT_SHAPES,AGENT_MASCOT_BODIES,AGENT_MASCOT_COLORS,AGENT_MASCOT_EXPRESSIONS,AGENT_IMAGE_CROPS,agentIdentityFromProfile,agentIdentityMetadata,defaultAgentIdentity,randomAgentIdentity,decodeAgentAvatar,encodeAgentAvatar,normalizeAvatar,YAOYAO_AGENT_IDENTITY_NAMESPACE} from '../../src/shared/agentIdentity'
 const photo='data:image/png;base64,aGVsbG8='
 describe('avatar v2',()=>{
  it('resets legacy internal appearance while retaining the configured name',()=>{
@@ -28,6 +28,12 @@ describe('avatar v2',()=>{
  })
  it('uses the same green circle for all defaults, regardless of name or role',()=>{
   for(const name of ['samien','developer','研究员']) expect(defaultAgentIdentity(name)).toMatchObject({shape:'circle',color:'#00c875',expression:'idle'})
+ })
+ it('creates a complete random v2 identity without falling back to the fixed green circle',()=>{
+  const values=[0,0,.99];let index=0
+  expect(randomAgentIdentity('new-agent','新 Agent',()=>values[index++]!)).toMatchObject({shape:'circle',bodyId:null,color:'#000000',expression:'proud'})
+  index=0;values[0]=.99;values[1]=.99;values[2]=0
+  expect(randomAgentIdentity('new-agent','新 Agent',()=>values[index++]!)).toMatchObject({bodyId:'star',color:'#808080',expression:'idle'})
  })
  it('rejects untrusted geometry, invalid crops and external image URLs',()=>{
   const base={...defaultAgentIdentity('bot')}

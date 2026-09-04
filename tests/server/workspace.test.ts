@@ -499,6 +499,14 @@ it('accepts the existing cross-client mascot and team avatar formats', () => {
   expect(() => store.updateAgent(owner, a.id, { avatar: 'javascript:alert(1)' })).toThrow()
 })
 
+it('assigns a random v2 avatar only when a new Agent omits its avatar', () => {
+  const random = vi.spyOn(Math, 'random').mockReturnValue(0)
+  const created = store.createAgent(owner, { name: '随机头像', profile: 'default' })
+  expect(decodeAgentAvatar(created.avatar)).toMatchObject({ shape: 'circle', color: '#000000', expression: 'idle' })
+  expect(created.avatar).not.toBe(encodeAgentAvatar(defaultAgentIdentity(created.id, created.name)))
+  random.mockRestore()
+})
+
 it('keeps the last message time independent of pinning and metadata edits', () => {
   const agent=store.createAgent(owner,{name:'时间验收',profile:'default'})
   const c=store.list<WorkspaceConversation>(owner,'conversation')[0]!
@@ -570,9 +578,9 @@ it('keeps an unconfirmed turn separate from a later reply and retries history wi
   expect(requests.filter(r => r.method === 'prompt.submit')).toHaveLength(1)
   expect(store.messages(owner, c.id).at(-1)).toMatchObject({ content: '本轮结果', status: 'complete' })
 })
-it('uses one canonical default avatar for the agent and its direct conversation',()=>{
+it('uses one generated avatar for the agent and its direct conversation',()=>{
   const a=agent('默认头像'),c=direct(a.id)
-  expect(decodeAgentAvatar(a.avatar)).toMatchObject({version:2,color:'#00c875'})
+  expect(decodeAgentAvatar(a.avatar)).toMatchObject({version:2,avatarMode:'mascot'})
   expect(store.agentSummary(a).avatar).toBe(store.conversationSummary(owner,c).avatar)
   const changed=store.updateAgent(owner,a.id,{name:'换个名称'})
   expect(store.agentSummary(changed).avatar).toBe(store.agentSummary(a).avatar)

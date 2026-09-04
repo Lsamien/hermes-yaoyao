@@ -953,6 +953,7 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
       user_id: user.id,
       display_name: user.username,
       username: user.username,
+      avatar: user.avatar,
       provider: 'yaoyao-local',
       role: user.role,
       must_change_password: user.mustChangePassword,
@@ -1406,6 +1407,11 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     const username = typeof request.username === 'string' ? request.username : undefined
     const user = dependencies.auth.changeCredentials(ctx, currentPassword, newPassword, username)
     json(ctx, 200, { user, mustChangePassword: false, csrfToken: dependencies.csrf.issue(ctx, true) })
+  })
+  router.put('/api/app/account/avatar', (ctx) => {
+    const request = body(ctx)
+    const user = dependencies.auth.setAvatar(ctx, request.avatar)
+    json(ctx, 200, { user })
   })
   router.get('/api/app/admin/users', (ctx) => {
     const admin = dependencies.auth.requireAdmin(ctx)

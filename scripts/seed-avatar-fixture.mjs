@@ -21,6 +21,7 @@ const source = (await request('/api/app/agents/sources')).sources[0]
 if (!source) throw new Error('No isolated fixture profile')
 const agents = (await request('/api/app/agents')).agents
 const photo = 'data:image/png;base64,' + readFileSync(new URL('../public/brand/AppIcon-1024.png', import.meta.url)).toString('base64')
+await request('/api/app/account/avatar', { avatar: photo }, 'PUT')
 for (const [name, image] of [['跨端造型', false], ['跨端照片', true]]) {
   const avatar = 'yaoyao-avatar:v2:' + JSON.stringify({
     version: 2, avatarMode: image ? 'image' : 'mascot', shape: 'circle', color: '#1488ff',

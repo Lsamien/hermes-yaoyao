@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events'
 import { z } from 'zod'
 import { HttpError } from './errors.js'
 import { notificationPlainText } from './notificationText.js'
-import { decodeAgentMascotAvatar, isAgentImageAvatar, defaultAgentIdentity, encodeAgentAvatar, normalizeAvatar, MAX_AVATAR_DESCRIPTOR_LENGTH } from '../shared/agentIdentity.js'
+import { decodeAgentMascotAvatar, isAgentImageAvatar, defaultAgentIdentity, encodeAgentAvatar, normalizeAvatar, randomAgentIdentity, MAX_AVATAR_DESCRIPTOR_LENGTH } from '../shared/agentIdentity.js'
 import type {
   WorkspaceAgent as Agent,
   WorkspaceConversation as Conversation,
@@ -234,7 +234,7 @@ export class WorkspaceStore {
         id = randomUUID()
       const agent: Agent = {
         ...body,
-        avatar: normalizeAvatar(body.avatar),
+        avatar: body.avatar ? normalizeAvatar(body.avatar) : encodeAgentAvatar(randomAgentIdentity(id, body.name)),
         id,
         archived: false,
         revision: 1,

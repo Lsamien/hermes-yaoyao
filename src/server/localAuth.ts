@@ -18,6 +18,7 @@ import { dirname, join } from 'node:path'
 import type Koa from 'koa'
 import { parse, serialize } from 'cookie'
 import { HttpError } from './errors.js'
+import { validAvatarImage } from '../shared/agentIdentity.js'
 import { appendSetCookies } from './security.js'
 import { CookieJar, type UpstreamRequestOptions, type UpstreamResponse, UpstreamClient } from './upstream.js'
 import { allowsLocalAuthorization, isLocalAuthorizationTarget, localSessionToken } from './loopbackAuthorization.js'
@@ -31,6 +32,7 @@ export type LocalRole = 'admin' | 'user'
 interface StoredUser {
   id: string
   username: string
+  avatar?: string
   normalizedUsername: string
   role: LocalRole
   enabled: boolean
@@ -54,6 +56,7 @@ interface StoredSessions { version: 1; sessions: Array<SessionRecord & { tokenHa
 export interface LocalUser {
   id: string
   username: string
+  avatar?: string
   role: LocalRole
   enabled: boolean
   mustChangePassword: boolean
@@ -88,6 +91,7 @@ function publicUser(user: StoredUser): LocalUser {
   return {
     id: user.id,
     username: user.username,
+    ...(validAvatarImage(user.avatar) ? { avatar: user.avatar } : {}),
     role: user.role,
     enabled: user.enabled,
     mustChangePassword: user.mustChangePassword,
@@ -281,6 +285,21 @@ export class LocalAuthStore {
     this.#saveUsers()
     this.#revokeUser(user.id)
     return this.login(ctx, username, newPassword)
+  }
+
+  setAvatar(ctx: Koa.Context, value: unknown): LocalUser {
+    const current = this.require(ctx)
+    const user = this.#users.find(candidate => candidate.id === current.id)!
+    if (value !== null && value !== '' && !validAvatarImage(value)) {
+      throw new HttpError(400, '头像必须是有效的 PNG、JPEG 或 WebP 图片', 'invalid_account_avatar')
+    }
+    if (typeof value === 'string' && value) user.avatar = value
+    else delete user.avatar
+    user.updatedAt = Date.now()
+    this.#saveUsers()
+    const published = publicUser(user)
+    ctx.state.localUser = published
+    return published
   }
 
   upstreamCredentials(fallback?: UpstreamCredentials): UpstreamCredentials | undefined {

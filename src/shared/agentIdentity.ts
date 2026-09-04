@@ -37,6 +37,16 @@ export function validAvatarImage(v: unknown): boolean { return typeof v === 'str
 export function defaultAgentIdentity(profile: string, displayName?: string): AgentIdentity {
   return { version: 2, displayName: name(displayName) || name(profile) || 'default', avatarMode: 'mascot', shape: 'circle', color: '#00c875', expression: 'idle', bodyId: null, imageCrop: 'rounded' }
 }
+export function randomAgentIdentity(profile: string, displayName?: string, random: () => number = Math.random): AgentIdentity {
+  const identity = defaultAgentIdentity(profile, displayName)
+  const count = AGENT_MASCOT_SHAPES.length + AGENT_MASCOT_BODIES.length
+  const visual = Math.min(count - 1, Math.max(0, Math.floor(random() * count)))
+  if (visual < AGENT_MASCOT_SHAPES.length) identity.shape = AGENT_MASCOT_SHAPES[visual]!
+  else identity.bodyId = AGENT_MASCOT_BODIES[visual - AGENT_MASCOT_SHAPES.length]!
+  identity.color = AGENT_MASCOT_COLORS[Math.min(AGENT_MASCOT_COLORS.length - 1, Math.max(0, Math.floor(random() * AGENT_MASCOT_COLORS.length)))]!
+  identity.expression = AGENT_MASCOT_EXPRESSIONS[Math.min(AGENT_MASCOT_EXPRESSIONS.length - 1, Math.max(0, Math.floor(random() * AGENT_MASCOT_EXPRESSIONS.length)))]!
+  return identity
+}
 function descriptor(v: Record<string, unknown>): AgentIdentity | null {
   if (v.version !== 2 || !['mascot', 'image'].includes(String(v.avatarMode)) || !AGENT_MASCOT_SHAPES.includes(v.shape as AgentMascotShape)
       || typeof v.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(v.color)

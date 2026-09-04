@@ -3,8 +3,9 @@ import { computed } from 'vue'
 
 const props = withDefaults(defineProps<{
   name: string
+  imageUrl?: string
   size?: number
-}>(), { size: 30 })
+}>(), { imageUrl: '', size: 30 })
 
 const initial = computed(() => Array.from(props.name.trim())[0]?.toLocaleUpperCase() || '?')
 const colors = ['#1488ff', '#00a17a', '#9655f7', '#e05d2f', '#b7791f', '#5166d6'] as const
@@ -24,9 +25,10 @@ const background = computed(() => {
     :style="{ width: `${size}px`, height: `${size}px`, backgroundColor: background, fontSize: `${Math.max(11, Math.round(size * .42))}px` }"
     role="img"
     :aria-label="`${name || '当前账号'} 的账号头像`"
-  ><span aria-hidden="true">{{ initial }}</span></span>
+  ><img v-if="imageUrl" :src="imageUrl" alt="" /><span v-else aria-hidden="true">{{ initial }}</span></span>
 </template>
 
 <style scoped>
 .account-initial-avatar { display: inline-grid; flex: 0 0 auto; place-items: center; border-radius: 50%; color: #fff; font-weight: 700; line-height: 1; text-transform: uppercase; user-select: none; }
+.account-initial-avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
 </style>

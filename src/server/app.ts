@@ -269,7 +269,7 @@ export function createApplication(options: ApplicationOptions = {}): Application
     },
   })
   const ordinaryBody = parseBody('2mb'), workspaceBody = parseBody('4mb')
-  app.use((ctx,next) => (/^\/api\/app\/(agents|conversations)(\/|$)/.test(ctx.path) ? workspaceBody : ordinaryBody)(ctx,next))
+  app.use((ctx,next) => (/^\/api\/app\/(agents|conversations)(\/|$)/.test(ctx.path) || ctx.path === '/api/app/account/avatar' ? workspaceBody : ordinaryBody)(ctx,next))
   app.use(async (ctx, next) => {
     ctx.state.localAuth = auth
     ctx.state.upstreamSession = upstreamSession

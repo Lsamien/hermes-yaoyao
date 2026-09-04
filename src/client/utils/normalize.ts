@@ -65,6 +65,7 @@ export function normalizeUser(value: unknown): CurrentUser {
   return {
     id,
     username: string(pick(source, 'username', 'display_name', 'displayName', 'email', 'user_id', 'userId'), id),
+    avatar: string(source.avatar) || undefined,
     displayName: string(pick(source, 'display_name', 'displayName')) || undefined,
     email: string(source.email) || undefined,
     provider: string(source.provider) || undefined,

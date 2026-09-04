@@ -119,10 +119,13 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = await authApi.changeCredentials(input)
     await bootstrap()
   }
+  async function updateAccountAvatar(avatar: string | null): Promise<void> {
+    user.value = await authApi.updateAccountAvatar(avatar)
+  }
 
   return {
     status, user, profiles, activeProfileName, activeProfile, csrfToken, error, authRequired, insecureLan, groupUploadsEnabled,
     upstreamReady, upstreamError, isAuthenticated, bootstrap, login, logout, selectProfile, refreshProfiles, refreshProfileAvatars,
-    changeCredentials, expire,
+    changeCredentials, updateAccountAvatar, expire,
   }
 })

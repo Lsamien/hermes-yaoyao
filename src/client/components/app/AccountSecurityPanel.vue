@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
+import AccountInitialAvatar from '@/components/common/AccountInitialAvatar.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const props = withDefaults(defineProps<{
@@ -31,6 +32,8 @@ const confirmation = ref('')
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
+const avatarInput = ref<HTMLInputElement>()
+const avatarBusy = ref(false)
 
 const isAdmin = computed(() => auth.user?.role === 'admin')
 const isActive = computed(() => props.open ?? props.active)
@@ -95,6 +98,67 @@ async function save() {
   }
 }
 
+function imageUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('无法读取图片'))
+    reader.onerror = () => reject(new Error('无法读取图片'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function resizeImage(source: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => {
+      const ratio = Math.min(1, 256 / Math.max(image.width, image.height))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(image.width * ratio))
+      canvas.height = Math.max(1, Math.round(image.height * ratio))
+      const context = canvas.getContext('2d')
+      if (!context) return reject(new Error('当前浏览器不支持图片处理'))
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+      resolve(canvas.toDataURL('image/png'))
+    }
+    image.onerror = () => reject(new Error('请选择有效的 PNG、JPEG 或 WebP 图片'))
+    image.src = source
+  })
+}
+
+async function chooseAvatar(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  avatarBusy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('请选择 PNG、JPEG 或 WebP 图片')
+    if (file.size > 10 * 1024 * 1024) throw new Error('图片不能超过 10 MB')
+    await auth.updateAccountAvatar(await resizeImage(await imageUrl(file)))
+    notice.value = '账号头像已更新，iOS 下次打开 Bot 模式时会同步显示'
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '保存头像失败'
+  } finally {
+    avatarBusy.value = false
+    input.value = ''
+  }
+}
+
+async function resetAvatar() {
+  avatarBusy.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    await auth.updateAccountAvatar(null)
+    notice.value = '已恢复首字母头像'
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '恢复头像失败'
+  } finally {
+    avatarBusy.value = false
+  }
+}
+
 watch(isActive, active => {
   if (active) reset()
 }, { immediate: true })
@@ -113,6 +177,14 @@ watch(canSave, value => emit('can-save-change', value), { immediate: true, flush
       </div>
       <span class="account-badge">{{ auth.user?.username || '当前账号' }}</span>
     </header>
+
+    <section class="account-avatar-card" aria-label="账号头像">
+      <AccountInitialAvatar :name="auth.user?.username || '当前账号'" :image-url="auth.user?.avatar" :size="64" />
+      <div><strong>账号头像</strong><small>默认显示用户名首字母。头像只在 Web 修改，iOS 会同步显示。</small></div>
+      <button type="button" :disabled="busy || avatarBusy" @click="avatarInput?.click()">{{ avatarBusy ? '正在保存…' : '更换头像' }}</button>
+      <button v-if="auth.user?.avatar" type="button" :disabled="busy || avatarBusy" @click="resetAvatar">使用首字母</button>
+      <input ref="avatarInput" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" @change="chooseAvatar" />
+    </section>
 
     <form :id="formId" class="security-form" @submit.prevent="save">
       <h3 v-if="isAdmin" class="security-section-title">账号信息</h3>
@@ -178,6 +250,7 @@ watch(canSave, value => emit('can-save-change', value), { immediate: true, flush
 .panel-heading h2{margin:0;font-size:22px;letter-spacing:-.035em}
 .panel-description{max-width:520px;margin:8px 0 0;color:var(--text-secondary);font-size:13px;line-height:1.65}
 .account-badge{max-width:180px;padding:6px 10px;overflow:hidden;border:1px solid var(--line);border-radius:999px;background:var(--surface-soft);color:var(--text-muted);font-size:12px;text-overflow:ellipsis;white-space:nowrap}
+.account-avatar-card{display:flex;align-items:center;gap:12px}.account-avatar-card>div{display:grid;min-width:0;flex:1;gap:4px}.account-avatar-card strong{font-size:14px}.account-avatar-card small{color:var(--text-muted);font-size:12px;line-height:1.5}.account-avatar-card button{min-height:36px;padding:0 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface-raised);color:var(--text-secondary);cursor:pointer;font-size:12px;font-weight:600}.account-avatar-card button:disabled{cursor:wait;opacity:.5}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .security-form{display:grid;gap:20px}
 .security-section-title{margin:0;font-size:16px}.security-section-title--password{margin-top:8px;padding-top:24px;border-top:1px solid var(--line)}
 .field{display:grid;gap:8px;color:var(--text-secondary);font-size:14px;font-weight:650}
@@ -200,5 +273,5 @@ watch(canSave, value => emit('can-save-change', value), { immediate: true, flush
 .logout-card p{max-width:470px;margin:5px 0 0;color:var(--text-muted);font-size:12px;line-height:1.55}
 .logout-button{display:inline-flex;min-height:40px;flex:0 0 auto;align-items:center;justify-content:center;gap:7px;padding:0 12px;border:1px solid color-mix(in srgb,var(--danger) 35%,var(--line));border-radius:9px;background:var(--surface-raised);color:var(--danger);cursor:pointer;font-size:13px;font-weight:650}
 .logout-button:disabled{cursor:wait;opacity:.5}
-@media(max-width:620px){.panel-heading{align-items:flex-start;flex-direction:column;gap:10px}.form-actions,.logout-card{align-items:stretch;flex-direction:column}.form-actions .solid-button,.logout-button{width:100%}}
+@media(max-width:620px){.panel-heading{align-items:flex-start;flex-direction:column;gap:10px}.account-avatar-card{align-items:flex-start;flex-wrap:wrap}.account-avatar-card>div{min-width:calc(100% - 84px)}.form-actions,.logout-card{align-items:stretch;flex-direction:column}.form-actions .solid-button,.logout-button{width:100%}}
 </style>

@@ -12,6 +12,7 @@ export type AuthStatus =
 export interface CurrentUser {
   id: string
   username: string
+  avatar?: string
   displayName?: string
   email?: string
   provider?: string

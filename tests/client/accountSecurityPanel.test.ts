@@ -4,8 +4,9 @@ import AccountSecurityDialog from '@/components/app/AccountSecurityDialog.vue'
 import AccountSecurityPanel from '@/components/app/AccountSecurityPanel.vue'
 
 const auth = vi.hoisted(() => ({
-  user: { id: 'admin-1', username: 'owner', role: 'admin' } as { id: string; username: string; role: string } | undefined,
+  user: { id: 'admin-1', username: 'owner', role: 'admin' } as { id: string; username: string; role: string; avatar?: string } | undefined,
   changeCredentials: vi.fn(async () => undefined),
+  updateAccountAvatar: vi.fn(async (avatar: string | null) => { if (auth.user) { if (avatar) auth.user.avatar=avatar; else delete auth.user.avatar } }),
   logout: vi.fn(async () => undefined),
 }))
 
@@ -18,6 +19,7 @@ async function fill(wrapper: ReturnType<typeof mount>, name: string, value: stri
 beforeEach(() => {
   auth.user = { id: 'admin-1', username: 'owner', role: 'admin' }
   auth.changeCredentials.mockResolvedValue(undefined)
+  auth.updateAccountAvatar.mockClear()
 })
 
 afterEach(() => {
@@ -81,6 +83,16 @@ describe('Account security panel', () => {
     await wrapper.get<HTMLButtonElement>('.logout-button').trigger('click')
     expect(wrapper.emitted('logout')).toHaveLength(1)
     expect(auth.logout).not.toHaveBeenCalled()
+  })
+
+  it('restores the account to its generated initial avatar independently', async () => {
+    auth.user = { id: 'admin-1', username: 'owner', role: 'admin', avatar: 'data:image/png;base64,aGVsbG8=' }
+    const wrapper = mount(AccountSecurityPanel, { props: { active: true } })
+    expect(wrapper.get('.account-initial-avatar img').attributes('src')).toBe(auth.user.avatar)
+    await wrapper.get('.account-avatar-card button:last-of-type').trigger('click')
+    await flushPromises()
+    expect(auth.updateAccountAvatar).toHaveBeenCalledWith(null)
+    expect(wrapper.get('.account-initial-avatar').text()).toBe('O')
   })
 
   it('keeps the legacy dialog wrapper operational', async () => {

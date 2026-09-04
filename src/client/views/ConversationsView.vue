@@ -26,6 +26,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 import { apiRequest } from '@/api/client'
 import { updateProfileIdentity, type ProfileIdentityInput } from '@/api/profiles'
+import { encodeAgentAvatar, randomAgentIdentity } from '@shared/agentIdentity'
 import type { JsonValue } from '@shared/types'
 import type {
   WorkspaceAgent as Agent,
@@ -278,7 +279,7 @@ async function openDialog(kind: NonNullable<typeof dialog.value>) {
   selectedPresetId.value = 'custom'
   Object.assign(form, {
     name: '',
-    avatar: '',
+    avatar: kind === 'agent' ? encodeAgentAvatar(randomAgentIdentity('new-agent', 'Agent')) : '',
     instructions: '',
     source: '',
     memberIds: [],
@@ -521,6 +522,7 @@ onBeforeUnmount(() => {
 <template>
   <WorkspaceShell
     :user-name="auth.user?.username"
+    :user-avatar="auth.user?.avatar"
     :profiles="auth.profiles"
     :active-profile="auth.activeProfile"
     :is-admin="auth.user?.role === 'admin'"

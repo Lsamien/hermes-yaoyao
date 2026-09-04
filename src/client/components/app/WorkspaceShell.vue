@@ -38,6 +38,7 @@ const SIDEBAR_SEARCH_CLOSE_EVENT = 'hermes-yaoyao:sidebar-search-close'
 
 const props = withDefaults(defineProps<{
   userName?: string
+  userAvatar?: string
   pairingUserName?: string
   activeProfile?: Profile
   profiles?: Profile[]
@@ -58,6 +59,7 @@ const props = withDefaults(defineProps<{
   identityResetVersion?: number
 }>(), {
   userName: '',
+  userAvatar: '',
   pairingUserName: '',
   activeProfile: undefined,
   profiles: () => [],
@@ -456,7 +458,7 @@ onBeforeUnmount(() => {
       <div class="sidebar-footer">
         <div class="sidebar-account-switcher">
           <button class="sidebar-account-switcher__main" type="button" :title="applicationWorkspace ? '当前账号' : `切换 Agent：${profileTitle(activeProfile)}`" :aria-haspopup="applicationWorkspace ? undefined : 'listbox'" :aria-expanded="applicationWorkspace ? undefined : profileMenuOpen" @click="applicationWorkspace ? openSettings('account-security', $event) : toggleProfileMenu($event)">
-            <AccountInitialAvatar v-if="applicationWorkspace" :name="userName" :size="30" />
+            <AccountInitialAvatar v-if="applicationWorkspace" :name="userName" :image-url="userAvatar" :size="30" />
             <AgentAvatar v-else :name="profileTitle(activeProfile)" :avatar="activeProfile?.agentAvatar || ''" :size="30" />
             <span class="account-copy">
               <strong>{{ applicationWorkspace ? userName : profileTitle(activeProfile) }}</strong>
@@ -563,7 +565,7 @@ onBeforeUnmount(() => {
       <div class="sidebar-footer mobile-drawer__footer">
         <div class="sidebar-account-switcher">
           <button class="sidebar-account-switcher__main" type="button" :title="applicationWorkspace ? '当前账号' : `切换 Agent：${profileTitle(activeProfile)}`" :aria-haspopup="applicationWorkspace ? undefined : 'listbox'" :aria-expanded="applicationWorkspace ? undefined : profileMenuOpen" @click="applicationWorkspace ? openSettings('account-security', $event) : toggleProfileMenu($event)">
-            <AccountInitialAvatar v-if="applicationWorkspace" :name="userName" :size="30" />
+            <AccountInitialAvatar v-if="applicationWorkspace" :name="userName" :image-url="userAvatar" :size="30" />
             <AgentAvatar v-else :name="profileTitle(activeProfile)" :avatar="activeProfile?.agentAvatar || ''" :size="30" />
             <span class="account-copy">
               <strong>{{ applicationWorkspace ? userName : profileTitle(activeProfile) }}</strong>
@@ -617,6 +619,7 @@ onBeforeUnmount(() => {
       @switch-mode="switchInterfaceMode"
       :initial-page="settingsPage"
       :user-name="userName"
+      :user-avatar="userAvatar"
       :pairing-user-name="pairingUserName"
       :active-profile="activeProfile"
       :profiles="profiles"

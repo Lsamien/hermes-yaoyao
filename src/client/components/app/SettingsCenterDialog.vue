@@ -44,6 +44,7 @@ const props = withDefaults(defineProps<{
   botMode?: boolean
   initialPage?: SettingsPage
   userName?: string
+  userAvatar?: string
   pairingUserName?: string
   activeProfile?: Profile
   profiles?: Profile[]
@@ -59,6 +60,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   initialPage: 'agent-identity',
   userName: '',
+  userAvatar: '',
   pairingUserName: '',
   activeProfile: undefined,
   profiles: () => [],
@@ -289,7 +291,7 @@ function requestModeSwitch() {
                   </div>
                 </div>
                 <div v-else class="settings-account-summary" aria-label="当前账号">
-                  <AccountInitialAvatar :name="accountName" :size="34" />
+                  <AccountInitialAvatar :name="accountName" :image-url="userAvatar" :size="34" />
                   <span><strong>{{ accountName }}</strong><small>当前账号</small></span>
                 </div>
 
