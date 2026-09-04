@@ -100,6 +100,7 @@ describe('Settings center dialog', () => {
     expect(wrapper.find('.settings-agent-selector').exists()).toBe(false)
     expect(wrapper.get('.settings-account-summary').text()).toContain('owner')
     expect(wrapper.get('.settings-account-summary').text()).toContain('当前账号')
+    expect(wrapper.get('.settings-account-summary .account-initial-avatar').text()).toBe('O')
 
     const voiceButton = navigationButton(wrapper, '双流语音')
     expect(voiceButton.text()).toContain('全局')

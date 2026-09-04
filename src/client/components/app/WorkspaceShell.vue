@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Profile } from '@shared/types'
 import AgentAvatar from '@/components/common/AgentAvatar.vue'
+import AccountInitialAvatar from '@/components/common/AccountInitialAvatar.vue'
 import type { ProfileIdentityInput } from '@/api/profiles'
 import AppIcon from '@/components/common/AppIcon.vue'
 import BrandMark from '@/components/common/BrandMark.vue'
@@ -455,7 +456,8 @@ onBeforeUnmount(() => {
       <div class="sidebar-footer">
         <div class="sidebar-account-switcher">
           <button class="sidebar-account-switcher__main" type="button" :title="applicationWorkspace ? '当前账号' : `切换 Agent：${profileTitle(activeProfile)}`" :aria-haspopup="applicationWorkspace ? undefined : 'listbox'" :aria-expanded="applicationWorkspace ? undefined : profileMenuOpen" @click="applicationWorkspace ? openSettings('account-security', $event) : toggleProfileMenu($event)">
-            <AgentAvatar :name="applicationWorkspace ? userName : profileTitle(activeProfile)" :avatar="applicationWorkspace ? '' : activeProfile?.agentAvatar || ''" :size="30" />
+            <AccountInitialAvatar v-if="applicationWorkspace" :name="userName" :size="30" />
+            <AgentAvatar v-else :name="profileTitle(activeProfile)" :avatar="activeProfile?.agentAvatar || ''" :size="30" />
             <span class="account-copy">
               <strong>{{ applicationWorkspace ? userName : profileTitle(activeProfile) }}</strong>
               <span>{{ applicationWorkspace ? '当前账号' : activeProfile?.name || userName || '未选择 Agent' }}</span>
@@ -561,7 +563,8 @@ onBeforeUnmount(() => {
       <div class="sidebar-footer mobile-drawer__footer">
         <div class="sidebar-account-switcher">
           <button class="sidebar-account-switcher__main" type="button" :title="applicationWorkspace ? '当前账号' : `切换 Agent：${profileTitle(activeProfile)}`" :aria-haspopup="applicationWorkspace ? undefined : 'listbox'" :aria-expanded="applicationWorkspace ? undefined : profileMenuOpen" @click="applicationWorkspace ? openSettings('account-security', $event) : toggleProfileMenu($event)">
-            <AgentAvatar :name="applicationWorkspace ? userName : profileTitle(activeProfile)" :avatar="applicationWorkspace ? '' : activeProfile?.agentAvatar || ''" :size="30" />
+            <AccountInitialAvatar v-if="applicationWorkspace" :name="userName" :size="30" />
+            <AgentAvatar v-else :name="profileTitle(activeProfile)" :avatar="activeProfile?.agentAvatar || ''" :size="30" />
             <span class="account-copy">
               <strong>{{ applicationWorkspace ? userName : profileTitle(activeProfile) }}</strong>
               <span>{{ applicationWorkspace ? '当前账号' : activeProfile?.name || userName || '未选择 Agent' }}</span>

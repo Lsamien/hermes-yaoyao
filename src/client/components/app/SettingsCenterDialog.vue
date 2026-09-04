@@ -12,6 +12,7 @@ import SystemManagementPanel from '@/components/app/SystemManagementPanel.vue'
 import SystemOverviewPanel from '@/components/app/SystemOverviewPanel.vue'
 import SystemUpdatePanel from '@/components/app/SystemUpdatePanel.vue'
 import AgentAvatar from '@/components/common/AgentAvatar.vue'
+import AccountInitialAvatar from '@/components/common/AccountInitialAvatar.vue'
 import type { ProfileIdentityInput } from '@/api/profiles'
 import AppIcon from '@/components/common/AppIcon.vue'
 
@@ -288,7 +289,7 @@ function requestModeSwitch() {
                   </div>
                 </div>
                 <div v-else class="settings-account-summary" aria-label="当前账号">
-                  <AgentAvatar :name="accountName" :size="34" />
+                  <AccountInitialAvatar :name="accountName" :size="34" />
                   <span><strong>{{ accountName }}</strong><small>当前账号</small></span>
                 </div>
 

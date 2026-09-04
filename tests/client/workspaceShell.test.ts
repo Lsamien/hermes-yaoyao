@@ -151,6 +151,8 @@ it('uses the reference Bot list header and keeps mode changes in settings', asyn
   expect(rail.find('.sidebar-primary-action').exists()).toBe(false)
   expect(rail.find('.sidebar-footer').exists()).toBe(true)
   expect(rail.get('.sidebar-account-switcher__main').text()).toContain('owner')
+  expect(rail.get('.account-initial-avatar').text()).toBe('O')
+  expect(rail.find('.sidebar-account-switcher__main .agent-avatar').exists()).toBe(false)
   expect(rail.find('.bot-logo-trigger').exists()).toBe(true)
   expect(rail.find('.bot-account-trigger').exists()).toBe(false)
   expect(rail.find('.sidebar-collapse').exists()).toBe(false)
