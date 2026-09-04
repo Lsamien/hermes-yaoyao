@@ -120,6 +120,25 @@ export class WorkspaceStore {
       }
       this.db.prepare('INSERT INTO workspace_migrations VALUES(?)').run('avatar-v2')
     })
+    this.atomic(() => {
+      if (this.db.prepare('SELECT id FROM workspace_migrations WHERE id=?').get('avatar-random-default-v1')) return
+      for (const owner of this.owners()) {
+        for (const agent of this.list<Agent>(owner, 'agent')) {
+          const identity = decodeAgentMascotAvatar(agent.avatar)
+          const isSystemDefault = identity && !identity.imageDataURL && identity.shape === 'circle'
+            && identity.color === '#00c875' && identity.expression === 'idle' && !identity.bodyId
+          if (!isSystemDefault) continue
+          const avatar = encodeAgentAvatar(randomAgentIdentity(agent.id, agent.name))
+          this.put(owner, 'agent', agent.id, { ...agent, avatar })
+          for (const conversation of this.list<Conversation>(owner, 'conversation')) {
+            if (conversation.kind === 'direct' && conversation.memberIds[0] === agent.id) {
+              this.put(owner, 'conversation', conversation.id, { ...conversation, avatar })
+            }
+          }
+        }
+      }
+      this.db.prepare('INSERT INTO workspace_migrations VALUES(?)').run('avatar-random-default-v1')
+    })
   }
   get<T>(owner: string, kind: string, id: string): T | undefined {
     const row = this.db

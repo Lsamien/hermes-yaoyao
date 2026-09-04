@@ -876,17 +876,20 @@ it('marks a stopped administrator as interrupted without sending a false complet
   expect(notifications).toEqual([])
 })
 
-it('migrates old internal avatars and photos once, synchronizing direct snapshots without changing conversations',()=>{
+it('randomizes old default avatars once while preserving photos, custom v2 settings and direct snapshots',()=>{
   const a=store.createAgent(owner,{name:'旧头像',profile:'default',instructions:'保留规则'})
   const photo='data:image/png;base64,aGVsbG8='
   const b=store.createAgent(owner,{name:'照片',profile:'default',avatar:photo})
   store.put(owner,'agent',a.id,{...a,avatar:'yaoyao-mascot:v1:triangle:ff0000:friendly'})
   store.put(owner,'agent',b.id,{...b,avatar:photo})
-  store.db.prepare('DELETE FROM workspace_migrations WHERE id=?').run('avatar-v2')
+  store.db.prepare("DELETE FROM workspace_migrations WHERE id IN ('avatar-v2','avatar-random-default-v1')").run()
+  const random=vi.spyOn(Math,'random').mockReturnValue(0)
   const migrated=new WorkspaceStore(home)
+  random.mockRestore()
   const next=migrated.require<any>(owner,'agent',a.id)
   expect(next.instructions).toBe('保留规则')
-  expect(decodeAgentAvatar(next.avatar)).toMatchObject({shape:'circle',color:'#00c875',expression:'idle'})
+  expect(decodeAgentAvatar(next.avatar)).toMatchObject({avatarMode:'mascot'})
+  expect(next.avatar).not.toBe(encodeAgentAvatar(defaultAgentIdentity(a.id,a.name)))
   const image=migrated.require<any>(owner,'agent',b.id)
   expect(decodeAgentAvatar(image.avatar)).toMatchObject({avatarMode:'image',imageDataURL:photo,imageCrop:'rounded'})
   for(const c of migrated.list<WorkspaceConversation>(owner,'conversation')) expect(c.avatar).toBe(migrated.require<any>(owner,'agent',c.memberIds[0]!).avatar)
@@ -895,6 +898,7 @@ it('migrates old internal avatars and photos once, synchronizing direct snapshot
   migrated.close()
   const reopened=new WorkspaceStore(home)
   expect(reopened.require<any>(owner,'agent',a.id).avatar).toBe(customized)
+  expect(reopened.db.prepare("SELECT count(*) AS count FROM workspace_migrations WHERE id='avatar-random-default-v1'").get()!.count).toBe(1)
   reopened.close()
 })
 
