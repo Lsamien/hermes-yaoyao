@@ -24,6 +24,10 @@ const sessions = new Map<
 >()
 const calls: Array<{ method: string; params: Record<string, unknown> }> = []
 const heldReplies: Array<() => void> = []
+const profileState = new Map([
+  ['default', { name: 'default', display_name: '通用助手', is_default: true, gateway_running: true, ui_meta: {} as Record<string, unknown>, ui_meta_revisions: {} as Record<string, number> }],
+  ['server', { name: 'server', display_name: '开发助手', is_default: false, gateway_running: true, ui_meta: {} as Record<string, unknown>, ui_meta_revisions: {} as Record<string, number> }],
+])
 const upstream = createServer((req, res) => {
   const url = new URL(req.url || '/', `http://127.0.0.1:${upstreamPort}`)
   res.setHeader('content-type', 'application/json')
@@ -61,12 +65,7 @@ const upstream = createServer((req, res) => {
     return
   }
   if (url.pathname === '/api/profiles') {
-    send({
-      profiles: [
-        { name: 'default', display_name: '通用助手', is_default: true, gateway_running: true },
-        { name: 'server', display_name: '开发助手', is_default: false, gateway_running: true },
-      ],
-    })
+    send({ profiles: [...profileState.values()] })
     return
   }
   if (url.pathname === '/api/sessions') {
@@ -116,12 +115,17 @@ wss.on('connection', (socket) => {
         )
     }
     if (f.method === 'profiles.list') {
-      respond({
-        profiles: [
-          { name: 'default', display_name: '通用助手' },
-          { name: 'server', display_name: '开发助手', is_default: false, gateway_running: true },
-        ],
-      })
+      respond({ profiles: [...profileState.values()] })
+      return
+    }
+    if (f.method === 'profiles.configure') {
+      const profile = profileState.get(String(f.params.name))
+      if (!profile) { respond({ error: 'profile_not_found' }); return }
+      for (const [namespace, value] of Object.entries(f.params.ui_meta ?? {})) {
+        profile.ui_meta[namespace] = value
+        profile.ui_meta_revisions[namespace] = (profile.ui_meta_revisions[namespace] ?? 0) + 1
+      }
+      respond({ profile })
       return
     }
     if (f.method === 'session.create' || f.method === 'session.resume') {

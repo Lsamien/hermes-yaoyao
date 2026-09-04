@@ -132,6 +132,7 @@ const activeTitle = computed(() => ({
   'system-update': '更新与回滚',
 })[activePage.value])
 const accountName = computed(() => props.pairingUserName || props.userName || '当前账号')
+const showAgentSelector = computed(() => activePage.value.startsWith('agent-'))
 const activeScope = computed(() => {
   if (activePage.value.startsWith('agent-')) return `正在设置：${profileTitle(props.activeProfile)} / ${props.activeProfile?.name || '未选择'}`
   if (activePage.value.startsWith('account-')) return `当前账号：${accountName.value}${props.isAdmin ? ' · 管理员' : ''}`
@@ -272,7 +273,7 @@ function requestModeSwitch() {
                 <button class="settings-center__close" type="button" aria-label="关闭设置中心" :disabled="updateLocked" @click="requestClose"><AppIcon name="close" :size="18" /></button>
               </header>
               <div class="settings-sidebar__scroll">
-                <div class="settings-agent-selector">
+                <div v-if="showAgentSelector" class="settings-agent-selector">
                   <button ref="settingsAgentTrigger" type="button" aria-haspopup="listbox" :aria-expanded="profileMenuOpen" @click="toggleAgentMenu">
                     <AgentAvatar :name="profileTitle(activeProfile)" :avatar="activeProfile?.agentAvatar || ''" :size="34" />
                     <span><strong>{{ profileTitle(activeProfile) }}</strong><small>{{ activeProfile?.name || '未选择 Agent' }}</small></span>
@@ -285,6 +286,10 @@ function requestModeSwitch() {
                       <AppIcon v-if="profile.name === activeProfile?.name" name="check" :size="14" />
                     </button>
                   </div>
+                </div>
+                <div v-else class="settings-account-summary" aria-label="当前账号">
+                  <AgentAvatar :name="accountName" :size="34" />
+                  <span><strong>{{ accountName }}</strong><small>当前账号</small></span>
                 </div>
 
                 <nav>
@@ -392,6 +397,8 @@ function requestModeSwitch() {
 .settings-sidebar__header { display: none; }.settings-sidebar__header h2 { margin: 0; font-size: 14px; letter-spacing: -.01em; }
 .settings-sidebar__scroll { min-height: 0; }
 .settings-agent-selector { position: sticky; z-index: 3; top: -12px; margin: -12px 0 8px; padding: 12px 0 8px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-soft) 42%, var(--surface-raised)); }
+.settings-account-summary { position: sticky; z-index: 3; top: -12px; display: grid; min-height: 42px; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 8px; margin: -12px 0 8px; padding: 12px 4px 8px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-soft) 42%, var(--surface-raised)); }
+.settings-account-summary span { display: grid; min-width: 0; gap: 2px; }.settings-account-summary strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }.settings-account-summary small { color: var(--text-muted); font-size: 11px; }
 .settings-agent-selector > button { display: grid; width: 100%; min-height: 42px; grid-template-columns: 34px minmax(0, 1fr) 16px; align-items: center; gap: 8px; padding: 2px 4px; border: 0; border-radius: 9px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }
 .settings-agent-selector > button:hover { background: var(--surface-hover); }
 .settings-agent-selector span,.settings-agent-menu span { display: grid; min-width: 0; gap: 2px; }
@@ -460,6 +467,6 @@ function requestModeSwitch() {
   .settings-content--with-footer { grid-template-rows: auto minmax(0, 1fr) calc(68px + env(safe-area-inset-bottom)); }
   .settings-content__footer { padding: 0 20px env(safe-area-inset-bottom); }
   .settings-content__footer button { flex: 1; }
-  .settings-agent-selector { top: -18px; margin-top: -18px; padding-top: 18px; }
+  .settings-agent-selector,.settings-account-summary { top: -18px; margin-top: -18px; padding-top: 18px; }
 }
 </style>

@@ -96,6 +96,11 @@ describe('Settings center dialog', () => {
     expect(modelPanel.attributes('data-profile')).toBe('ops:blue/team')
     expect(wrapper.get('.settings-content__header').text()).toContain('正在设置：运维 Agent / ops:blue/team')
 
+    await navigationButton(wrapper, '登录与安全').trigger('click')
+    expect(wrapper.find('.settings-agent-selector').exists()).toBe(false)
+    expect(wrapper.get('.settings-account-summary').text()).toContain('owner')
+    expect(wrapper.get('.settings-account-summary').text()).toContain('当前账号')
+
     const voiceButton = navigationButton(wrapper, '双流语音')
     expect(voiceButton.text()).toContain('全局')
     expect(voiceButton.element.closest('section')?.textContent).toContain('系统 · 仅管理员')
