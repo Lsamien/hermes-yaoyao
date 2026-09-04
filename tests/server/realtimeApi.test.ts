@@ -14,11 +14,11 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-describe('native Hermes sessions are read-only on 8800', () => {
-  it('does not advertise realtime chat and rejects all native session writes locally', async () => {
+describe('native Hermes chat and history are separated on 8800', () => {
+  it('opens realtime chat while keeping non-Web history mutations read-only', async () => {
     const home = mkdtempSync(join(tmpdir(), 'yaoyao-native-history-'))
     roots.push(home)
-    let upstreamCalls = 0
+    let upstreamCalls = 0, upstreamWrites = 0
     const config: ServerConfig = {
       host: '127.0.0.1', port: 8800, upstream: new URL('http://127.0.0.1:9119'),
       allowedHosts: new Set(), home, mediaRoot: home, attachmentsRoot: home,
@@ -29,6 +29,7 @@ describe('native Hermes sessions are read-only on 8800', () => {
       config,
       fetchImpl: (async (input, init) => {
         upstreamCalls += 1
+        if (!['GET', 'HEAD'].includes(init?.method ?? 'GET')) upstreamWrites += 1
         const path = new URL(String(input)).pathname
         if (path === '/api/status') return Response.json({ auth_required: true })
         if (path === '/api/auth/me') return Response.json({ user_id: 'service' })
@@ -37,6 +38,8 @@ describe('native Hermes sessions are read-only on 8800', () => {
           headers: { 'content-type': 'application/json', 'set-cookie': 'hermes_service=session; Path=/; HttpOnly' },
         })
         if (path === '/api/profiles') return Response.json({ profiles: [{ name: 'default' }] })
+        if (path === '/api/auth/ws-ticket') return Response.json({ ticket: 'fixture-ticket' })
+        if (path === '/api/sessions/session-web') return Response.json(init?.method === 'PATCH' ? { ok: true } : { id: 'session-web', source: 'web' })
         return Response.json({ method: init?.method ?? 'GET' })
       }) as typeof fetch,
     })
@@ -54,12 +57,8 @@ describe('native Hermes sessions are read-only on 8800', () => {
     const csrf = credentials.body.csrfToken
 
     const capabilities = await agent.get('/api/realtime/capabilities').set('Host', '127.0.0.1:8800').expect(200)
-    expect(capabilities.body.channels).toEqual([])
-    await agent.post('/api/realtime/channels').set('Host', '127.0.0.1:8800')
-      .set('Origin', origin).set('X-CSRF-Token', csrf).send({ channel: 'chat' })
-      .expect(410, { error: '原生 Hermes 会话仅供历史查看；请在聊天中开始或继续对话', code: 'native_sessions_read_only' })
-
-    const beforeWrites = upstreamCalls
+    expect(capabilities.body.channels).toEqual(['chat'])
+    const beforeWrites = upstreamCalls, beforeUpstreamWrites = upstreamWrites
     for (const path of ['/api/app/sessions/session-1', '/api/sessions/session-1']) {
       const response = await agent.patch(path).set('Host', '127.0.0.1:8800')
         .set('Origin', origin).set('X-CSRF-Token', csrf).send({ title: '不能修改' }).expect(410)
@@ -78,6 +77,10 @@ describe('native Hermes sessions are read-only on 8800', () => {
       .send({ title: '不能修改' })
       .expect(410)
     expect(pairedWrite.body.code).toBe('native_sessions_read_only')
-    expect(upstreamCalls).toBe(beforeWrites)
+    expect(upstreamCalls).toBeGreaterThan(beforeWrites)
+    expect(upstreamWrites).toBe(beforeUpstreamWrites)
+    await agent.patch('/api/app/sessions/session-web?profile=default').set('Host', '127.0.0.1:8800')
+      .set('Origin', origin).set('X-CSRF-Token', csrf).send({ title: '可修改的聊天' }).expect(200)
+    expect(upstreamWrites).toBe(beforeUpstreamWrites + 1)
   })
 })

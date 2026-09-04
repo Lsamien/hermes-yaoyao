@@ -326,6 +326,13 @@ function nativeSessionsReadOnly(): never {
   )
 }
 
+function requireWritableWebSession(response: UpstreamResponse): void {
+  const payload = requireSuccess(response)
+  const session = payload.session && typeof payload.session === 'object' && !Array.isArray(payload.session)
+    ? payload.session as JsonObject : payload
+  if (session.source !== 'web') nativeSessionsReadOnly()
+}
+
 function pairedProxyPath(rawPath: string): string {
   const path = rawPath.startsWith('/') ? rawPath : `/${rawPath}`
   if (path.includes('\\') || path.includes('\u0000') || path.length > 2_048) {
@@ -1793,8 +1800,10 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     )
   })
   router.get('/api/app/sessions', async (ctx) => {
+    const view = ctx.query.view === 'history' || ctx.query.view === 'chat' ? ctx.query.view : undefined
     const search = searchFrom(ctx, ['limit', 'offset', 'order', 'archived', 'profile', 'source'])
-    search.set('exclude_sources', 'cron,ios_group,yaoyao_workspace')
+    if (view === 'chat') search.set('source', 'web')
+    else search.set('exclude_sources', view === 'history' ? 'cron,ios_group,yaoyao_workspace,web' : 'cron,ios_group,yaoyao_workspace')
     const path = search.get('profile') ? '/api/sessions' : '/api/profiles/sessions'
     await proxy(ctx, dependencies.upstream, path, { search })
   })
@@ -1818,10 +1827,25 @@ export function createApiRouter(dependencies: RouteDependencies): Router {
     })
   })
   router.patch('/api/app/sessions/:sessionID', async (ctx) => {
-    nativeSessionsReadOnly()
+    const id = safeIdentifier(ctx.params.sessionID, 'session ID')
+    const search = searchFrom(ctx, ['profile'])
+    await withJar(ctx, async jar => {
+      requireWritableWebSession(await dependencies.upstream.request(`/api/sessions/${encodeURIComponent(id)}`, jar, { search }))
+      const request = body(ctx)
+      const profile = search.get('profile')
+      if (profile) request.profile = profile
+      const response = await dependencies.upstream.request(`/api/sessions/${encodeURIComponent(id)}`, jar, { method: 'PATCH', search, body: request })
+      sendUpstreamResponse(ctx, response, jar)
+    })
   })
   router.delete('/api/app/sessions/:sessionID', async (ctx) => {
-    nativeSessionsReadOnly()
+    const id = safeIdentifier(ctx.params.sessionID, 'session ID')
+    const search = searchFrom(ctx, ['profile'])
+    await withJar(ctx, async jar => {
+      requireWritableWebSession(await dependencies.upstream.request(`/api/sessions/${encodeURIComponent(id)}`, jar, { search }))
+      const response = await dependencies.upstream.request(`/api/sessions/${encodeURIComponent(id)}`, jar, { method: 'DELETE', search })
+      sendUpstreamResponse(ctx, response, jar)
+    })
   })
 
   router.all('/api/*gatewayPath', async (ctx) => {

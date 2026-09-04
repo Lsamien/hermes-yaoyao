@@ -25,6 +25,7 @@ async function mountShell(start = '/chat') {
     history: createMemoryHistory(),
     routes: [
       { path: '/chat', component: { template: '<div></div>' } },
+      { path: '/history', component: { template: '<div></div>' } },
       { path: '/conversations', component: { template: '<div></div>' } },
       { path: '/groups', component: { template: '<div></div>' } },
       { path: '/kanban', component: { template: '<div></div>' } },
@@ -68,6 +69,7 @@ describe('Workspace shell account controls', () => {
   it('includes the Kanban workspace in desktop and mobile navigation', async () => {
     const wrapper = await mountShell()
     expect(wrapper.get('.desktop-sidebar').text()).toContain('看板')
+    expect(wrapper.get('.desktop-sidebar').text()).toContain('历史记录')
     expect(wrapper.get('.mobile-drawer').text()).toContain('看板')
     await wrapper.get('.desktop-sidebar .sidebar-feature-nav button[title="看板"]').trigger('click')
     await vi.waitFor(() => expect(wrapper.get('.sidebar-context__heading').text()).toContain('看板列表'))

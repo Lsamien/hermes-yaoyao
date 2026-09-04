@@ -58,7 +58,7 @@ function handleModelCatalogChanged(event: Event) {
 }
 
 const sessions = computed(() => [...chat.sessions]
-  .filter(session => session.source === 'web'))
+  .filter(session => !['cron', 'ios_group', 'yaoyao_workspace', 'web'].includes(session.source)))
 const agentNames = computed(() => new Map(auth.profiles.map(profile => [
   profile.name,
   profile.agentName || profile.displayName || profile.name,
@@ -113,7 +113,7 @@ function routeProfile(): string {
 }
 
 function sessionLocation(id: string, profile: string) {
-  return { path: `/chat/${encodeURIComponent(id)}`, query: { profile } }
+  return { path: `/history/${encodeURIComponent(id)}`, query: { profile } }
 }
 
 async function findLegacySessionProfile(sessionId: string): Promise<string> {
@@ -143,18 +143,18 @@ async function refreshSessions() {
   }
   // The session route is the authoritative navigation target. A secondary
   // unread-count request must never prevent its history from being restored.
-  await chat.loadSessions(profile, 'chat')
+  await chat.loadSessions(profile, 'history')
   if (requestedId) {
     const target = await getSession(requestedId, profile).catch(() => undefined)
-    if (target && target.source !== 'web') {
-      await router.replace({ path: `/history/${encodeURIComponent(requestedId)}`, query: { profile } })
+    if (target?.source === 'web') {
+      await router.replace({ path: `/chat/${encodeURIComponent(requestedId)}`, query: { profile } })
       return
     }
   }
   if (requestedId && chat.activeSessionId !== requestedId) await chat.selectSession(requestedId, profile)
   if (requestedId && profile && routeProfile() !== profile) await router.replace(sessionLocation(requestedId, profile))
   void chat.loadUnread(profile).catch(() => undefined)
-  if (!requestedId && chat.activeSession?.source !== 'web') chat.clearSelection()
+  if (!requestedId && chat.activeSession?.source === 'web') chat.clearSelection()
 }
 
 async function chooseSession(id: string) {
@@ -164,7 +164,7 @@ async function chooseSession(id: string) {
   const profile = session?.profile || auth.activeProfile?.name || 'default'
   await router.push(sessionLocation(id, profile))
   await ensureRouteProfile(profile)
-    if (chat.activeProfileName !== profile) await chat.loadSessions(profile, 'chat')
+  if (chat.activeProfileName !== profile) await chat.loadSessions(profile, 'history')
   await chat.selectSession(id, profile)
   await chat.markRead(id, profile).catch(() => undefined)
   quoted.value = null
@@ -348,14 +348,7 @@ onMounted(async () => {
   document.addEventListener('keydown', handleSessionActionKey)
   window.addEventListener(MODEL_CATALOG_CHANGED_EVENT, handleModelCatalogChanged)
   await refreshSessions()
-  await Promise.allSettled([chat.loadModels(auth.activeProfile?.name), chat.connect()])
-  void chat.refreshActiveSessionModel().catch(() => undefined)
-  modelSyncTimer = window.setInterval(() => {
-    if (document.visibilityState === 'visible') void chat.refreshActiveSessionModel().catch(() => undefined)
-  }, 3_000)
   await revealSourceMessage()
-  const pendingFile = await consumeLibraryItemForComposer()
-  if (pendingFile) composer.value?.attachFiles([pendingFile])
 })
 
 onBeforeUnmount(() => {
@@ -377,30 +370,23 @@ watch(() => auth.activeProfile?.name, async (profile, previous) => {
   chat.switchProfile(profile)
   const requestedId = typeof route.params.sessionId === 'string' ? route.params.sessionId : ''
   if (requestedId && routeProfile() === profile) {
-    await Promise.allSettled([chat.loadSessions(profile, 'chat'), chat.loadModels(profile), chat.loadUnread(profile), chat.connect()])
+    await Promise.allSettled([chat.loadSessions(profile, 'history'), chat.loadUnread(profile)])
     await chat.selectSession(requestedId, profile)
     return
   }
-  await router.replace({ path: '/chat', query: { profile } })
-  await Promise.allSettled([chat.loadSessions(profile, 'chat'), chat.loadModels(profile), chat.loadUnread(profile), chat.connect()])
+  await router.replace({ path: '/history', query: { profile } })
+  await Promise.allSettled([chat.loadSessions(profile, 'history'), chat.loadUnread(profile)])
 })
 
 watch(() => chat.activeSessionId, async id => {
   const profile = chat.activeProfileName || auth.activeProfile?.name || ''
-  if (id) void chat.refreshActiveSessionModel().catch(() => undefined)
   if (!id || (route.params.sessionId === id && routeProfile() === profile)) return
   await router.replace(sessionLocation(id, profile))
 })
 </script>
 
 <template>
-  <WorkspaceView sidebar-title="对话" :sidebar-subtitle="`${sessions.length} 个会话`" :inspector-open="!!preview || outlineOpen" :inspector-close-label="outlineOpen ? '关闭会话大纲' : '关闭预览'" @close-inspector="closeInspector">
-    <template #sidebar-action>
-      <button class="sidebar-primary-action" type="button" title="新建聊天" aria-label="新建聊天" @click="createSession">
-        <YaoYaoSidebarIcon name="add" />
-        <span>新建聊天</span>
-      </button>
-    </template>
+  <WorkspaceView sidebar-title="历史记录" :sidebar-subtitle="`${sessions.length} 个会话`" :inspector-open="!!preview || outlineOpen" :inspector-close-label="outlineOpen ? '关闭会话大纲' : '关闭预览'" @close-inspector="closeInspector">
     <template #sidebar>
       <ResourceSidebar
         :items="sidebarItems"
@@ -411,8 +397,8 @@ watch(() => chat.activeSessionId, async id => {
         :has-more="chat.hasMoreSessions"
         :loading-more="chat.isLoadingMoreSessions"
         search-placeholder="搜索会话"
-        empty-title="还没有会话"
-        empty-description="新建会话后，从输入框开始聊天。"
+        empty-title="还没有历史会话"
+        empty-description="Hermes 会话会在这里以只读历史显示。"
         @load-more="chat.loadMoreSessions(auth.activeProfile?.name)"
         @select="chooseSession"
         @more="openSessionActions"
@@ -424,94 +410,46 @@ watch(() => chat.activeSessionId, async id => {
       <MessageTimeline
         ref="timeline"
         :messages="messages"
-        :title="activeSession?.title || '新会话'"
-        :subtitle="activeSession ? `${activeSession.profile || auth.activeProfile?.name || ''} · ${activeSession.model || chat.selectedModel?.name || '默认模型'}` : '选择会话或直接开始输入'"
+        :title="activeSession?.title || '历史记录'"
+        :subtitle="activeSession ? `${activeSession.profile || auth.activeProfile?.name || ''} · ${activeSession.model || '默认模型'}` : '选择左侧会话查看历史'"
         :loading="chat.activeRouteState?.isLoadingHistory || chat.isLoading"
         :loading-older="chat.activeRouteState?.isLoadingHistory"
         :has-older="chat.hasMoreBefore"
-        :connected="connected"
+        :connected="false"
         :synced="chat.historySynced"
         :show-tools="showThinking"
-        :thinking="chat.isSending || chat.isStreaming"
+        :thinking="false"
         :show-assistant-identity="false"
         :agent-avatars="agentAvatars"
-        :interaction="interaction"
+        :allow-branch="false"
+        read-only
         empty-logo
         transparent-header
-        :fork-source-title="forkSourceTitle"
         @load-older="chat.loadOlder"
-        @quote="quoted = $event"
-        @branch="branch"
         @preview="openAttachment"
         @preview-file="openLocalFile"
-        @approve="interaction && chat.respondToApproval(interaction.id, $event)"
-        @clarify="interaction && chat.respondToClarification(interaction.id, $event)"
       >
         <template #header-actions>
           <button v-if="activeSession" ref="headerSessionMenuButton" class="icon-button header-session-menu" type="button" title="会话操作" aria-label="会话操作" @click="openSessionActions(activeSession.id, $event)"><AppIcon name="dots" :size="18" /></button>
         </template>
       </MessageTimeline>
       <p v-if="chat.error" class="chat-error" role="alert"><AppIcon name="alert" :size="13" />{{ chat.error }}</p>
-      <ComposerShell
-        ref="composer"
-        mode="chat"
-        :draft-key="`${auth.user?.id || 'local'}:${auth.activeProfile?.name || 'default'}:${chat.activeSessionId || 'new'}`"
-        :disabled="chat.connectionState === 'failed'"
-        :streaming="chat.isStreaming"
-        :sending="chat.isSending"
-        :model-label="chat.selectedModel?.name || '选择模型'"
-        :fast-mode="chat.fastMode"
-        :fast-mode-disabled="!chat.activeSessionId"
-        :reasoning-effort="reasoningLabel"
-        :reasoning-value="chat.reasoningEffort || ''"
-        :reasoning-options="reasoningComposerOptions"
-        :context-used="contextUsed"
-        :context-limit="chat.contextUsage?.contextLimit || 262144"
-        :context-estimated="contextIsEstimated"
-        :queue-mode="queueMode || chat.isQueued"
-        :tool-trace-visible="showThinking"
-        :reference="reference"
-        :slash-commands="[
-          { id: 'fork', label: 'fork', detail: '从当前会话创建分支' },
-          { id: 'compact', label: 'compact', detail: '压缩当前会话上下文' },
-          { id: 'model', label: 'model', detail: '切换模型' },
-        ]"
-        @send="send"
-        @stop="chat.interrupt"
-        @model-click="modelDialog = true"
-        @fast-mode-toggle="toggleFastMode"
-        @reasoning-change="selectReasoning"
-        @settings-click="toggleShowThinking"
-        @queue-toggle="queueMode = !queueMode"
-        @clear-reference="quoted = null"
-      />
     </div>
 
     <template #inspector>
       <SessionOutline v-if="outlineOpen" :messages="messages" :has-older="chat.hasMoreBefore" @navigate="navigateOutline" />
-      <PreviewInspector v-else-if="preview" :item="preview" @close="preview = null" @add-to-composer="addPreviewToComposer" />
+      <PreviewInspector v-else-if="preview" :item="preview" :can-add-to-composer="false" @close="preview = null" />
     </template>
   </WorkspaceView>
 
   <FloatingResourceSearch section="chat" label="搜索会话" :items="sidebarItems" @select="chooseSession" />
-  <PreviewModal v-if="filePreview" :item="filePreview" :items="conversationMediaItems" @close="filePreview = null" @add-to-composer="addPreviewToComposer" @source="filePreview = null" />
-  <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" @add="addMediaToComposer" />
-
-  <ModelChoiceDialog :open="modelDialog" :options="chat.models" :selected-id="selectedModelId" :busy="modelSwitching" @close="modelDialog = false" @select="selectModel" />
+  <PreviewModal v-if="filePreview" :item="filePreview" :items="conversationMediaItems" :can-add-to-composer="false" @close="filePreview = null" @source="filePreview = null" />
+  <ImagePreviewLightbox v-model="mediaPreviewIndex" :images="lightboxMedia" :can-add="false" />
 
   <Teleport to="body">
     <Transition name="session-menu">
       <section v-if="actionSessionId" class="session-actions" :style="actionMenuStyle" role="menu" aria-label="会话操作" @contextmenu.prevent>
-        <template v-if="renaming">
-          <label>会话名称<input v-model="renameValue" maxlength="120" autofocus @keydown.enter="saveRename" /></label>
-          <div><button class="quiet-button" type="button" @click="renaming = false">取消</button><button class="solid-button" type="button" @click="saveRename">保存</button></div>
-        </template>
-        <template v-else>
-          <button class="action-row" role="menuitem" type="button" @click="openSessionOutline"><AppIcon name="menu" :size="14" />会话大纲</button>
-          <button class="action-row" role="menuitem" type="button" @click="toggleSessionPinned"><AppIcon :name="actionSession?.pinned ? 'pin-off' : 'pin'" :size="14" />{{ actionSession?.pinned ? '取消置顶' : '置顶会话' }}</button>
-          <button class="action-row" role="menuitem" type="button" @click="renaming = true"><AppIcon name="edit" :size="14" />重命名</button>
-          <button class="action-row danger" role="menuitem" type="button" @click="deleteSession"><AppIcon name="trash" :size="14" />删除会话</button>
-        </template>
+        <button class="action-row" role="menuitem" type="button" @click="openSessionOutline"><AppIcon name="menu" :size="14" />会话大纲</button>
       </section>
     </Transition>
   </Teleport>

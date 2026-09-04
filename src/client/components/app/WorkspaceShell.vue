@@ -12,10 +12,10 @@ import { rememberInterfacePath } from '@/utils/interfaceMode'
 import YaoYaoSidebarIcon from '@/components/common/YaoYaoSidebarIcon.vue'
 
 type NavItem = {
-  key: 'chat' | 'groups' | 'kanban' | 'files'
+  key: 'chat' | 'history' | 'groups' | 'kanban' | 'files'
   label: string
   path: string
-  icon: 'chat' | 'groups' | 'board' | 'files'
+  icon: 'chat' | 'history' | 'groups' | 'board' | 'files'
 }
 
 type SettingsPage =
@@ -119,7 +119,8 @@ function profileTitle(profile?: Profile): string {
 }
 
 const navItems: NavItem[] = [
-  { key: 'chat', label: '历史记录', path: '/chat', icon: 'chat' },
+  { key: 'chat', label: '聊天', path: '/chat', icon: 'chat' },
+  { key: 'history', label: '历史记录', path: '/history', icon: 'history' },
   { key: 'groups', label: '聊天', path: '/conversations', icon: 'groups' },
   { key: 'kanban', label: '看板', path: '/kanban', icon: 'board' },
   { key: 'files', label: '文件库', path: '/files', icon: 'files' },
@@ -137,7 +138,8 @@ const activeNav = computed(() => {
 })
 
 const contextHeading = computed(() => ({
-  chat: '历史记录',
+  chat: '聊天',
+  history: '历史记录',
   groups: '聊天列表',
   kanban: '看板列表',
   files: '历史记录',
@@ -290,8 +292,8 @@ function toggleSidebar() {
   try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0') } catch { /* optional persistence */ }
 }
 
-function navIcon(key: NavItem['key']): 'chat' | 'folder' | 'people' | 'board' {
-  return key === 'groups' ? 'people' : key === 'kanban' ? 'board' : key === 'files' ? 'folder' : 'chat'
+function navIcon(key: NavItem['key']): 'chat' | 'history' | 'folder' | 'people' | 'board' {
+  return key === 'groups' ? 'people' : key === 'kanban' ? 'board' : key === 'files' ? 'folder' : key === 'history' ? 'history' : 'chat'
 }
 
 async function openSidebarSearch(host: HTMLElement | null) {

@@ -374,13 +374,15 @@ export const useChatStore = defineStore('chat', () => {
     }
   })
 
-  async function loadSessions(profile?: string): Promise<void> {
+  let sessionView: 'chat' | 'history' = 'chat'
+  async function loadSessions(profile?: string, view: 'chat' | 'history' = sessionView): Promise<void> {
+    sessionView = view
     const requestedProfile = profile || undefined
     const loadGeneration = ++sessionLoadGeneration
     isLoading.value = true
     error.value = undefined
     try {
-      const page = await getSessions(requestedProfile, undefined, 100)
+      const page = await getSessions(requestedProfile, undefined, 100, sessionView)
       if (loadGeneration !== sessionLoadGeneration
         || (requestedProfile && auth.activeProfile?.name !== requestedProfile)) return
       // 9119 owns recency within each bucket. Pinning is an explicit user
@@ -403,7 +405,7 @@ export const useChatStore = defineStore('chat', () => {
     const loadGeneration = sessionLoadGeneration
     isLoadingMoreSessions.value = true
     try {
-      const page = await getSessions(requestedProfile, cursor, 100)
+      const page = await getSessions(requestedProfile, cursor, 100, sessionView)
       if (loadGeneration !== sessionLoadGeneration
         || (requestedProfile && auth.activeProfile?.name !== requestedProfile)) return
       sessions.value = appendSessionPage(sessions.value, page.items)
@@ -510,6 +512,7 @@ export const useChatStore = defineStore('chat', () => {
     activeProfileName.value = profile
     return id
   }
+  function clearSelection(): void { activeSessionId.value = undefined }
 
   async function performEnsureRuntime(initialState: ChatRouteState): Promise<ChatRouteState> {
     if (initialState.runtimeSessionId) return initialState
@@ -952,7 +955,7 @@ export const useChatStore = defineStore('chat', () => {
     sessions, activeSessionId, activeProfileName, activeSession, routes, activeRouteState, messages,
     connectionState, historySynced, hasMoreBefore, isLoading, isLoadingMoreSessions, hasMoreSessions, isSending, isStreaming, isQueued,
     error, models, selectedModel, reasoningEffort, fastMode, contextUsage, pendingApproval, pendingClarification, unreadCounts,
-    loadSessions, loadMoreSessions, selectSession, loadOlder, createSession, connect, disconnect, send, interrupt,
+    loadSessions, loadMoreSessions, selectSession, loadOlder, createSession, clearSelection, connect, disconnect, send, interrupt,
     respondToApproval, respondToClarification, branchSession, renameSession, setSessionPinned, removeSession,
     loadModels, setModel, setFastMode, refreshActiveSessionModel, refreshContextUsage, loadUnread, markRead, switchProfile,
   }

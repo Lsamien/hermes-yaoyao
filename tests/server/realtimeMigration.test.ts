@@ -147,13 +147,12 @@ describe('HTTP+SSE migration', () => {
     })
     expect(retired.status).toBe(410)
     const capabilities = await fetch(`${claim.serverUrl}/api/realtime/capabilities`, { headers: { Authorization: authorization } })
-    expect(await capabilities.json()).toMatchObject({ protocolVersion: 1, channels: [] })
+    expect(await capabilities.json()).toMatchObject({ protocolVersion: 1, channels: ['chat'] })
     const opened = await fetch(`${claim.serverUrl}/api/realtime/channels`, {
       method: 'POST', headers: { Authorization: authorization, 'Content-Type': 'application/json' },
       body: JSON.stringify({ channel: 'chat' }),
     })
-    expect(opened.status).toBe(410)
-    expect(await opened.json()).toMatchObject({ code: 'native_sessions_read_only' })
+    expect(opened.status).toBe(201)
     expect(pairedFrames).toEqual([])
     const revoke = await fetch(`${origin}/api/pair/v1/devices/${claim.deviceId}`, {
       method: 'DELETE', headers: { Authorization: authorization },

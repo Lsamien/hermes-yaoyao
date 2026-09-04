@@ -52,6 +52,14 @@ async function fixture() {
 }
 const resume = { method: 'session.resume', params: { session_id: 'stored-1', profile: 'default' } }
 describe('realtime broker', () => {
+  it('rejects resuming a history-only session before opening an upstream route', async () => {
+    const f = await fixture()
+    const principal = { ...f.principal('alice'), canResume: async () => false }
+    const channel = await f.broker.create(principal, 'chat')
+    const receipt = await f.broker.command(channel, 'history-resume', resume)
+    expect(receipt).toMatchObject({ state: 'rejected', response: { error: { code: 'history_session_read_only' } } })
+    expect(f.commands).toEqual([])
+  })
   it('shares upstream across subscribers and isolates unregistered routes', async () => {
     const f = await fixture()
     const a = await f.broker.create(f.principal('alice'), 'chat')

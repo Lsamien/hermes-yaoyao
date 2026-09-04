@@ -20,7 +20,7 @@ export interface MessagePage {
   limit: number
 }
 
-export async function getSessions(profile?: string, cursor?: string, limit = 100): Promise<SessionPage> {
+export async function getSessions(profile?: string, cursor?: string, limit = 100, view: 'chat' | 'history' = 'chat'): Promise<SessionPage> {
   const offset = Math.max(0, Number.parseInt(cursor ?? '0', 10) || 0)
   const payload = unwrapData(await apiRequest<unknown>(apiUrl('/api/app/sessions', {
     profile,
@@ -29,6 +29,7 @@ export async function getSessions(profile?: string, cursor?: string, limit = 100
     order: 'recent',
     archived: 'exclude',
     exclude: EXCLUDED_SOURCES,
+    view,
   })))
   const source = record(payload)
   const rawItems = values(source.items ?? source.sessions ?? payload)

@@ -10,6 +10,8 @@ describe('last interface mode', () => {
     expect(savedInterfacePath()).toBe('/conversations')
     rememberInterfacePath('/files')
     expect(savedInterfacePath()).toBe('/conversations')
+    rememberInterfacePath('/history/existing-session')
+    expect(savedInterfacePath()).toBe('/conversations')
     rememberInterfacePath('/chat/existing-session')
     expect(savedInterfacePath()).toBe('/chat')
   })

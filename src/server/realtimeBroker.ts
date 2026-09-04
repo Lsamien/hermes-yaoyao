@@ -14,6 +14,7 @@ export interface RealtimePrincipal {
   agent?: WebSocket.ClientOptions['agent']
   valid(): boolean
   authorize?(kind: 'chat' | 'groups', method?: string): void
+  canResume?(profile: string, sessionId: string): Promise<boolean>
   url(channel: 'chat' | 'groups', anchor?: { epoch: string; cursor: number }): Promise<URL>
   observeCommand?(frame: string): void
   observeEvent?(frame: string): void
@@ -193,6 +194,9 @@ export class RealtimeBroker {
     const execute = async () => {
       if (!c.principal.valid()) throw new HttpError(401, 'Authentication expired', 'authentication_required')
       if (method === 'session.resume') {
+        if (c.principal.canResume && !await c.principal.canResume(String(p.profile), String(p.session_id))) {
+          throw new HttpError(403, '此会话属于历史记录，不能继续聊天', 'history_session_read_only')
+        }
         const ownerKey = JSON.stringify([c.principal.instanceKey ?? c.principal.upstreamKey, p.profile, p.session_id])
         const owner = this.routeOwners.get(ownerKey)
         if (owner && owner !== c.principal.upstreamKey) throw new HttpError(409, 'Session is attached through another credential scope', 'session_scope_conflict')

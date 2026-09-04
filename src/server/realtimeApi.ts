@@ -24,6 +24,22 @@ export class RealtimeAPI {
       if (change.kind === 'reset') session.invalidateAuthentication()
     })
   }
+  private async canResume(profile: string, sessionId: string, jar?: CookieJar): Promise<boolean> {
+    const search = new URLSearchParams({ profile })
+    const path = `/api/sessions/${encodeURIComponent(sessionId)}`
+    const response = jar
+      ? await this.upstream.request(path, jar, { search })
+      : await this.session.request(path, { search })
+    if (response.status < 200 || response.status >= 300) return false
+    try {
+      const payload = JSON.parse(response.body.toString()) as Record<string, unknown>
+      const session = payload.session && typeof payload.session === 'object'
+        ? payload.session as Record<string, unknown> : payload
+      return session.source === 'web'
+    } catch {
+      return false
+    }
+  }
   private principal(ctx: Koa.Context, device?: string): RealtimePrincipal {
     let key: string
     let valid: () => boolean
@@ -54,6 +70,7 @@ export class RealtimeAPI {
     }
     return {
       key, instanceKey: this.config.upstream.href, upstreamKey: `${this.config.upstream.href}:${device ? `device:${device}` : 'service'}`, paired: Boolean(device), valid, authorize,
+      canResume: (profile, sessionId) => this.canResume(profile, sessionId, jar),
       agent: this.upstream.directAgent,
       observeCommand: f => observer?.observeClientFrame(f),
       observeEvent: f => observer?.observeUpstreamFrame(Buffer.from(f), false),
@@ -146,7 +163,7 @@ export class RealtimeAPI {
       ctx.set('Cache-Control', 'no-store')
       const path = match![2]!
       if (ctx.method === 'GET' && path === '/capabilities') {
-        ctx.body = { protocolVersion: 1, channels: [], brokerEpoch: this.broker.epoch,
+        ctx.body = { protocolVersion: 1, channels: ['chat'], brokerEpoch: this.broker.epoch,
           ...(device ? {} : { csrfToken: this.csrf.issue(ctx) }) }
         return
       }
@@ -154,13 +171,6 @@ export class RealtimeAPI {
       if (ctx.method === 'POST' && path === '/channels') {
         const body = await this.body(ctx)
         if (body.channel !== 'chat' && body.channel !== 'groups') throw new HttpError(400, 'Invalid channel', 'invalid_channel')
-        if (body.channel === 'chat') {
-          throw new HttpError(
-            410,
-            '原生 Hermes 会话仅供历史查看；请在聊天中开始或继续对话',
-            'native_sessions_read_only',
-          )
-        }
         const c = await this.broker.create(principal, body.channel, body.channel === 'groups'
           ? { epoch: canonicalEpoch(body.epoch), cursor: groupCursor(body.cursor) } : undefined)
         ctx.status = 201; ctx.body = { id: c.id, brokerEpoch: this.broker.epoch }; return

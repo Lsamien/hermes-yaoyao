@@ -36,6 +36,22 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole('navigation')).toBeVisible()
 })
 
+test('separates writable Web chats from read-only Hermes history', async ({ page }) => {
+  const sidebar = page.locator('.desktop-sidebar')
+  await expect(page.getByRole('button', { name: '新建聊天', exact: true })).toBeVisible()
+  await expect(sidebar.getByText('Hermes 外部历史', { exact: true })).toHaveCount(0)
+  await sidebar.getByRole('button', { name: '历史记录', exact: true }).click()
+  await expect(page).toHaveURL(/\/history/)
+  await expect(sidebar.getByText('Hermes 外部历史', { exact: true })).toBeVisible()
+  await expect(sidebar.getByText('夭夭 Web 验收会话', { exact: true })).toHaveCount(0)
+  await sidebar.getByText('Hermes 外部历史', { exact: true }).click()
+  await expect(page).toHaveURL(/\/history\/session-history-only/)
+  await expect(page.locator('.composer-shell')).toHaveCount(0)
+  await sidebar.getByRole('button', { name: '聊天', exact: true }).click()
+  await expect(page).toHaveURL(/\/chat/)
+  await expect(page.getByRole('button', { name: '新建聊天', exact: true })).toBeVisible()
+})
+
 test('explains optional upstream credentials without blocking a ready connection', async ({ page }, testInfo) => {
   await page.getByRole('button', { name: /^(打开设置中心|设置与模式)$/ }).first().click()
   if (await page.getByRole('menuitem', { name: '进入设置', exact: true }).isVisible()) await page.getByRole('menuitem', { name: '进入设置', exact: true }).click()
